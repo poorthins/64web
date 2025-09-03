@@ -1,0 +1,30 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm create:*)",
+      "Bash(yarn create:*)",
+      "Bash(npx create-vite:*)",
+      "Bash(mkdir:*)",
+      "Bash(npm install)",
+      "Bash(npm run dev:*)",
+      "Bash(npm run build:*)",
+      "Bash(xcopy:*)",
+      "Bash(cp:*)",
+      "Bash(robocopy:*)",
+      "Bash(move carbon-tracker frontend)",
+      "Bash(mv:*)",
+      "Bash(rm:*)",
+      "Bash(lsof:*)",
+      "Bash(curl:*)",
+      "Bash(npm install:*)",
+      "Bash(python:*)",
+      "Bash(npm cache clean:*)",
+      "Bash(npx playwright:*)",
+      "Bash(npm config get:*)",
+      "Bash(npm config set:*)",
+      "Bash(npm run test:e2e:*)"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}

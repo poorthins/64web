@@ -1,0 +1,27 @@
+# ---- General ----
+.DS_Store
+*.swp
+*.swo
+*.tmp
+*.log
+
+# 忽略所有環境變數檔（保留 example 模板）
+.env
+.env.*
+!frontend/.env.example
+!backend/.env.example
+
+# ---- Frontend (Vite/React) ----
+frontend/node_modules/
+frontend/dist/
+frontend/.env
+frontend/.env.*
+frontend/*.log
+
+# ---- Backend (Flask/Python) ----
+backend/__pycache__/
+backend/.pytest_cache/
+backend/.venv/
+backend/venv/
+backend/.env
+backend/*.log
