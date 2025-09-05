@@ -62,62 +62,53 @@ const ProtectedLayout = () => {
               
               {/* 導航連結 */}
               <nav className="hidden md:flex items-center space-x-6">
-                <button
-                  onClick={() => navigate('/app')}
-                  className={`px-3 py-2 text-sm font-medium rounded-md transition duration-200 ${
-                    location.pathname === '/app'
-                      ? 'bg-blue-100 text-blue-700'
-                      : 'text-gray-600 hover:text-gray-900 hover:bg-gray-100'
-                  }`}
-                >
-                  總覽
-                </button>
-                
-                <button
-                  onClick={() => navigate('/app/calculator')}
-                  className={`px-3 py-2 text-sm font-medium rounded-md transition duration-200 ${
-                    location.pathname === '/app/calculator'
-                      ? 'bg-blue-100 text-blue-700'
-                      : 'text-gray-600 hover:text-gray-900 hover:bg-gray-100'
-                  }`}
-                >
-                  計算器
-                </button>
-                
-                <button
-                  onClick={() => navigate('/app/my/entries')}
-                  className={`px-3 py-2 text-sm font-medium rounded-md transition duration-200 ${
-                    location.pathname === '/app/my/entries'
-                      ? 'bg-blue-100 text-blue-700'
-                      : 'text-gray-600 hover:text-gray-900 hover:bg-gray-100'
-                  }`}
-                >
-                  我的填報
-                </button>
-                
-                <button
-                  onClick={() => navigate('/app/help')}
-                  className={`px-3 py-2 text-sm font-medium rounded-md transition duration-200 ${
-                    location.pathname === '/app/help'
-                      ? 'bg-blue-100 text-blue-700'
-                      : 'text-gray-600 hover:text-gray-900 hover:bg-gray-100'
-                  }`}
-                >
-                  支援中心
-                </button>
-                
-                {/* Admin 專區 - 僅管理員可見 */}
-                {!loadingRole && role === 'admin' && (
-                  <button
-                    onClick={() => navigate('/app/admin')}
-                    className={`px-3 py-2 text-sm font-medium rounded-md transition duration-200 ${
-                      location.pathname === '/app/admin'
-                        ? 'bg-red-100 text-red-700'
-                        : 'text-red-600 hover:text-red-900 hover:bg-red-50'
-                    }`}
-                  >
-                    管理員
-                  </button>
+                {/* 只有非管理員才顯示一般導航按鈕 */}
+                {!loadingRole && role !== 'admin' && (
+                  <>
+                    <button
+                      onClick={() => navigate('/app')}
+                      className={`px-3 py-2 text-sm font-medium rounded-md transition duration-200 ${
+                        location.pathname === '/app'
+                          ? 'bg-blue-100 text-blue-700'
+                          : 'text-gray-600 hover:text-gray-900 hover:bg-gray-100'
+                      }`}
+                    >
+                      總覽
+                    </button>
+                    
+                    <button
+                      onClick={() => navigate('/app/calculator')}
+                      className={`px-3 py-2 text-sm font-medium rounded-md transition duration-200 ${
+                        location.pathname === '/app/calculator'
+                          ? 'bg-blue-100 text-blue-700'
+                          : 'text-gray-600 hover:text-gray-900 hover:bg-gray-100'
+                      }`}
+                    >
+                      計算器
+                    </button>
+                    
+                    <button
+                      onClick={() => navigate('/app/my/entries')}
+                      className={`px-3 py-2 text-sm font-medium rounded-md transition duration-200 ${
+                        location.pathname === '/app/my/entries'
+                          ? 'bg-blue-100 text-blue-700'
+                          : 'text-gray-600 hover:text-gray-900 hover:bg-gray-100'
+                      }`}
+                    >
+                      我的填報
+                    </button>
+                    
+                    <button
+                      onClick={() => navigate('/app/help')}
+                      className={`px-3 py-2 text-sm font-medium rounded-md transition duration-200 ${
+                        location.pathname === '/app/help'
+                          ? 'bg-blue-100 text-blue-700'
+                          : 'text-gray-600 hover:text-gray-900 hover:bg-gray-100'
+                      }`}
+                    >
+                      支援中心
+                    </button>
+                  </>
                 )}
               </nav>
             </div>

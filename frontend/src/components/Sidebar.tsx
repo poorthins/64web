@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useNavigation, SidebarItem } from '../contexts/NavigationContext';
+import { useRole } from '../hooks/useRole';
 
 interface SidebarItemWithIcon extends SidebarItem {
   icon?: React.ReactNode;
@@ -60,6 +61,10 @@ export default function Sidebar() {
   const { selectItem } = useNavigation();
   const navigate = useNavigate();
   const location = useLocation();
+  const { role, loadingRole } = useRole();
+  
+  // 檢查是否為管理員
+  const isAdmin = !loadingRole && role === 'admin';
 
   const toggleExpand = (itemId: string) => {
     setExpandedItems(prev => 
@@ -163,7 +168,20 @@ export default function Sidebar() {
       
       <nav className="mt-6 px-3">
         <div className="space-y-2">
-          {sidebarData.map(item => renderSidebarItem(item))}
+          {/* 只有非管理員才顯示範疇一、二、三 */}
+          {!isAdmin && sidebarData.map(item => renderSidebarItem(item))}
+          
+          {/* 管理員顯示簡化的導航 */}
+          {isAdmin && (
+            <div className="text-center py-8">
+              <div className="text-white/60 text-sm">
+                管理員模式
+              </div>
+              <div className="mt-2 text-white/40 text-xs">
+                系統管理功能
+              </div>
+            </div>
+          )}
         </div>
       </nav>
     </div>

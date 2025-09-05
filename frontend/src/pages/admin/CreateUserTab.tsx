@@ -1,0 +1,235 @@
+import { useState } from 'react'
+import { UserPlus, Mail, User, Building, Key } from 'lucide-react'
+import { supabase } from '../../lib/supabaseClient'
+
+const CreateUserTab: React.FC = () => {
+  const [formData, setFormData] = useState({
+    email: '',
+    displayName: '',
+    company: '',
+    password: ''
+  })
+  const [loading, setLoading] = useState(false)
+  const [success, setSuccess] = useState<string | null>(null)
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault()
+    
+    if (!formData.email || !formData.displayName) {
+      alert('請填入必填欄位')
+      return
+    }
+
+    try {
+      setLoading(true)
+      setSuccess(null)
+      
+      const { data: { session } } = await supabase.auth.getSession()
+      
+      if (!session?.access_token) {
+        throw new Error('No access token')
+      }
+
+      const response = await fetch('/api/admin/create-user', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${session.access_token}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          email: formData.email,
+          displayName: formData.displayName,
+          company: formData.company,
+          password: formData.password || 'TempPassword123!'
+        })
+      })
+
+      if (!response.ok) {
+        const error = await response.json()
+        throw new Error(error.error || 'Failed to create user')
+      }
+
+      const data = await response.json()
+      
+      setSuccess(`用戶建立成功！用戶ID: ${data.user_id}`)
+      setFormData({
+        email: '',
+        displayName: '',
+        company: '',
+        password: ''
+      })
+    } catch (error) {
+      console.error('Error creating user:', error)
+      alert(`建立用戶時發生錯誤: ${error instanceof Error ? error.message : '未知錯誤'}`)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const { name, value } = e.target
+    setFormData(prev => ({
+      ...prev,
+      [name]: value
+    }))
+  }
+
+  return (
+    <div className="max-w-2xl mx-auto space-y-6">
+      {/* Header */}
+      <div className="text-center">
+        <div className="mx-auto h-12 w-12 bg-blue-100 rounded-full flex items-center justify-center">
+          <UserPlus className="h-6 w-6 text-blue-600" />
+        </div>
+        <h2 className="mt-4 text-2xl font-bold text-gray-900">建立新用戶</h2>
+        <p className="mt-2 text-gray-600">
+          為系統新增一個用戶帳號
+        </p>
+      </div>
+
+      {/* Success Message */}
+      {success && (
+        <div className="bg-green-50 border border-green-200 rounded-lg p-4">
+          <div className="flex">
+            <div className="flex-shrink-0">
+              <svg className="h-5 w-5 text-green-400" viewBox="0 0 20 20" fill="currentColor">
+                <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
+              </svg>
+            </div>
+            <div className="ml-3">
+              <p className="text-sm text-green-700">{success}</p>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Form */}
+      <div className="bg-white shadow-sm rounded-lg border border-gray-200">
+        <form onSubmit={handleSubmit} className="p-6 space-y-6">
+          {/* Email */}
+          <div>
+            <label htmlFor="email" className="block text-sm font-medium text-gray-700 mb-2">
+              電子信箱 <span className="text-red-500">*</span>
+            </label>
+            <div className="relative">
+              <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                <Mail className="h-5 w-5 text-gray-400" />
+              </div>
+              <input
+                type="email"
+                id="email"
+                name="email"
+                value={formData.email}
+                onChange={handleInputChange}
+                required
+                className="block w-full pl-10 pr-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                placeholder="user@example.com"
+              />
+            </div>
+          </div>
+
+          {/* Display Name */}
+          <div>
+            <label htmlFor="displayName" className="block text-sm font-medium text-gray-700 mb-2">
+              顯示名稱 <span className="text-red-500">*</span>
+            </label>
+            <div className="relative">
+              <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                <User className="h-5 w-5 text-gray-400" />
+              </div>
+              <input
+                type="text"
+                id="displayName"
+                name="displayName"
+                value={formData.displayName}
+                onChange={handleInputChange}
+                required
+                className="block w-full pl-10 pr-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                placeholder="張小明"
+              />
+            </div>
+          </div>
+
+          {/* Company */}
+          <div>
+            <label htmlFor="company" className="block text-sm font-medium text-gray-700 mb-2">
+              公司名稱
+            </label>
+            <div className="relative">
+              <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                <Building className="h-5 w-5 text-gray-400" />
+              </div>
+              <input
+                type="text"
+                id="company"
+                name="company"
+                value={formData.company}
+                onChange={handleInputChange}
+                className="block w-full pl-10 pr-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                placeholder="ABC 公司"
+              />
+            </div>
+          </div>
+
+          {/* Password */}
+          <div>
+            <label htmlFor="password" className="block text-sm font-medium text-gray-700 mb-2">
+              密碼
+            </label>
+            <div className="relative">
+              <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                <Key className="h-5 w-5 text-gray-400" />
+              </div>
+              <input
+                type="password"
+                id="password"
+                name="password"
+                value={formData.password}
+                onChange={handleInputChange}
+                className="block w-full pl-10 pr-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                placeholder="留空將使用預設密碼"
+              />
+            </div>
+            <p className="mt-1 text-sm text-gray-500">
+              若不指定密碼，系統將使用預設密碼：TempPassword123!
+            </p>
+          </div>
+
+          {/* Submit Button */}
+          <div className="pt-4">
+            <button
+              type="submit"
+              disabled={loading}
+              className="w-full flex justify-center py-3 px-4 border border-transparent rounded-lg shadow-sm text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {loading ? (
+                <>
+                  <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
+                  建立中...
+                </>
+              ) : (
+                <>
+                  <UserPlus className="h-4 w-4 mr-2" />
+                  建立用戶
+                </>
+              )}
+            </button>
+          </div>
+        </form>
+      </div>
+
+      {/* Tips */}
+      <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+        <h3 className="text-sm font-medium text-blue-800 mb-2">提醒事項</h3>
+        <ul className="text-sm text-blue-700 space-y-1">
+          <li>• 新建立的用戶預設角色為「使用者」</li>
+          <li>• 新建立的用戶預設狀態為「啟用」</li>
+          <li>• 用戶將收到帳號建立通知信件（如果設定了SMTP）</li>
+          <li>• 用戶首次登入時建議變更密碼</li>
+        </ul>
+      </div>
+    </div>
+  )
+}
+
+export default CreateUserTab

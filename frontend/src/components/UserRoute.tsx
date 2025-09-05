@@ -2,12 +2,11 @@ import React from 'react'
 import { Navigate } from 'react-router-dom'
 import { useRole } from '../hooks/useRole'
 
-interface AdminRouteProps {
+interface UserRouteProps {
   children: React.ReactNode
-  fallback?: React.ReactNode
 }
 
-const AdminRoute: React.FC<AdminRouteProps> = ({ children, fallback }) => {
+const UserRoute: React.FC<UserRouteProps> = ({ children }) => {
   const { role, loadingRole } = useRole()
 
   if (loadingRole) {
@@ -18,12 +17,12 @@ const AdminRoute: React.FC<AdminRouteProps> = ({ children, fallback }) => {
     )
   }
 
-  if (role !== 'admin') {
-    // 如果有 fallback 組件，顯示 fallback；否則導向 /app
-    return fallback ? <>{fallback}</> : <Navigate to="/app" replace />
+  // 如果是管理員，重定向到管理員頁面
+  if (role === 'admin') {
+    return <Navigate to="/app" replace />
   }
 
   return <>{children}</>
 }
 
-export default AdminRoute
+export default UserRoute

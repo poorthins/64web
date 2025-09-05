@@ -17,7 +17,9 @@ import CommutePage from '../pages/Category3/CommuteePage'
 import SepticTankPage from '../pages/Category1/SepticTankPage'
 import PingPage from '../pages/PingPage'
 import AdminPage from '../pages/AdminPage'
+import UserDetailPage from '../pages/admin/UserDetailPage'
 import AdminRoute from '../components/AdminRoute'
+import UserRoute from '../components/UserRoute'
 
 function AppRouter() {
   return (
@@ -29,27 +31,82 @@ function AppRouter() {
             <Route path="/login" element={<LoginSimple />} />
             
             <Route path="/app" element={<ProtectedLayout />}>
-              <Route index element={<DashboardPage />} />
-              <Route path="my/entries" element={<MyEntriesPage />} />
-              <Route path="help" element={<HelpPage />} />
-              <Route path="home" element={<HomePage />} />
-              <Route path="calculator" element={<CarbonCalculatorPage />} />
-              <Route path="reports" element={<ReportsPage />} />
-              <Route path="wd40" element={<WD40Page />} />
-              <Route path="acetylene" element={<AcetylenePage />} />
-              <Route path="electricity_bill" element={<ElectricityBillPage />} />
-              <Route path="employee_commute" element={<CommutePage />} />
-              <Route path="refrigerant" element={<RefrigerantPage />} />
-              <Route path="septictank" element={<SepticTankPage />} />
+              {/* 根據用戶角色決定首頁內容 */}
+              <Route index element={
+                <AdminRoute fallback={<DashboardPage />}>
+                  <AdminPage />
+                </AdminRoute>
+              } />
+              
+              {/* 管理員專用頁面 */}
+              <Route path="admin" element={
+                <AdminRoute fallback={<DashboardPage />}>
+                  <AdminPage />
+                </AdminRoute>
+              } />
+              <Route path="admin/users/:userId" element={
+                <AdminRoute fallback={<DashboardPage />}>
+                  <UserDetailPage />
+                </AdminRoute>
+              } />
+              
+              {/* 只有一般用戶可以訪問的頁面 */}
+              <Route path="my/entries" element={
+                <UserRoute>
+                  <MyEntriesPage />
+                </UserRoute>
+              } />
+              <Route path="help" element={
+                <UserRoute>
+                  <HelpPage />
+                </UserRoute>
+              } />
+              <Route path="home" element={
+                <UserRoute>
+                  <HomePage />
+                </UserRoute>
+              } />
+              <Route path="calculator" element={
+                <UserRoute>
+                  <CarbonCalculatorPage />
+                </UserRoute>
+              } />
+              <Route path="reports" element={
+                <UserRoute>
+                  <ReportsPage />
+                </UserRoute>
+              } />
+              <Route path="wd40" element={
+                <UserRoute>
+                  <WD40Page />
+                </UserRoute>
+              } />
+              <Route path="acetylene" element={
+                <UserRoute>
+                  <AcetylenePage />
+                </UserRoute>
+              } />
+              <Route path="electricity_bill" element={
+                <UserRoute>
+                  <ElectricityBillPage />
+                </UserRoute>
+              } />
+              <Route path="employee_commute" element={
+                <UserRoute>
+                  <CommutePage />
+                </UserRoute>
+              } />
+              <Route path="refrigerant" element={
+                <UserRoute>
+                  <RefrigerantPage />
+                </UserRoute>
+              } />
+              <Route path="septictank" element={
+                <UserRoute>
+                  <SepticTankPage />
+                </UserRoute>
+              } />
               <Route path="ping" element={<PingPage />} />
-              <Route 
-                path="admin" 
-                element={
-                  <AdminRoute>
-                    <AdminPage />
-                  </AdminRoute>
-                } 
-              />
             </Route>
           </Routes>
         </NavigationProvider>
