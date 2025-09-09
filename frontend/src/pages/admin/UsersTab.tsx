@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
-import { Eye, Search, Users, UserCheck, UserX, AlertCircle, Loader2 } from 'lucide-react'
-import { combineUsersWithCounts, bulkUpdateUserStatus, User } from '../../api/adminUsers'
+import { Eye, Search, Users, UserCheck, UserX, AlertCircle, Loader2, Edit, ToggleLeft, ToggleRight } from 'lucide-react'
+import { combineUsersWithCounts, bulkUpdateUserStatus, updateUserStatus, User } from '../../api/adminUsers'
+import UserEditModal from '../../components/UserEditModal'
 
 interface UsersTabProps {
   onViewUserEntries: (userId: string, userName: string) => void
@@ -13,6 +14,8 @@ const UsersTab: React.FC<UsersTabProps> = ({ onViewUserEntries }) => {
   const [searchTerm, setSearchTerm] = useState('')
   const [selectedUsers, setSelectedUsers] = useState<Set<string>>(new Set())
   const [bulkUpdating, setBulkUpdating] = useState(false)
+  const [editingUserId, setEditingUserId] = useState<string | null>(null)
+  const [togglingUsers, setTogglingUsers] = useState<Set<string>>(new Set())
 
   useEffect(() => {
     fetchUsers()
@@ -79,6 +82,31 @@ const UsersTab: React.FC<UsersTabProps> = ({ onViewUserEntries }) => {
   const handleViewUser = (userId: string, userName: string) => {
     // 導向使用者詳情頁
     window.location.href = `/app/admin/users/${userId}`
+  }
+
+  const handleEditUser = (userId: string) => {
+    setEditingUserId(userId)
+  }
+
+  const handleEditSuccess = () => {
+    fetchUsers() // 重新載入用戶列表
+  }
+
+  const handleToggleUserStatus = async (userId: string, currentStatus: boolean) => {
+    try {
+      setTogglingUsers(prev => new Set([...prev, userId]))
+      await updateUserStatus(userId, !currentStatus)
+      await fetchUsers()
+    } catch (error) {
+      console.error('Error toggling user status:', error)
+      alert(`更新用戶狀態時發生錯誤: ${error instanceof Error ? error.message : '未知錯誤'}`)
+    } finally {
+      setTogglingUsers(prev => {
+        const newSet = new Set(prev)
+        newSet.delete(userId)
+        return newSet
+      })
+    }
   }
 
   if (loading) {
@@ -233,9 +261,12 @@ const UsersTab: React.FC<UsersTabProps> = ({ onViewUserEntries }) => {
                     />
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap">
-                    <div className="text-sm font-medium text-gray-900">
+                    <button
+                      onClick={() => handleEditUser(user.id)}
+                      className="text-sm font-medium text-blue-600 hover:text-blue-900 hover:underline text-left"
+                    >
                       {user.display_name || 'N/A'}
-                    </div>
+                    </button>
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap">
                     <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${
@@ -247,32 +278,52 @@ const UsersTab: React.FC<UsersTabProps> = ({ onViewUserEntries }) => {
                     </span>
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap">
-                    <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${
-                      user.is_active 
-                        ? 'bg-green-100 text-green-800' 
-                        : 'bg-red-100 text-red-800'
-                    }`}>
+                    <button
+                      onClick={() => handleToggleUserStatus(user.id, user.is_active)}
+                      disabled={togglingUsers.has(user.id)}
+                      className={`inline-flex items-center px-2 py-1 text-xs font-semibold rounded-full transition-colors hover:opacity-80 disabled:opacity-50 ${
+                        user.is_active 
+                          ? 'bg-green-100 text-green-800 hover:bg-green-200' 
+                          : 'bg-red-100 text-red-800 hover:bg-red-200'
+                      }`}
+                    >
+                      {togglingUsers.has(user.id) ? (
+                        <Loader2 className="h-3 w-3 animate-spin mr-1" />
+                      ) : user.is_active ? (
+                        <ToggleRight className="h-3 w-3 mr-1" />
+                      ) : (
+                        <ToggleLeft className="h-3 w-3 mr-1" />
+                      )}
                       {user.is_active ? '啟用' : '停用'}
-                    </span>
+                    </button>
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
                     <span className="font-medium">{user.entries_count}</span>
                   </td>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm font-medium space-x-2">
-                    <button
-                      onClick={() => handleViewUser(user.id, user.display_name)}
-                      className="text-blue-600 hover:text-blue-900 flex items-center gap-1"
-                    >
-                      <Eye className="h-4 w-4" />
-                      查看
-                    </button>
-                    <button
-                      onClick={() => onViewUserEntries(user.id, user.display_name || 'N/A')}
-                      className="text-green-600 hover:text-green-900 flex items-center gap-1 ml-2"
-                    >
-                      <Eye className="h-4 w-4" />
-                      填報
-                    </button>
+                  <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={() => handleEditUser(user.id)}
+                        className="text-blue-600 hover:text-blue-900 flex items-center gap-1"
+                        title="編輯用戶資料"
+                      >
+                        <Edit className="h-4 w-4" />
+                      </button>
+                      <button
+                        onClick={() => handleViewUser(user.id, user.display_name)}
+                        className="text-gray-600 hover:text-gray-900 flex items-center gap-1"
+                        title="查看詳細資料"
+                      >
+                        <Eye className="h-4 w-4" />
+                      </button>
+                      <button
+                        onClick={() => onViewUserEntries(user.id, user.display_name || 'N/A')}
+                        className="text-green-600 hover:text-green-900 flex items-center gap-1"
+                        title="查看填報記錄"
+                      >
+                        <Eye className="h-4 w-4" />
+                      </button>
+                    </div>
                   </td>
                 </tr>
               ))}
@@ -289,6 +340,16 @@ const UsersTab: React.FC<UsersTabProps> = ({ onViewUserEntries }) => {
             {searchTerm ? '嘗試調整搜尋條件' : '系統中暫無用戶'}
           </p>
         </div>
+      )}
+
+      {/* Edit User Modal */}
+      {editingUserId && (
+        <UserEditModal
+          userId={editingUserId}
+          isOpen={true}
+          onClose={() => setEditingUserId(null)}
+          onSuccess={handleEditSuccess}
+        />
       )}
     </div>
   )

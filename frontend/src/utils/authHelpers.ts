@@ -116,10 +116,11 @@ export function analyzeRLSError(error: any): RLSError {
   let operation: 'SELECT' | 'INSERT' | 'UPDATE' | 'DELETE' | undefined
 
   // 檢查是否為已知的 RLS 錯誤
+  let rlsMessage = message
   for (const { pattern, message: patternMessage } of rlsPatterns) {
     if (pattern.test(message) || pattern.test(details)) {
       isRLSError = true
-      message = patternMessage
+      rlsMessage = patternMessage
       break
     }
   }
@@ -159,7 +160,7 @@ export function analyzeRLSError(error: any): RLSError {
 
   return {
     isRLSError,
-    message: isRLSError ? `RLS 錯誤: ${message}` : message,
+    message: isRLSError ? `RLS 錯誤: ${rlsMessage}` : message,
     code,
     table,
     operation,
@@ -171,6 +172,29 @@ export function analyzeRLSError(error: any): RLSError {
  * 標準化 API 錯誤處理
  */
 export function handleAPIError(error: any, context: string): Error {
+  const message = error?.message || '未知錯誤'
+  const code = error?.code || ''
+  
+  // 特殊處理資料庫約束錯誤
+  if (message.includes('null value in column') && message.includes('violates not-null constraint')) {
+    // 提取欄位名稱
+    const columnMatch = message.match(/column "([^"]+)"/)
+    const tableMatch = message.match(/of relation "([^"]+)"/)
+    const column = columnMatch ? columnMatch[1] : '未知欄位'
+    const table = tableMatch ? tableMatch[1] : '未知表格'
+    
+    if (column === 'entry_id' && table === 'entry_files') {
+      return new Error('檔案上傳失敗：請先建立能源使用記錄再上傳檔案')
+    }
+    
+    return new Error(`資料庫約束錯誤：${table} 表的 ${column} 欄位不可為空`)
+  }
+  
+  // 其他約束錯誤
+  if (message.includes('violates') && message.includes('constraint')) {
+    return new Error(`資料庫約束錯誤：${message}`)
+  }
+  
   const rlsAnalysis = analyzeRLSError(error)
   
   if (rlsAnalysis.isRLSError) {
@@ -197,7 +221,6 @@ export function handleAPIError(error: any, context: string): Error {
   }
 
   // 一般錯誤處理
-  const message = error?.message || '未知錯誤'
   return new Error(`${context}: ${message}`)
 }
 

@@ -36,7 +36,7 @@ export class ErrorBoundary extends Component<Props, State> {
     };
   }
 
-  componentDidCatch(error: Error, errorInfo: ErrorInfo) {
+  override componentDidCatch(error: Error, errorInfo: ErrorInfo) {
     // 記錄錯誤到錯誤報告服務
     console.error('ErrorBoundary caught an error:', error, errorInfo);
     
@@ -66,7 +66,7 @@ export class ErrorBoundary extends Component<Props, State> {
     });
   };
 
-  render() {
+  override render() {
     if (this.state.hasError) {
       // 如果提供了自定義的 fallback UI，使用它
       if (this.props.fallback) {

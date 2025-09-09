@@ -1,260 +1,220 @@
 import { useState, useEffect } from 'react'
-import { Calendar, Filter, Download, CheckCircle, XCircle, AlertTriangle } from 'lucide-react'
-import { supabase } from '../../lib/supabaseClient'
+import { Calendar, Users, Eye, ChevronRight, CheckCircle, XCircle, AlertTriangle, Loader2, Filter, Search } from 'lucide-react'
+import { getAllUsersWithSubmissions, getSubmissionStats, UserWithSubmissions, SubmissionStats } from '../../api/adminSubmissions'
 
-interface Entry {
-  id: string
-  period_start: string
-  period_end: string
-  category: string
-  unit: string
-  amount: number
-  notes: string
-  created_at: string
-  profiles: {
-    display_name: string
-  }
-  entry_reviews: Array<{
-    id: string
-    status: string
-    note: string
-    created_at: string
-  }>
+interface AllEntriesTabProps {
+  onViewUserSubmissions?: (userId: string, userName: string) => void
 }
 
-const AllEntriesTab: React.FC = () => {
-  const [entries, setEntries] = useState<Entry[]>([])
+const AllEntriesTab: React.FC<AllEntriesTabProps> = ({ onViewUserSubmissions }) => {
+  const [users, setUsers] = useState<UserWithSubmissions[]>([])
+  const [stats, setStats] = useState<SubmissionStats | null>(null)
   const [loading, setLoading] = useState(true)
-  const [fromDate, setFromDate] = useState('')
-  const [toDate, setToDate] = useState('')
-  const [category, setCategory] = useState('')
+  const [error, setError] = useState<string | null>(null)
+  const [searchTerm, setSearchTerm] = useState('')
+  const [statusFilter, setStatusFilter] = useState<'all' | 'pending' | 'approved' | 'needs_fix'>('all')
+  const [activeFilter, setActiveFilter] = useState<'all' | 'active' | 'inactive'>('all')
 
   useEffect(() => {
-    fetchEntries()
-  }, [fromDate, toDate, category])
+    fetchData()
+  }, [])
 
-  const fetchEntries = async () => {
+  const fetchData = async () => {
     try {
       setLoading(true)
-      const { data: { session } } = await supabase.auth.getSession()
-      
-      if (!session?.access_token) {
-        throw new Error('No access token')
-      }
-
-      const params = new URLSearchParams()
-      if (fromDate) params.append('from', fromDate)
-      if (toDate) params.append('to', toDate)
-      if (category) params.append('category', category)
-
-      const response = await fetch(`/api/admin/entries?${params}`, {
-        headers: {
-          'Authorization': `Bearer ${session.access_token}`,
-          'Content-Type': 'application/json'
-        }
-      })
-
-      if (!response.ok) {
-        throw new Error('Failed to fetch entries')
-      }
-
-      const data = await response.json()
-      setEntries(data.entries || [])
+      setError(null)
+      const [usersData, statsData] = await Promise.all([
+        getAllUsersWithSubmissions(),
+        getSubmissionStats()
+      ])
+      setUsers(usersData)
+      setStats(statsData)
     } catch (error) {
-      console.error('Error fetching entries:', error)
-      alert('取得填報記錄時發生錯誤')
+      console.error('Error fetching data:', error)
+      setError(error instanceof Error ? error.message : '載入資料失敗')
     } finally {
       setLoading(false)
     }
   }
 
-  const getLatestReviewStatus = (entry: Entry) => {
-    if (!entry.entry_reviews || entry.entry_reviews.length === 0) {
-      return { status: 'pending', note: '', icon: <AlertTriangle className="h-4 w-4 text-yellow-500" /> }
+  const filteredUsers = users.filter(user => {
+    // 搜尋過濾
+    const matchesSearch = user.display_name.toLowerCase().includes(searchTerm.toLowerCase())
+    
+    // 狀態過濾
+    const matchesActiveFilter = activeFilter === 'all' || 
+      (activeFilter === 'active' && user.is_active) ||
+      (activeFilter === 'inactive' && !user.is_active)
+    
+    // 審核狀態過濾
+    let matchesStatusFilter = true
+    if (statusFilter !== 'all') {
+      if (statusFilter === 'pending' && user.pending_reviews === 0) matchesStatusFilter = false
+      if (statusFilter === 'approved' && user.approved_reviews === 0) matchesStatusFilter = false
+      if (statusFilter === 'needs_fix' && user.needs_fix_reviews === 0) matchesStatusFilter = false
     }
 
-    const latest = entry.entry_reviews.sort((a, b) => 
-      new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
-    )[0]
+    return matchesSearch && matchesActiveFilter && matchesStatusFilter
+  })
 
-    const statusConfig = {
-      approved: { 
-        status: '已核准', 
-        note: latest.note, 
-        icon: <CheckCircle className="h-4 w-4 text-green-500" />,
-        color: 'text-green-800 bg-green-100'
-      },
-      needs_fix: { 
-        status: '需修正', 
-        note: latest.note, 
-        icon: <XCircle className="h-4 w-4 text-red-500" />,
-        color: 'text-red-800 bg-red-100'
-      },
-      pending: { 
-        status: '待審核', 
-        note: '', 
-        icon: <AlertTriangle className="h-4 w-4 text-yellow-500" />,
-        color: 'text-yellow-800 bg-yellow-100'
-      }
+  const handleViewUserSubmissions = (userId: string, userName: string) => {
+    if (onViewUserSubmissions) {
+      onViewUserSubmissions(userId, userName)
+    } else {
+      // 預設行為：導向用戶填報頁面
+      window.location.href = `/app/admin/users/${userId}/entries`
+    }
+  }
+
+  const getStatusBadge = (user: UserWithSubmissions) => {
+    if (user.submission_count === 0) {
+      return <span className="px-2 py-1 text-xs font-semibold rounded-full bg-gray-100 text-gray-800">無填報</span>
     }
 
-    return statusConfig[latest.status as keyof typeof statusConfig] || statusConfig.pending
+    const badges = []
+    if (user.pending_reviews > 0) {
+      badges.push(
+        <span key="pending" className="px-2 py-1 text-xs font-semibold rounded-full bg-yellow-100 text-yellow-800">
+          待審 {user.pending_reviews}
+        </span>
+      )
+    }
+    if (user.approved_reviews > 0) {
+      badges.push(
+        <span key="approved" className="px-2 py-1 text-xs font-semibold rounded-full bg-green-100 text-green-800">
+          已核准 {user.approved_reviews}
+        </span>
+      )
+    }
+    if (user.needs_fix_reviews > 0) {
+      badges.push(
+        <span key="needs_fix" className="px-2 py-1 text-xs font-semibold rounded-full bg-red-100 text-red-800">
+          需修正 {user.needs_fix_reviews}
+        </span>
+      )
+    }
+
+    return <div className="flex gap-1 flex-wrap">{badges}</div>
   }
-
-  const exportToCSV = () => {
-    if (entries.length === 0) return
-
-    const headers = ['用戶', '期間開始', '期間結束', '類別', '單位', '數量', '備註', '審核狀態', '審核備註', '建立時間']
-    
-    const csvContent = [
-      headers.join(','),
-      ...entries.map(entry => {
-        const reviewStatus = getLatestReviewStatus(entry)
-        return [
-          entry.profiles?.display_name || 'N/A',
-          entry.period_start,
-          entry.period_end,
-          entry.category,
-          entry.unit,
-          entry.amount,
-          `"${entry.notes || ''}"`,
-          reviewStatus.status,
-          `"${reviewStatus.note || ''}"`,
-          new Date(entry.created_at).toLocaleDateString()
-        ].join(',')
-      })
-    ].join('\n')
-
-    const blob = new Blob(['\uFEFF' + csvContent], { type: 'text/csv;charset=utf-8;' })
-    const link = document.createElement('a')
-    const url = URL.createObjectURL(blob)
-    link.setAttribute('href', url)
-    link.setAttribute('download', `全部填報記錄-${new Date().toISOString().split('T')[0]}.csv`)
-    link.style.visibility = 'hidden'
-    document.body.appendChild(link)
-    link.click()
-    document.body.removeChild(link)
-  }
-
-  const getStatusStats = () => {
-    const stats = entries.reduce((acc, entry) => {
-      const status = getLatestReviewStatus(entry)
-      if (status.status === '已核准') acc.approved++
-      else if (status.status === '需修正') acc.needs_fix++
-      else acc.pending++
-      return acc
-    }, { approved: 0, needs_fix: 0, pending: 0 })
-    
-    return stats
-  }
-
-  const stats = getStatusStats()
 
   if (loading) {
     return (
       <div className="flex items-center justify-center py-12">
-        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
+        <div className="flex items-center space-x-2">
+          <Loader2 className="w-6 h-6 animate-spin text-blue-600" />
+          <span className="text-gray-600">載入用戶填報資料中...</span>
+        </div>
+      </div>
+    )
+  }
+
+  if (error) {
+    return (
+      <div className="bg-red-50 border border-red-200 rounded-lg p-6">
+        <div className="flex items-center">
+          <AlertTriangle className="w-5 h-5 text-red-500 mr-2" />
+          <div className="flex-1">
+            <h3 className="text-sm font-medium text-red-800">載入資料時發生錯誤</h3>
+            <p className="text-sm text-red-700 mt-1">{error}</p>
+          </div>
+          <button
+            onClick={fetchData}
+            className="ml-4 px-3 py-1 bg-red-100 hover:bg-red-200 text-red-800 text-sm rounded-md transition-colors"
+          >
+            重試
+          </button>
+        </div>
       </div>
     )
   }
 
   return (
     <div className="space-y-6">
-      {/* Stats */}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-        <div className="bg-blue-50 rounded-lg p-4">
-          <div className="flex items-center">
-            <Calendar className="h-8 w-8 text-blue-600" />
-            <div className="ml-4">
-              <div className="text-2xl font-bold text-blue-900">{entries.length}</div>
-              <div className="text-blue-600">總填報數</div>
+      {/* Stats Cards */}
+      {stats && (
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+          <div className="bg-blue-50 rounded-lg p-4">
+            <div className="flex items-center">
+              <Users className="h-8 w-8 text-blue-600" />
+              <div className="ml-4">
+                <div className="text-2xl font-bold text-blue-900">{stats.total_users_with_submissions}</div>
+                <div className="text-blue-600">填報用戶</div>
+              </div>
+            </div>
+          </div>
+          <div className="bg-yellow-50 rounded-lg p-4">
+            <div className="flex items-center">
+              <AlertTriangle className="h-8 w-8 text-yellow-600" />
+              <div className="ml-4">
+                <div className="text-2xl font-bold text-yellow-900">{stats.pending_reviews}</div>
+                <div className="text-yellow-600">待審核</div>
+              </div>
+            </div>
+          </div>
+          <div className="bg-green-50 rounded-lg p-4">
+            <div className="flex items-center">
+              <CheckCircle className="h-8 w-8 text-green-600" />
+              <div className="ml-4">
+                <div className="text-2xl font-bold text-green-900">{stats.approved_reviews}</div>
+                <div className="text-green-600">已核准</div>
+              </div>
+            </div>
+          </div>
+          <div className="bg-red-50 rounded-lg p-4">
+            <div className="flex items-center">
+              <XCircle className="h-8 w-8 text-red-600" />
+              <div className="ml-4">
+                <div className="text-2xl font-bold text-red-900">{stats.needs_fix_reviews}</div>
+                <div className="text-red-600">需修正</div>
+              </div>
             </div>
           </div>
         </div>
-        <div className="bg-green-50 rounded-lg p-4">
-          <div className="flex items-center">
-            <CheckCircle className="h-8 w-8 text-green-600" />
-            <div className="ml-4">
-              <div className="text-2xl font-bold text-green-900">{stats.approved}</div>
-              <div className="text-green-600">已核准</div>
-            </div>
-          </div>
-        </div>
-        <div className="bg-red-50 rounded-lg p-4">
-          <div className="flex items-center">
-            <XCircle className="h-8 w-8 text-red-600" />
-            <div className="ml-4">
-              <div className="text-2xl font-bold text-red-900">{stats.needs_fix}</div>
-              <div className="text-red-600">需修正</div>
-            </div>
-          </div>
-        </div>
-        <div className="bg-yellow-50 rounded-lg p-4">
-          <div className="flex items-center">
-            <AlertTriangle className="h-8 w-8 text-yellow-600" />
-            <div className="ml-4">
-              <div className="text-2xl font-bold text-yellow-900">{stats.pending}</div>
-              <div className="text-yellow-600">待審核</div>
-            </div>
-          </div>
-        </div>
-      </div>
+      )}
 
-      {/* Header and Export */}
-      <div className="flex items-center justify-between">
-        <h2 className="text-xl font-semibold text-gray-900">全部填報記錄</h2>
-        <button
-          onClick={exportToCSV}
-          disabled={entries.length === 0}
-          className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50"
-        >
-          <Download className="h-4 w-4" />
-          匯出 CSV
-        </button>
-      </div>
-
-      {/* Filters */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 p-4 bg-gray-50 rounded-lg">
-        <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">
-            開始日期
-          </label>
-          <input
-            type="date"
-            value={fromDate}
-            onChange={(e) => setFromDate(e.target.value)}
-            className="w-full border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
-          />
-        </div>
-        <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">
-            結束日期
-          </label>
-          <input
-            type="date"
-            value={toDate}
-            onChange={(e) => setToDate(e.target.value)}
-            className="w-full border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
-          />
-        </div>
-        <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">
-            類別
-          </label>
+      {/* Header and Filters */}
+      <div className="flex flex-col sm:flex-row gap-4 items-center justify-between">
+        <h2 className="text-xl font-semibold text-gray-900">用戶填報總覽</h2>
+        
+        <div className="flex gap-4 items-center">
+          {/* Search */}
+          <div className="relative">
+            <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 h-4 w-4" />
+            <input
+              type="text"
+              placeholder="搜尋用戶..."
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              className="pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+            />
+          </div>
+          
+          {/* Status Filter */}
           <select
-            value={category}
-            onChange={(e) => setCategory(e.target.value)}
-            className="w-full border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
+            value={statusFilter}
+            onChange={(e) => setStatusFilter(e.target.value as typeof statusFilter)}
+            className="border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500"
           >
-            <option value="">全部類別</option>
-            <option value="範疇一">範疇一</option>
-            <option value="範疇二">範疇二</option>
-            <option value="範疇三">範疇三</option>
+            <option value="all">全部狀態</option>
+            <option value="pending">有待審核</option>
+            <option value="approved">有已核准</option>
+            <option value="needs_fix">有需修正</option>
+          </select>
+          
+          {/* Active Filter */}
+          <select
+            value={activeFilter}
+            onChange={(e) => setActiveFilter(e.target.value as typeof activeFilter)}
+            className="border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500"
+          >
+            <option value="all">全部用戶</option>
+            <option value="active">啟用用戶</option>
+            <option value="inactive">停用用戶</option>
           </select>
         </div>
       </div>
 
-      {/* Entries Table */}
+      {/* Users Table */}
       <div className="bg-white border border-gray-200 rounded-lg overflow-hidden">
         <div className="overflow-x-auto">
           <table className="min-w-full divide-y divide-gray-200">
@@ -264,72 +224,85 @@ const AllEntriesTab: React.FC = () => {
                   用戶
                 </th>
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  期間
+                  狀態
                 </th>
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  類別
+                  填報總數
                 </th>
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  數量
+                  審核狀況
                 </th>
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  審核狀態
+                  最後填報
                 </th>
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  建立時間
+                  操作
                 </th>
               </tr>
             </thead>
             <tbody className="bg-white divide-y divide-gray-200">
-              {entries.map((entry) => {
-                const reviewStatus = getLatestReviewStatus(entry)
-                return (
-                  <tr key={entry.id} className="hover:bg-gray-50">
-                    <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
-                      {entry.profiles?.display_name || 'N/A'}
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+              {filteredUsers.map((user) => (
+                <tr key={user.id} className="hover:bg-gray-50">
+                  <td className="px-6 py-4 whitespace-nowrap">
+                    <div className="flex items-center">
                       <div>
-                        <div>{new Date(entry.period_start).toLocaleDateString()}</div>
-                        <div className="text-gray-500">至 {new Date(entry.period_end).toLocaleDateString()}</div>
-                      </div>
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                      {entry.category}
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                      {entry.amount} {entry.unit}
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap">
-                      <div className="flex items-center gap-2">
-                        {reviewStatus.icon}
-                        <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${reviewStatus.color || 'bg-yellow-100 text-yellow-800'}`}>
-                          {reviewStatus.status}
-                        </span>
-                      </div>
-                      {reviewStatus.note && (
-                        <div className="text-xs text-gray-500 mt-1">
-                          {reviewStatus.note}
+                        <div className="text-sm font-medium text-gray-900">
+                          {user.display_name || 'N/A'}
                         </div>
-                      )}
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                      {new Date(entry.created_at).toLocaleDateString()}
-                    </td>
-                  </tr>
-                )
-              })}
+                        {user.email && (
+                          <div className="text-sm text-gray-500">{user.email}</div>
+                        )}
+                      </div>
+                    </div>
+                  </td>
+                  <td className="px-6 py-4 whitespace-nowrap">
+                    <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${
+                      user.is_active 
+                        ? 'bg-green-100 text-green-800' 
+                        : 'bg-red-100 text-red-800'
+                    }`}>
+                      {user.is_active ? '啟用' : '停用'}
+                    </span>
+                  </td>
+                  <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
+                    {user.submission_count}
+                  </td>
+                  <td className="px-6 py-4 whitespace-nowrap">
+                    {getStatusBadge(user)}
+                  </td>
+                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                    {user.latest_submission_date 
+                      ? new Date(user.latest_submission_date).toLocaleDateString()
+                      : '-'
+                    }
+                  </td>
+                  <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
+                    <button
+                      onClick={() => handleViewUserSubmissions(user.id, user.display_name)}
+                      className="inline-flex items-center text-blue-600 hover:text-blue-900"
+                      disabled={user.submission_count === 0}
+                    >
+                      <Eye className="h-4 w-4 mr-1" />
+                      查看填報
+                      <ChevronRight className="h-4 w-4 ml-1" />
+                    </button>
+                  </td>
+                </tr>
+              ))}
             </tbody>
           </table>
         </div>
       </div>
 
-      {entries.length === 0 && (
+      {filteredUsers.length === 0 && (
         <div className="text-center py-12">
           <Calendar className="mx-auto h-12 w-12 text-gray-400" />
-          <h3 className="mt-2 text-sm font-medium text-gray-900">沒有填報記錄</h3>
+          <h3 className="mt-2 text-sm font-medium text-gray-900">沒有找到符合條件的用戶</h3>
           <p className="mt-1 text-sm text-gray-500">
-            系統中尚無任何填報記錄
+            {searchTerm || statusFilter !== 'all' || activeFilter !== 'all'
+              ? '嘗試調整篩選條件'
+              : '系統中尚無用戶填報記錄'
+            }
           </p>
         </div>
       )}

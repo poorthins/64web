@@ -7,8 +7,11 @@ interface MainContentProps {
 
 export default function MainContent({ children, title }: MainContentProps) {
   return (
-    <div className="flex-1 h-screen bg-gray-50 overflow-y-auto ml-64 xl:ml-64 lg:ml-56 md:ml-48 sm:ml-44">
-      <div className="min-h-screen bg-gray-50">
+    <div className="flex-1 h-screen overflow-y-auto ml-64 xl:ml-64 lg:ml-56 md:ml-48 sm:ml-44 bg-green-50 relative">
+      {/* 擴展背景到左側和上方 */}
+      <div className="absolute inset-0 bg-green-50 -ml-64 xl:-ml-64 lg:-ml-56 md:-ml-48 sm:-ml-44 -top-20"></div>
+      
+      <div className="min-h-screen bg-green-50 relative z-10">
         <div className="max-w-6xl mx-auto px-6 py-8 xl:px-8 lg:px-6 md:px-4 sm:px-3">
           {title && (
             <div className="mb-8">
@@ -17,7 +20,7 @@ export default function MainContent({ children, title }: MainContentProps) {
             </div>
           )}
           
-          <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-8 xl:p-8 lg:p-6 md:p-4 sm:p-3 w-full min-h-96">
+          <div className="p-8 xl:p-8 lg:p-6 md:p-4 sm:p-3 w-full min-h-96">
             {children}
           </div>
         </div>

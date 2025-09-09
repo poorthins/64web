@@ -11,18 +11,28 @@ import {
   AlertCircle,
   Loader2,
   UserCheck,
-  UserX
+  UserX,
+  Mail,
+  Phone,
+  Briefcase,
+  Edit,
+  Clock,
+  CheckCircle,
+  XCircle,
+  Eye
 } from 'lucide-react'
-import { getUserById, updateUserStatus, User as UserType } from '../../api/adminUsers'
+import { getUserDetails, updateUserStatus, UserProfile } from '../../api/adminUsers'
+import UserEditModal from '../../components/UserEditModal'
 
 const UserDetailPage = () => {
   const { userId } = useParams<{ userId: string }>()
   const navigate = useNavigate()
   
-  const [user, setUser] = useState<UserType | null>(null)
+  const [user, setUser] = useState<UserProfile | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [updating, setUpdating] = useState(false)
+  const [showEditModal, setShowEditModal] = useState(false)
 
   useEffect(() => {
     if (userId) {
@@ -36,7 +46,7 @@ const UserDetailPage = () => {
     try {
       setLoading(true)
       setError(null)
-      const userData = await getUserById(userId)
+      const userData = await getUserDetails(userId)
       setUser(userData)
     } catch (error) {
       console.error('Error fetching user detail:', error)
@@ -66,6 +76,11 @@ const UserDetailPage = () => {
 
   const handleBack = () => {
     navigate('/app/admin')
+  }
+
+  const handleEditSuccess = () => {
+    setShowEditModal(false)
+    fetchUserDetail() // 重新載入用戶資料
   }
 
   if (loading) {
@@ -188,6 +203,35 @@ const UserDetailPage = () => {
             </div>
           </div>
 
+          {/* Email */}
+          <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
+            <div className="flex items-center">
+              <div className="p-3 bg-green-50 rounded-full">
+                <Mail className="w-6 h-6 text-green-600" />
+              </div>
+              <div className="ml-4">
+                <p className="text-sm font-medium text-gray-600">電子郵件</p>
+                <p className="text-lg font-semibold text-gray-900">
+                  {user.email || 'N/A'}
+                </p>
+              </div>
+            </div>
+          </div>
+
+          {/* Company */}
+          <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
+            <div className="flex items-center">
+              <div className="p-3 bg-indigo-50 rounded-full">
+                <Building className="w-6 h-6 text-indigo-600" />
+              </div>
+              <div className="ml-4">
+                <p className="text-sm font-medium text-gray-600">公司</p>
+                <p className="text-lg font-semibold text-gray-900">
+                  {user.company || 'N/A'}
+                </p>
+              </div>
+            </div>
+          </div>
 
           {/* Role */}
           <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
@@ -203,27 +247,68 @@ const UserDetailPage = () => {
               </div>
             </div>
           </div>
+        </div>
 
-          {/* Entries Count */}
+        {/* Secondary Info Cards */}
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mb-8">
+          {/* Job Title */}
           <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
             <div className="flex items-center">
-              <div className="p-3 bg-orange-50 rounded-full">
-                <FileText className="w-6 h-6 text-orange-600" />
+              <div className="p-3 bg-yellow-50 rounded-full">
+                <Briefcase className="w-6 h-6 text-yellow-600" />
               </div>
               <div className="ml-4">
-                <p className="text-sm font-medium text-gray-600">填報數量</p>
+                <p className="text-sm font-medium text-gray-600">職位</p>
                 <p className="text-lg font-semibold text-gray-900">
-                  {user.entries_count}
+                  {user.job_title || 'N/A'}
+                </p>
+              </div>
+            </div>
+          </div>
+
+          {/* Phone */}
+          <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
+            <div className="flex items-center">
+              <div className="p-3 bg-teal-50 rounded-full">
+                <Phone className="w-6 h-6 text-teal-600" />
+              </div>
+              <div className="ml-4">
+                <p className="text-sm font-medium text-gray-600">電話</p>
+                <p className="text-lg font-semibold text-gray-900">
+                  {user.phone || 'N/A'}
+                </p>
+              </div>
+            </div>
+          </div>
+
+          {/* Account Status */}
+          <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
+            <div className="flex items-center">
+              <div className={`p-3 rounded-full ${
+                user.is_active ? 'bg-green-50' : 'bg-red-50'
+              }`}>
+                {user.is_active ? (
+                  <CheckCircle className="w-6 h-6 text-green-600" />
+                ) : (
+                  <XCircle className="w-6 h-6 text-red-600" />
+                )}
+              </div>
+              <div className="ml-4">
+                <p className="text-sm font-medium text-gray-600">帳號狀態</p>
+                <p className={`text-lg font-semibold ${
+                  user.is_active ? 'text-green-700' : 'text-red-700'
+                }`}>
+                  {user.is_active ? '已啟用' : '已停用'}
                 </p>
               </div>
             </div>
           </div>
         </div>
 
-        {/* Detailed Information */}
-        <div className="bg-white rounded-lg shadow-sm border border-gray-200">
+        {/* User Activity and System Information */}
+        <div className="bg-white rounded-lg shadow-sm border border-gray-200 mb-8">
           <div className="px-6 py-4 border-b border-gray-200">
-            <h2 className="text-lg font-semibold text-gray-900">詳細資訊</h2>
+            <h2 className="text-lg font-semibold text-gray-900">系統資訊</h2>
           </div>
           
           <div className="p-6">
@@ -239,16 +324,16 @@ const UserDetailPage = () => {
               
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">
-                  帳號狀態
+                  帳號權限
                 </label>
                 <div className="flex items-center">
-                  <Activity className={`w-4 h-4 mr-2 ${
-                    user.is_active ? 'text-green-500' : 'text-red-500'
+                  <Shield className={`w-4 h-4 mr-2 ${
+                    user.role === 'admin' ? 'text-purple-500' : 'text-blue-500'
                   }`} />
                   <span className={`font-medium ${
-                    user.is_active ? 'text-green-700' : 'text-red-700'
+                    user.role === 'admin' ? 'text-purple-700' : 'text-blue-700'
                   }`}>
-                    {user.is_active ? '帳號已啟用' : '帳號已停用'}
+                    {user.role === 'admin' ? '管理員權限' : '一般使用者權限'}
                   </span>
                 </div>
               </div>
@@ -256,17 +341,107 @@ const UserDetailPage = () => {
           </div>
         </div>
 
+        {/* Contact Information */}
+        <div className="bg-white rounded-lg shadow-sm border border-gray-200 mb-8">
+          <div className="px-6 py-4 border-b border-gray-200">
+            <div className="flex items-center justify-between">
+              <h2 className="text-lg font-semibold text-gray-900">聯絡資訊</h2>
+              <button
+                onClick={() => setShowEditModal(true)}
+                className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-medium transition-colors flex items-center gap-2"
+              >
+                <Edit className="w-4 h-4" />
+                編輯資料
+              </button>
+            </div>
+          </div>
+          
+          <div className="p-6">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  顯示名稱
+                </label>
+                <div className="p-3 bg-gray-50 rounded-lg">
+                  <div className="text-sm text-gray-800">{user.display_name || 'N/A'}</div>
+                </div>
+              </div>
+              
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  電子郵件
+                </label>
+                <div className="p-3 bg-gray-50 rounded-lg">
+                  <div className="text-sm text-gray-800">{user.email || 'N/A'}</div>
+                </div>
+              </div>
+              
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  公司名稱
+                </label>
+                <div className="p-3 bg-gray-50 rounded-lg">
+                  <div className="text-sm text-gray-800">{user.company || 'N/A'}</div>
+                </div>
+              </div>
+              
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  職位
+                </label>
+                <div className="p-3 bg-gray-50 rounded-lg">
+                  <div className="text-sm text-gray-800">{user.job_title || 'N/A'}</div>
+                </div>
+              </div>
+              
+              <div className="md:col-span-2">
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  聯絡電話
+                </label>
+                <div className="p-3 bg-gray-50 rounded-lg">
+                  <div className="text-sm text-gray-800">{user.phone || 'N/A'}</div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
         {/* Actions */}
-        <div className="mt-8 flex justify-end space-x-4">
-          <button
-            onClick={() => navigate(`/app/admin/users/${user.id}/entries`)}
-            className="px-6 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-medium transition-colors flex items-center gap-2"
-          >
-            <FileText className="w-4 h-4" />
-            查看填報記錄
-          </button>
+        <div className="mt-8 flex justify-between items-center">
+          <div className="flex space-x-4">
+            <button
+              onClick={() => navigate(`/app/admin/users/${user.id}/entries`)}
+              className="px-6 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-medium transition-colors flex items-center gap-2"
+            >
+              <FileText className="w-4 h-4" />
+              查看填報記錄
+            </button>
+            
+            <button
+              onClick={() => navigate(`/app/admin/users/${user.id}/submissions`)}
+              className="px-6 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg font-medium transition-colors flex items-center gap-2"
+            >
+              <Eye className="w-4 h-4" />
+              查看審核狀況
+            </button>
+          </div>
+          
+          <div className="text-sm text-gray-500">
+            <Clock className="w-4 h-4 inline mr-1" />
+            最後更新: {new Date().toLocaleDateString('zh-TW')}
+          </div>
         </div>
       </div>
+      
+      {/* Edit User Modal */}
+      {showEditModal && (
+        <UserEditModal
+          userId={user.id}
+          isOpen={true}
+          onClose={() => setShowEditModal(false)}
+          onSuccess={handleEditSuccess}
+        />
+      )}
     </div>
   )
 }

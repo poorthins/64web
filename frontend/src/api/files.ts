@@ -1,9 +1,30 @@
 import { supabase } from '../lib/supabaseClient'
 import { validateAuth, handleAPIError } from '../utils/authHelpers'
 
+/**
+ * 根據 page_key 推斷 category 名稱
+ */
+function getCategoryFromPageKey(pageKey: string): string {
+  const categoryMap: Record<string, string> = {
+    'wd40': 'WD-40',
+    'acetylene': '乙炔',
+    'refrigerant': '冷媒',
+    'lpg': 'LPG',
+    'diesel': '柴油',
+    'gasoline': '汽油'
+  }
+  return categoryMap[pageKey] || pageKey.toUpperCase()
+}
+
 export interface FileMetadata {
   pageKey: string
   year: number
+  category: 'msds' | 'usage_evidence'
+  month?: number  // 僅用於 usage_evidence，表示月份 (1-12)
+}
+
+export interface UploadOptions {
+  allowOverwrite?: boolean
 }
 
 export interface EvidenceFile {
@@ -76,9 +97,30 @@ function validateFileType(file: File): { valid: boolean; error?: string } {
 
 /**
  * 上傳證據檔案到 Storage 並建立記錄（支援檔案覆蓋）
- * 注意：檔案需要關聯到現有的 energy_entries 記錄
+ * 注意：檔案會自動關聯到對應的 energy_entries 記錄
+ * 如果該用戶的該頁面還沒有 entry 記錄，會自動建立一個草稿記錄
  */
-export async function uploadEvidence(file: File, meta: FileMetadata & { entryId?: string }): Promise<EvidenceFile> {
+export async function uploadEvidence(file: File, meta: FileMetadata & { entryId?: string; allowOverwrite?: boolean }): Promise<EvidenceFile> {
+  return await uploadEvidenceWithValidation(file, meta, true)
+}
+
+/**
+ * 上傳證據檔案並驗證必須有 entry_id
+ * @param file - 要上傳的檔案
+ * @param meta - 檔案元數據，必須包含 entryId
+ * @returns Promise<EvidenceFile>
+ */
+export async function uploadEvidenceWithEntry(file: File, meta: FileMetadata & { entryId: string; allowOverwrite?: boolean }): Promise<EvidenceFile> {
+  return await uploadEvidenceWithValidation(file, meta, false)
+}
+
+/**
+ * 內部函數：上傳證據檔案的核心邏輯
+ * @param file - 要上傳的檔案
+ * @param meta - 檔案元數據
+ * @param allowAutoCreateEntry - 是否允許自動建立 energy_entry
+ */
+async function uploadEvidenceWithValidation(file: File, meta: FileMetadata & { entryId?: string; allowOverwrite?: boolean }, allowAutoCreateEntry: boolean): Promise<EvidenceFile> {
   try {
     const authResult = await validateAuth()
     if (authResult.error || !authResult.user) {
@@ -95,47 +137,49 @@ export async function uploadEvidence(file: File, meta: FileMetadata & { entryId?
     // 推斷正確的 MIME 類型
     const resolvedType = inferMimeType(file)
 
-    // 檢查是否已有相同條件的檔案（同一使用者、頁面、年份）
-    // 需要通過 JOIN 查詢 energy_entries 來比對 page_key
-    let existingFileQuery = supabase
-      .from('entry_files')
-      .select(`
-        *,
-        energy_entries!inner(page_key, owner_id, period_year, status)
-      `)
-      .eq('owner_id', user.id)
-      .eq('energy_entries.page_key', meta.pageKey)
-      .eq('energy_entries.owner_id', user.id)
-      .eq('energy_entries.period_year', meta.year)
-      .eq('energy_entries.status', 'draft')
+    // 只有當 allowOverwrite 為 true 時才刪除現有檔案
+    if (meta.allowOverwrite) {
+      // 檢查是否已有相同條件的檔案（同一使用者、頁面、年份）
+      let existingFileQuery = supabase
+        .from('entry_files')
+        .select(`
+          *,
+          energy_entries!inner(page_key, owner_id, period_year, status)
+        `)
+        .eq('owner_id', user.id)
+        .eq('energy_entries.page_key', meta.pageKey)
+        .eq('energy_entries.owner_id', user.id)
+        .eq('energy_entries.period_year', meta.year)
+        .eq('energy_entries.status', 'draft')
 
-    const { data: existingFiles, error: queryError } = await existingFileQuery
+      const { data: existingFiles, error: queryError } = await existingFileQuery
 
-    if (queryError) {
-      console.error('Error querying existing files:', queryError)
-      throw handleAPIError(queryError, '查詢現有檔案失敗')
-    }
+      if (queryError) {
+        console.error('Error querying existing files:', queryError)
+        throw handleAPIError(queryError, '查詢現有檔案失敗')
+      }
 
-    // 如果有現有檔案，先刪除舊檔案
-    if (existingFiles && existingFiles.length > 0) {
-      for (const existingFile of existingFiles) {
-        // 從 Storage 刪除舊檔案
-        const { error: storageDeleteError } = await supabase.storage
-          .from('evidence')
-          .remove([existingFile.file_path])
+      // 如果有現有檔案且允許覆蓋，先刪除舊檔案
+      if (existingFiles && existingFiles.length > 0) {
+        for (const existingFile of existingFiles) {
+          // 從 Storage 刪除舊檔案
+          const { error: storageDeleteError } = await supabase.storage
+            .from('evidence')
+            .remove([existingFile.file_path])
 
-        if (storageDeleteError) {
-          console.warn('Warning: Failed to delete old file from storage:', storageDeleteError)
-        }
+          if (storageDeleteError) {
+            console.warn('Warning: Failed to delete old file from storage:', storageDeleteError)
+          }
 
-        // 從資料庫刪除舊記錄
-        const { error: dbDeleteError } = await supabase
-          .from('entry_files')
-          .delete()
-          .eq('id', existingFile.id)
+          // 從資料庫刪除舊記錄
+          const { error: dbDeleteError } = await supabase
+            .from('entry_files')
+            .delete()
+            .eq('id', existingFile.id)
 
-        if (dbDeleteError) {
-          console.warn('Warning: Failed to delete old file record:', dbDeleteError)
+          if (dbDeleteError) {
+            console.warn('Warning: Failed to delete old file record:', dbDeleteError)
+          }
         }
       }
     }
@@ -147,12 +191,15 @@ export async function uploadEvidence(file: File, meta: FileMetadata & { entryId?
       .replace(/^_+|_+$/g, '');  
     
     const timestamp = Date.now()
+    const randomSuffix = Math.random().toString(36).substring(2, 8) // 新增隨機字串以防止衝突
     
-    // 不使用 URL 編碼，直接使用安全的檔案名稱
-    const fileName = `${timestamp}_${safeName}`
+    // 使用時間戳 + 隨機字串確保檔案名稱唯一性
+    const fileName = `${timestamp}_${randomSuffix}_${safeName}`
     
-    // 構造檔案路徑：{userId}/{pageKey}/{year}/{filename}
-    const filePath = `${user.id}/${meta.pageKey}/${meta.year}/${fileName}`
+    // 構造檔案路徑：{userId}/{pageKey}/{year}/{category}/{month?}/{filename}
+    const categoryPath = meta.category
+    const monthPath = meta.category === 'usage_evidence' && meta.month ? `/${meta.month}` : ''
+    const filePath = `${user.id}/${meta.pageKey}/${meta.year}/${categoryPath}${monthPath}/${fileName}`
 
     // 驗證檔案路徑格式
     if (filePath.includes('//') || filePath.includes('..') || filePath.length > 1024) {
@@ -180,10 +227,116 @@ export async function uploadEvidence(file: File, meta: FileMetadata & { entryId?
       throw handleAPIError(uploadError, '檔案上傳失敗')
     }
 
+    // 驗證 entry_id 是否存在（必須關聯到現有的 energy_entries 記錄）
+    if (!meta.entryId) {
+      if (!allowAutoCreateEntry) {
+        throw new Error('檔案上傳必須關聯到現有的能源記錄')
+      }
+      
+      // 嘗試尋找現有的草稿記錄
+      // 根據資料庫唯一約束，使用 category 而不是 page_key 查詢
+      const category = getCategoryFromPageKey(meta.pageKey)
+      const { data: existingEntry } = await supabase
+        .from('energy_entries')
+        .select('id')
+        .eq('owner_id', user.id)
+        .eq('category', category)
+        .eq('period_year', meta.year)
+        .eq('status', 'draft')
+        .maybeSingle()
+      
+      if (!existingEntry) {
+        // 如果沒有草稿記錄，嘗試建立或更新一個
+        // 使用 upsert 避免重複插入錯誤
+        const { data: upsertResult, error: entryError } = await supabase
+          .from('energy_entries')
+          .upsert({
+            owner_id: user.id,
+            page_key: meta.pageKey,
+            period_year: meta.year,
+            category: getCategoryFromPageKey(meta.pageKey),
+            unit: 'ML', // 預設單位
+            amount: 0.00001, // 預設為最小值避免 amount > 0 約束錯誤
+            status: 'draft',
+            period_start: `${meta.year}-01-01`,
+            period_end: `${meta.year}-12-31`,
+            payload: {}
+          }, { 
+            onConflict: 'owner_id,category,period_year',  // 根據資料庫唯一約束進行衝突處理
+            ignoreDuplicates: false  // 不忽略重複，而是更新
+          })
+          .select('id')
+          .maybeSingle()  // 使用 maybeSingle 避免 single() 的錯誤
+        
+        if (entryError) {
+          throw new Error(`無法建立能源記錄: ${entryError.message}`)
+        }
+        
+        // 如果 upsert 成功但沒有返回資料，再查詢一次
+        if (!upsertResult) {
+          // 等待一小段時間確保資料庫操作完成
+          await new Promise(resolve => setTimeout(resolve, 100))
+          
+          const { data: existingAfterUpsert, error: queryError } = await supabase
+            .from('energy_entries')
+            .select('id')
+            .eq('owner_id', user.id)
+            .eq('category', category)
+            .eq('period_year', meta.year)
+            .eq('status', 'draft')
+            .maybeSingle()
+          
+          if (queryError) {
+            console.error('Query error after upsert:', queryError)
+            throw new Error(`查詢能源記錄失敗: ${queryError.message}`)
+          }
+          
+          if (!existingAfterUpsert) {
+            // 嘗試查詢所有狀態的記錄，看看是否存在但狀態不同
+            const { data: anyStatusRecord, error: anyStatusError } = await supabase
+              .from('energy_entries')
+              .select('id, status')
+              .eq('owner_id', user.id)
+              .eq('category', category)
+              .eq('period_year', meta.year)
+              .maybeSingle()
+            
+            if (anyStatusError) {
+              console.error('Any status query error:', anyStatusError)
+            }
+            
+            if (anyStatusRecord) {
+              console.log('Found record with different status:', anyStatusRecord)
+              meta.entryId = anyStatusRecord.id
+            } else {
+              console.error('No record found after upsert. Debug info:', {
+                user_id: user.id,
+                category,
+                period_year: meta.year,
+                page_key: meta.pageKey
+              })
+              throw new Error('建立能源記錄後無法找到該記錄')
+            }
+          } else {
+            meta.entryId = existingAfterUpsert.id
+          }
+        } else {
+          meta.entryId = upsertResult.id
+        }
+      } else {
+        meta.entryId = existingEntry.id
+      }
+    }
+    
+    // 最終驗證 entry_id 是否存在
+    if (!meta.entryId) {
+      throw new Error('無法取得有效的能源記錄 ID')
+    }
+
     // 建立資料庫記錄
     const fileRecord = {
       owner_id: user.id,
-      entry_id: meta.entryId || null, // Associate with energy_entry if provided
+      entry_id: meta.entryId, // 現在保證有值
       file_path: uploadData.path,
       file_name: file.name,
       mime_type: resolvedType,
@@ -200,12 +353,12 @@ export async function uploadEvidence(file: File, meta: FileMetadata & { entryId?
       // 如果資料庫插入失敗，清理已上傳的檔案
       await supabase.storage.from('evidence').remove([uploadData.path])
       console.error('Error creating file record:', dbError)
-      throw handleAPIError(dbError, '建立檔案記錄失敗')
+      throw handleAPIError(dbError, `建立檔案記錄失敗: ${dbError.message}`)
     }
 
     return dbData
   } catch (error) {
-    console.error('Error in uploadEvidence:', error)
+    console.error('Error in uploadEvidenceWithValidation:', error)
     if (error instanceof Error) {
       throw error
     }
@@ -214,7 +367,86 @@ export async function uploadEvidence(file: File, meta: FileMetadata & { entryId?
 }
 
 /**
- * 取得指定頁面的草稿檔案清單
+ * 取得指定頁面和類別的草稿檔案清單
+ */
+export async function listEvidenceByCategory(
+  pageKey: string, 
+  category: 'msds' | 'usage_evidence',
+  month?: number
+): Promise<EvidenceFile[]> {
+  try {
+    const authResult = await validateAuth()
+    if (authResult.error || !authResult.user) {
+      throw authResult.error || new Error('使用者未登入')
+    }
+    const user = authResult.user
+
+    let query = supabase
+      .from('entry_files')
+      .select(`
+        *,
+        energy_entries!inner(page_key, status, period_year)
+      `)
+      .eq('owner_id', user.id)
+      .eq('energy_entries.page_key', pageKey)
+      .eq('energy_entries.owner_id', user.id)
+      .in('energy_entries.status', ['draft', 'submitted'])
+      .order('created_at', { ascending: false })
+
+    // 根據類別和月份過濾檔案路徑
+    const yearStr = new Date().getFullYear().toString()
+    let pathPattern = `${user.id}/${pageKey}/${yearStr}/${category}`
+    
+    if (category === 'usage_evidence' && month) {
+      pathPattern += `/${month}`
+    }
+    
+    // 使用 LIKE 查詢匹配路徑模式
+    query = query.like('file_path', `${pathPattern}%`)
+
+    const { data, error } = await query
+
+    if (error) {
+      console.error('Error listing evidence by category:', error)
+      throw handleAPIError(error, '取得檔案清單失敗')
+    }
+
+    // Flatten the joined data
+    const flattenedData = (data || []).map(item => ({
+      ...item,
+      page_key: item.energy_entries?.page_key,
+      status: item.energy_entries?.status,
+      period_year: item.energy_entries?.period_year,
+      energy_entries: undefined // Remove nested object
+    }))
+
+    return flattenedData || []
+  } catch (error) {
+    console.error('Error in listEvidenceByCategory:', error)
+    if (error instanceof Error) {
+      throw error
+    }
+    throw new Error('取得檔案清單時發生未知錯誤')
+  }
+}
+
+/**
+ * 取得 MSDS 檔案清單
+ */
+export async function listMSDSFiles(pageKey: string): Promise<EvidenceFile[]> {
+  return await listEvidenceByCategory(pageKey, 'msds')
+}
+
+/**
+ * 取得指定月份的使用證明檔案清單
+ */
+export async function listUsageEvidenceFiles(pageKey: string, month: number): Promise<EvidenceFile[]> {
+  return await listEvidenceByCategory(pageKey, 'usage_evidence', month)
+}
+
+/**
+ * 取得指定頁面的檔案清單 (向後相容，但建議使用分類函數)
+ * @deprecated 建議使用 listMSDSFiles 或 listUsageEvidenceFiles
  */
 export async function listEvidence(pageKey: string): Promise<EvidenceFile[]> {
   try {
@@ -233,7 +465,7 @@ export async function listEvidence(pageKey: string): Promise<EvidenceFile[]> {
       .eq('owner_id', user.id)
       .eq('energy_entries.page_key', pageKey)
       .eq('energy_entries.owner_id', user.id)
-      .eq('energy_entries.status', 'draft')
+      .in('energy_entries.status', ['draft', 'submitted'])
       .order('created_at', { ascending: false })
 
     const { data, error } = await query
@@ -351,7 +583,15 @@ export async function commitEvidence(params: { entryId?: string; pageKey: string
     }
     const user = authResult.user
 
+    console.log('🔗 [commitEvidence] Starting with:', {
+      user_id: user.id,
+      pageKey: params.pageKey,
+      entryId: params.entryId
+    })
+
     // First, get all file IDs that match the criteria via JOIN
+    // 查找 draft 和 submitted 狀態的記錄，因為提交後狀態會變為 submitted
+    console.log('📁 [commitEvidence] Searching for files to commit...')
     const { data: filesData, error: fetchError } = await supabase
       .from('entry_files')
       .select(`
@@ -361,7 +601,13 @@ export async function commitEvidence(params: { entryId?: string; pageKey: string
       .eq('owner_id', user.id)
       .eq('energy_entries.page_key', params.pageKey)
       .eq('energy_entries.owner_id', user.id)
-      .eq('energy_entries.status', 'draft')
+      .in('energy_entries.status', ['draft', 'submitted'])
+      
+    console.log('📋 [commitEvidence] Found files:', {
+      count: filesData?.length || 0,
+      files: filesData,
+      error: fetchError
+    })
 
     if (fetchError) {
       console.error('Error fetching files to commit:', fetchError)
@@ -377,20 +623,23 @@ export async function commitEvidence(params: { entryId?: string; pageKey: string
 
     if (params.entryId) {
       updateData.entry_id = params.entryId
+      
+      // 更新所有關聯的檔案
+      const { error } = await supabase
+        .from('entry_files')
+        .update(updateData)
+        .in('id', fileIds)
+        .eq('owner_id', user.id)
+      
+      if (error) {
+        console.error('Error updating file entry_id:', error)
+        throw handleAPIError(error, '更新檔案關聯失敗')
+      }
     }
+    
+    // 不再在這裡執行空的 update，因為我們已經處理了 entry_id 的更新
 
-    // Note: We update the status in energy_entries table, not entry_files
-    // This function should coordinate with energy entry submission
-    const { error } = await supabase
-      .from('entry_files')
-      .update(updateData)
-      .in('id', fileIds)
-      .eq('owner_id', user.id)
-
-    if (error) {
-      console.error('Error committing evidence:', error)
-      throw handleAPIError(error, '提交檔案失敗')
-    }
+    // 已在上面處理了錯誤
   } catch (error) {
     console.error('Error in commitEvidence:', error)
     if (error instanceof Error) {

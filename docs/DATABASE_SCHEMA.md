@@ -1,15 +1,28 @@
-# 山椒魚組織型碳足跡盤查系統 - 資料庫架構文檔 v2.0
+# 山椒魚組織型碳足跡盤查系統 - 資料庫架構文檔 v4.0
 
 ## 系統概述
 
-本系統是一個基於 Supabase 的企業碳排放盤查和能源管理系統，支援範疇一、二、三的完整碳足跡追蹤作業。系統採用現代化的 JAMstack 架構，結合 Supabase Auth 認證和 Row Level Security (RLS) 進行權限控制。
+本系統是一個基於 Supabase 的企業碳排放盤查和能源管理系統，支援範疇一、二、三的完整碳足跡追蹤作業。系統採用現代化的 JAMstack 架構，結合 Supabase Auth 認證和 Row Level Security (RLS) 進行權限控制，並包含完整的批閱審核流程。
 
 ### 技術架構
 - **資料庫**: PostgreSQL (Supabase)
 - **認證系統**: Supabase Auth
 - **權限控制**: Row Level Security (RLS)
 - **前端框架**: React + TypeScript + Vite
-- **文檔生成時間**: 2025年9月5日 15:26:13 (UTC+8)
+- **批閱系統**: 單表設計的審核工作流程
+- **API 設計**: 函數式 API，取代視圖查詢
+- **文檔更新時間**: 2025年9月9日
+
+---
+
+## 系統架構優化歷程
+
+**v4.0 重大改進**：
+- 從複雜的雙表同步架構簡化為穩定的單表設計
+- 移除 `entry_reviews` 表，所有批閱功能整合到 `energy_entries`
+- 移除所有視圖，改用安全的函數 API
+- 解決了關聯查詢錯誤和無限循環觸發器問題
+- 符合 Supabase 安全最佳實踐
 
 ---
 
@@ -18,9 +31,10 @@
 | 表格名稱 | 類型 | 欄位數量 | 主鍵 | 用途 |
 |---------|------|---------|------|------|
 | profiles | 用戶管理表 | 11 | id | 管理系統用戶基本資料與權限設定 |
-| energy_entries | 能源記錄表 | 16 | id | 儲存各類能源使用紀錄 (核心業務資料) |
+| energy_entries | 能源記錄表 | 20 | id | 儲存各類能源使用紀錄 (核心業務資料，包含批閱功能) |
 | entry_files | 佐證檔案表 | 8 | id | 儲存能源記錄的佐證檔案 |
 | form_drafts | 表單草稿表 | 5 | id | 自動儲存用戶填寫中的表單資料 |
+| review_history | 批閱歷史表 | 7 | id | 記錄完整的審核歷史軌跡 |
 
 ---
 
@@ -44,9 +58,9 @@
 | updated_at | TIMESTAMP WITH TIME ZONE | NULL | now() | 更新時間 |
 | report_year | INTEGER | NOT NULL | 2025 | 填報年份 |
 
-### 2. energy_entries (能源使用記錄表)
+### 2. energy_entries (能源使用記錄表) **[核心表格]**
 
-**用途**: 儲存各類能源使用紀錄，系統核心業務資料
+**用途**: 儲存各類能源使用紀錄，系統核心業務資料，整合所有批閱功能
 
 | 欄位名稱 | 資料類型 | 約束 | 預設值 | 說明 |
 |---------|---------|------|-------|------|
@@ -64,13 +78,24 @@
 | updated_at | TIMESTAMP WITH TIME ZONE | NULL | now() | 更新時間 |
 | page_key | TEXT | NULL | null | 頁面識別碼 |
 | period_year | INTEGER | NULL | null | 資料年份 |
-| status | TEXT | NULL | 'submitted' | 狀態 (draft/submitted/approved/rejected) |
+| status | TEXT | NULL | 'submitted' | 狀態 (draft/submitted/under_review/approved/rejected) |
 | total_amount | NUMERIC | NULL | null | 年度總使用量 |
+| reviewer_id | UUID | FK, NULL | null | 批閱者ID，參考 profiles.id |
+| review_notes | TEXT | NULL | null | 批閱備註 |
+| reviewed_at | TIMESTAMP WITH TIME ZONE | NULL | null | 批閱時間 |
+| is_locked | BOOLEAN | NULL | false | 記錄鎖定狀態（已批准的記錄會被鎖定） |
 
 **支援的能源類別**:
 - **範疇一**: WD-40, 乙炔, 冷媒, 化糞池, 天然氣, 尿素, 柴油(發電機), 柴油, 汽油, 液化石油氣, 滅火器, 焊條
 - **範疇二**: 外購電力
 - **範疇三**: 員工通勤
+
+**批閱狀態流程**:
+```
+draft → submitted → under_review → approved/rejected
+             ↑                          ↓
+          可重新提交                   已批准記錄被鎖定
+```
 
 ### 3. entry_files (佐證檔案表)
 
@@ -87,9 +112,6 @@
 | file_size | BIGINT(64,0) | NULL | null | 檔案大小 (bytes) |
 | created_at | TIMESTAMP WITH TIME ZONE | NOT NULL | now() | 上傳時間 |
 
-**支援的檔案格式**: PDF, JPEG, JPG, PNG, GIF, WebP
-**檔案大小限制**: 最大 50MB (52,428,800 bytes)
-
 ### 4. form_drafts (表單草稿表)
 
 **用途**: 自動儲存用戶填寫中的表單資料，防止意外遺失
@@ -102,7 +124,19 @@
 | payload | JSONB | NOT NULL | null | 表單資料內容 |
 | updated_at | TIMESTAMP WITH TIME ZONE | NOT NULL | now() | 最後更新時間 |
 
-**支援的頁面識別碼**: wd40, acetylene, refrigerant, septic_tank, natural_gas, urea, diesel_generator, diesel, gasoline, lpg, fire_extinguisher, welding_rod, electricity, employee_commute
+### 5. review_history (批閱歷史表)
+
+**用途**: 記錄完整的審核歷史軌跡，保存所有狀態變更記錄
+
+| 欄位名稱 | 資料類型 | 約束 | 預設值 | 說明 |
+|---------|---------|------|-------|------|
+| id | UUID | PK, NOT NULL | gen_random_uuid() | 系統主鍵 |
+| entry_id | UUID | FK, NOT NULL | null | 能源記錄ID，參考 energy_entries.id |
+| reviewer_id | UUID | FK, NULL | null | 批閱者ID，參考 profiles.id |
+| old_status | TEXT | NULL | null | 變更前狀態 |
+| new_status | TEXT | NULL | null | 變更後狀態 |
+| review_notes | TEXT | NULL | null | 批閱備註 |
+| created_at | TIMESTAMP WITH TIME ZONE | NULL | now() | 記錄建立時間 |
 
 ---
 
@@ -110,8 +144,9 @@
 
 ```
 profiles (用戶管理)
-    ├── energy_entries (能源記錄) [1:N]
-    │   └── entry_files (佐證檔案) [1:N]
+    ├── energy_entries (能源記錄，整合批閱功能) [1:N]
+    │   ├── entry_files (佐證檔案) [1:N]
+    │   └── review_history (批閱歷史) [1:N]
     └── form_drafts (表單草稿) [1:N]
 ```
 
@@ -120,9 +155,59 @@ profiles (用戶管理)
 | 來源表 | 來源欄位 | 參考表 | 參考欄位 | 約束名稱 | 刪除規則 | 更新規則 |
 |--------|---------|--------|---------|----------|----------|----------|
 | energy_entries | owner_id | profiles | id | fk_energy_entries_owner | CASCADE | NO ACTION |
+| energy_entries | reviewer_id | profiles | id | fk_energy_entries_reviewer | SET NULL | NO ACTION |
 | entry_files | entry_id | energy_entries | id | fk_entry_files_entry | CASCADE | NO ACTION |
 | entry_files | owner_id | profiles | id | fk_entry_files_owner | CASCADE | NO ACTION |
 | form_drafts | owner_id | profiles | id | fk_form_drafts_owner | CASCADE | NO ACTION |
+| review_history | entry_id | energy_entries | id | fk_review_history_entry | CASCADE | NO ACTION |
+| review_history | reviewer_id | profiles | id | fk_review_history_reviewer | SET NULL | NO ACTION |
+
+---
+
+## API 設計 (函數式介面)
+
+**v4.0 重大改變**: 系統移除了所有視圖，改用安全的函數 API
+
+### 核心 API 函數
+
+#### 統計查詢
+```sql
+-- 取得填報統計
+SELECT * FROM get_entry_review_stats();
+
+-- 取得詳細進度
+SELECT * FROM get_entry_progress_detail();
+
+-- 取得批閱歷史
+SELECT * FROM get_review_history_detail();
+```
+
+#### 管理員功能
+```sql
+-- 管理員統計
+SELECT * FROM admin_get_review_stats(2025);
+
+-- 管理員進度查詢
+SELECT * FROM admin_get_progress_detail(user_id, 2025, 'submitted');
+
+-- 儀表板統計
+SELECT * FROM admin_get_dashboard_stats(2025);
+
+-- 用戶進度查詢
+SELECT * FROM get_user_progress(user_id, 2025);
+```
+
+#### 批閱操作
+```sql
+-- 單筆批閱
+SELECT admin_review_entry(entry_id, 'approved', '批准通過');
+
+-- 批量批閱
+SELECT batch_review_entries(ARRAY[entry_id1, entry_id2], 'approved', '批量批准');
+
+-- 解鎖記錄
+SELECT unlock_entry(entry_id);
+```
 
 ---
 
@@ -134,6 +219,7 @@ profiles (用戶管理)
 - `energy_entries_pkey`: energy_entries.id  
 - `entry_files_pkey`: entry_files.id
 - `form_drafts_pkey`: form_drafts.id
+- `review_history_pkey`: review_history.id
 
 ### 唯一性約束
 - `uq_profiles_email`: 確保 email 唯一性
@@ -148,7 +234,7 @@ profiles (用戶管理)
 **energy_entries 表**:
 - `chk_energy_entries_category`: 類別必須是預定義的能源類別
 - `chk_energy_entries_scope`: 範疇只能是 1, 2, 或 3
-- `chk_energy_entries_status`: 狀態只能是 'draft', 'submitted', 'approved', 'rejected'
+- `chk_energy_entries_status`: 狀態只能是 'draft', 'submitted', 'under_review', 'approved', 'rejected'
 - `chk_energy_entries_amount`: 使用量必須大於 0
 - `chk_energy_entries_period_dates`: 開始日期必須小於等於結束日期
 
@@ -172,6 +258,9 @@ profiles (用戶管理)
 - `idx_energy_entries_owner_year`: 用戶年份查詢優化
 - `idx_energy_entries_status`: 狀態查詢優化
 - `idx_energy_entries_scope`: 範疇查詢優化
+- `idx_energy_entries_reviewer_id`: 批閱者查詢優化
+- `idx_energy_entries_is_locked`: 鎖定狀態查詢優化
+- `idx_energy_entries_reviewed_at`: 批閱時間查詢優化
 - `uq_energy_entries_user_category_year`: 防重複約束 (唯一)
 
 **entry_files 表**:
@@ -193,6 +282,12 @@ profiles (用戶管理)
 - `idx_profiles_role`: 角色查詢優化
 - `idx_profiles_is_active`: 啟用狀態查詢優化
 
+**review_history 表**:
+- `review_history_pkey`: 主鍵 (唯一)
+- `idx_review_history_entry_id`: 能源記錄關聯查詢優化
+- `idx_review_history_reviewer_id`: 批閱者查詢優化
+- `idx_review_history_created_at`: 時間查詢優化
+
 ---
 
 ## 權限控制 (RLS 政策)
@@ -203,31 +298,39 @@ profiles (用戶管理)
 - energy_entries: ENABLED
 - entry_files: ENABLED
 - form_drafts: ENABLED
+- review_history: ENABLED
 
 ### RLS 政策詳細
 
 **profiles 表**:
 - `profiles_select_own`: 用戶只能查看自己的資料 `(id = auth.uid())`
+- `profiles_select_all_admin`: 管理員可以查看所有用戶資料
 - `profiles_update_own`: 用戶只能更新自己的資料 `(id = auth.uid())`
 
-**energy_entries 表**:
+**energy_entries 表** (核心權限控制):
 - `energy_entries_select_own`: 用戶查看自己的能源記錄 `(auth.uid() = owner_id)`
-- `energy_entries_select_all_admin`: 管理員查看所有用戶記錄 (使用複雜查詢檢查管理員權限)
+- `energy_entries_select_all_admin`: 管理員查看所有用戶記錄
 - `energy_entries_insert_own`: 用戶新增自己的記錄
-- `energy_entries_update_own`: 用戶更新自己的記錄 `(auth.uid() = owner_id)`
+- `energy_entries_update_own`: 用戶更新自己未鎖定的記錄 `(auth.uid() = owner_id AND (is_locked IS NULL OR is_locked = FALSE))`
+- `energy_entries_update_all_admin`: 管理員可以更新所有記錄
 - `energy_entries_delete_own`: 用戶刪除自己的記錄 `(auth.uid() = owner_id)`
 
 **entry_files 表**:
-- `entry_files_select_admin`: 管理員查看所有檔案 `is_admin()`
+- `entry_files_select_admin`: 管理員查看所有檔案
+- `entry_files_select_all_admin`: 管理員查看所有佐證檔案
 - `entry_files_insert_policy`: 用戶上傳檔案到自己的記錄
 - `entry_files_update_policy`: 用戶更新自己的檔案 `(owner_id = auth.uid())`
+- `entry_files_update_all_admin`: 管理員可以更新所有檔案
 - `entry_files_delete_policy`: 用戶刪除自己的檔案 `(owner_id = auth.uid())`
 
 **form_drafts 表**:
-- `form_drafts_select_admin`: 管理員查看所有草稿 `is_admin()`
+- `form_drafts_select_admin`: 管理員查看所有草稿
 - `form_drafts_insert_policy`: 用戶建立自己的草稿
 - `form_drafts_update_policy`: 用戶更新自己的草稿 `(owner_id = auth.uid())`
 - `form_drafts_delete_policy`: 用戶刪除自己的草稿 `(owner_id = auth.uid())`
+
+**review_history 表**:
+- `review_history_select_admin`: 管理員查看批閱歷史
 
 ---
 
@@ -237,9 +340,10 @@ profiles (用戶管理)
 
 **is_admin()**
 - **回傳類型**: BOOLEAN
-- **安全性**: SECURITY DEFINER
+- **安全性**: SECURITY INVOKER
 - **用途**: 檢查當前用戶是否為管理員
 - **邏輯**: 查詢 profiles 表檢查用戶角色是否為 'admin'
+- **設定**: SET search_path TO public, pg_temp
 
 ### 認證整合函數
 
@@ -256,6 +360,82 @@ profiles (用戶管理)
 - **安全性**: SECURITY DEFINER
 - **用途**: 新增或更新表單草稿
 - **邏輯**: 自動判斷 INSERT 或 UPDATE，回傳草稿 ID
+
+### 批閱系統函數
+
+**handle_review_update()**
+- **回傳類型**: TRIGGER
+- **安全性**: SECURITY DEFINER
+- **用途**: 處理批閱狀態變更，管理記錄鎖定狀態
+- **設定**: SET search_path TO public, pg_temp
+
+**log_review_history()**
+- **回傳類型**: TRIGGER
+- **安全性**: SECURITY DEFINER
+- **用途**: 記錄狀態變更歷史
+- **設定**: SET search_path TO public, pg_temp
+
+**admin_review_entry(entry_id, status, review_notes)**
+- **回傳類型**: BOOLEAN
+- **安全性**: SECURITY DEFINER
+- **用途**: 管理員批閱單筆記錄
+- **設定**: SET search_path TO public, pg_temp
+
+**batch_review_entries(entry_ids, status, review_notes)**
+- **回傳類型**: INTEGER
+- **安全性**: SECURITY DEFINER
+- **用途**: 批量批閱多筆記錄
+- **設定**: SET search_path TO public, pg_temp
+
+**unlock_entry(entry_id)**
+- **回傳類型**: BOOLEAN
+- **安全性**: SECURITY DEFINER
+- **用途**: 解鎖已批准的記錄
+- **設定**: SET search_path TO public, pg_temp
+
+### 統計查詢函數
+
+**get_entry_review_stats()**
+- **回傳類型**: TABLE
+- **安全性**: SECURITY INVOKER
+- **用途**: 取得填報統計資料
+- **設定**: SET search_path TO public, pg_temp
+
+**get_entry_progress_detail()**
+- **回傳類型**: TABLE
+- **安全性**: SECURITY INVOKER
+- **用途**: 取得詳細進度資料
+- **設定**: SET search_path TO public, pg_temp
+
+**get_review_history_detail()**
+- **回傳類型**: TABLE
+- **安全性**: SECURITY INVOKER
+- **用途**: 取得批閱歷史記錄
+- **設定**: SET search_path TO public, pg_temp
+
+**admin_get_review_stats(year)**
+- **回傳類型**: TABLE
+- **安全性**: SECURITY DEFINER
+- **用途**: 管理員取得批閱統計資料
+- **設定**: SET search_path TO public, pg_temp
+
+**admin_get_progress_detail(user_id, year, status)**
+- **回傳類型**: TABLE
+- **安全性**: SECURITY DEFINER
+- **用途**: 管理員取得詳細進度資料
+- **設定**: SET search_path TO public, pg_temp
+
+**admin_get_dashboard_stats(year)**
+- **回傳類型**: TABLE
+- **安全性**: SECURITY DEFINER
+- **用途**: 管理員儀表板統計
+- **設定**: SET search_path TO public, pg_temp
+
+**get_user_progress(user_id, year)**
+- **回傳類型**: TABLE
+- **安全性**: SECURITY DEFINER
+- **用途**: 取得用戶填報進度
+- **設定**: SET search_path TO public, pg_temp
 
 ### 觸發器函數
 
@@ -276,8 +456,9 @@ profiles (用戶管理)
 
 **prevent_duplicate_submission()**
 - **回傳類型**: TRIGGER
-- **安全性**: SECURITY INVOKER
+- **安全性**: SECURITY DEFINER
 - **用途**: 防止重複提交，自動覆蓋舊資料
+- **設定**: SET search_path TO public, pg_temp
 
 ---
 
@@ -286,7 +467,8 @@ profiles (用戶管理)
 | 觸發器名稱 | 作用表 | 觸發時機 | 觸發事件 | 執行函數 |
 |-----------|--------|----------|----------|----------|
 | prevent_duplicate_submission | energy_entries | BEFORE | INSERT | prevent_duplicate_submission() |
-| update_energy_entries_updated_at | energy_entries | BEFORE | UPDATE | update_energy_entries_updated_at() |
+| trigger_handle_review_update | energy_entries | BEFORE | UPDATE | handle_review_update() |
+| trigger_log_review_history | energy_entries | AFTER | UPDATE | log_review_history() |
 | update_form_drafts_updated_at | form_drafts | BEFORE | UPDATE | update_form_drafts_updated_at() |
 | update_profiles_updated_at | profiles | BEFORE | UPDATE | update_updated_at_column() |
 
@@ -301,117 +483,54 @@ profiles (用戶管理)
 - **日期驗證**: 期間開始日期必須小於等於結束日期
 - **數量驗證**: 使用量必須大於 0
 
-### 2. 檔案管理規則  
-- **關聯關係**: 每筆能源記錄可上傳多個佐證檔案
-- **格式限制**: 支援 PDF 和常見圖片格式
-- **大小限制**: 單檔最大 50MB
-- **CASCADE 刪除**: 刪除能源記錄時相關檔案一併刪除
+### 2. 批閱流程規則
+- **狀態流程**: draft → submitted → under_review → approved/rejected
+- **鎖定機制**: 已批准的記錄自動鎖定，用戶無法修改
+- **權限分離**: 只有管理員可以進行批閱操作
+- **歷史追蹤**: 所有狀態變更都會記錄在 review_history 表中
+- **單表設計**: 所有批閱功能整合在 energy_entries 表中
 
-### 3. 草稿功能規則
-- **自動儲存**: 系統自動儲存用戶填寫中的資料
-- **唯一性**: 每個類別維護一個草稿
-- **持久化**: 提交後草稿保留供下次參考
-- **覆蓋策略**: 新草稿自動覆蓋舊草稿
-
-### 4. 權限管理規則
-- **用戶權限**: 只能存取自己的資料
-- **管理員權限**: 可以查看所有用戶資料
-- **RLS 保護**: 所有操作都受 RLS 政策保護
-- **認證整合**: 與 Supabase Auth 完全整合
+### 3. API 使用規則
+- **無視圖依賴**: 所有查詢都通過函數 API
+- **權限檢查**: 函數內建權限驗證
+- **安全設計**: 所有函數都設有 search_path 保護
 
 ---
 
-## 資料統計
+## 系統特色
 
-### 當前資料狀態 (2025-09-05)
+### 架構優勢
+- **簡化設計**: 單表批閱系統，避免複雜的表格同步
+- **穩定性**: 無觸發器循環問題
+- **安全性**: 符合 Supabase 最佳實踐
+- **維護性**: 架構清晰，易於擴展
 
-| 表格 | 總記錄數 | 管理員數量 | 一般用戶數量 | 備註 |
-|------|---------|------------|-------------|------|
-| profiles | 2 | 1 | 1 | 系統已設定測試用戶 |
-| energy_entries | 0 | 0 | 0 | 準備接收業務資料 |
-| entry_files | 0 | - | - | 準備接收檔案上傳 |
-| form_drafts | 0 | - | - | 準備接收草稿資料 |
+### 功能完整性
+- 完整的能源使用記錄管理
+- 流暢的批閱工作流程
+- 詳細的統計和進度追蹤
+- 佐證檔案管理
+- 適當的權限控制
 
----
-
-## 系統維護注意事項
-
-### 1. 效能監控
-建議監控以下查詢的效能：
-- 用戶年度資料總覽查詢
-- 管理員跨用戶資料審核查詢
-- 檔案關聯查詢和下載操作
-
-### 2. 資料備份
-- 定期備份核心業務資料
-- 監控 Supabase Storage 使用量
-- 建立資料恢復程序
-
-### 3. 架構擴展
-新增能源類別時需要更新：
-- `chk_energy_entries_category` 約束條件
-- `chk_form_drafts_page_key` 約束條件
-- 前端對應的頁面和邏輯
-
-### 4. 安全性維護
-- 定期檢查 RLS 政策有效性
-- 監控異常的資料存取模式
-- 保持 Supabase 平台最新安全更新
+### 技術規範
+- PostgreSQL + Supabase
+- 函數式 API 設計
+- Row Level Security
+- 觸發器自動化
+- JSONB 靈活資料結構
 
 ---
 
-## 文檔版本資訊
+## 部署狀態
 
-- **版本**: 2.0
-- **建立日期**: 2025年9月5日
-- **最後更新**: 2025年9月5日 15:26:13 (UTC+8)
-- **資料庫架構狀態**: 生產就緒
-- **系統開發**: 山椒魚永續工程股份有限公司
+**當前版本**: v4.0 (生產就緒)
+**安全等級**: 符合 Supabase 標準
+**維護狀態**: 穩定，易於維護
+**擴展性**: 良好，支援未來功能增加
 
 ---
 
-## 附錄
+## 更新歷程
 
-### A. 支援的能源類別完整列表
-
-**範疇一 (直接排放)**:
-1. WD-40
-2. 乙炔
-3. 冷媒
-4. 化糞池
-5. 天然氣
-6. 尿素
-7. 柴油(發電機)
-8. 柴油
-9. 汽油
-10. 液化石油氣
-11. 滅火器
-12. 焊條
-
-**範疇二 (間接排放 - 能源)**:
-1. 外購電力
-
-**範疇三 (其他間接排放)**:
-1. 員工通勤
-
-### B. 狀態流程圖
-
-```
-用戶操作流程:
-draft (草稿) → submitted (已提交) → approved/rejected (管理員審核)
-                     ↑
-                重複提交時重置
-```
-
-### C. 檔案格式支援
-
-**支援格式**:
-- PDF: application/pdf
-- JPEG: image/jpeg, image/jpg
-- PNG: image/png
-- GIF: image/gif
-- WebP: image/webp
-
-**限制**:
-- 單檔最大: 50MB
-- 總儲存: 依 Supabase 方案限制
+- **v3.0**: 複雜雙表架構，存在同步問題
+- **v4.0**: 簡化為單表設計，移除視圖改用函數 API，解決所有架構問題

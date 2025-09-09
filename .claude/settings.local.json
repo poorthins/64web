@@ -111,7 +111,8 @@
       "Read(/C:\\Users\\Winnie\\.ipynb_checkpoints\\64web\\frontend\\src/**)",
       "Read(/C:\\Users\\Winnie\\.ipynb_checkpoints\\64web\\frontend\\src\\utils/**)",
       "Read(/C:\\Users\\Winnie\\.ipynb_checkpoints\\64web\\backend/**)",
-      "Read(/C:\\Users\\Winnie\\.ipynb_checkpoints\\64web\\frontend\\src\\api/**)"
+      "Read(/C:\\Users\\Winnie\\.ipynb_checkpoints\\64web\\frontend\\src\\api/**)",
+      "Bash(npm run lint)"
     ],
     "deny": [],
     "ask": []

@@ -1,6 +1,8 @@
 import { useState, useRef } from 'react'
-import { Upload, X, File, AlertCircle, CheckCircle, FileText } from 'lucide-react'
-import { uploadEvidence, deleteEvidence, getFileUrl, EvidenceFile } from '../api/files'
+import { Upload, X, File, AlertCircle, CheckCircle, FileText, Trash2 } from 'lucide-react'
+import { uploadEvidence, deleteEvidence, getFileUrl, EvidenceFile, listMSDSFiles, listUsageEvidenceFiles } from '../api/files'
+
+export type EntryStatus = 'draft' | 'submitted' | 'approved' | 'rejected'
 
 interface EvidenceUploadProps {
   pageKey: string
@@ -11,6 +13,19 @@ interface EvidenceUploadProps {
   maxFiles?: number
   className?: string
   kind?: 'usage_evidence' | 'msds' | 'other'
+  currentStatus?: EntryStatus
+}
+
+// 輔助函數：判斷當前狀態是否允許上傳檔案
+function canUploadFiles(status?: EntryStatus): boolean {
+  if (!status) return true // 如果沒有狀態，預設允許
+  return status === 'draft' || status === 'rejected'
+}
+
+// 輔助函數：判斷當前狀態是否允許刪除檔案
+function canDeleteFiles(status?: EntryStatus): boolean {
+  if (!status) return true // 如果沒有狀態，預設允許
+  return status === 'draft' || status === 'rejected'
 }
 
 const EvidenceUpload: React.FC<EvidenceUploadProps> = ({
@@ -21,20 +36,31 @@ const EvidenceUpload: React.FC<EvidenceUploadProps> = ({
   disabled = false,
   maxFiles = 5,
   className = '',
-  kind = 'usage_evidence'
+  kind = 'usage_evidence',
+  currentStatus
 }) => {
   const [uploading, setUploading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [successMessage, setSuccessMessage] = useState<string | null>(null)
   const [thumbnails, setThumbnails] = useState<{ [key: string]: string }>({})
   const [isDragging, setIsDragging] = useState(false)
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState<string | null>(null)
+  const [deletingFileId, setDeletingFileId] = useState<string | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   const handleFileSelect = async (selectedFiles: FileList | null) => {
     if (!selectedFiles || selectedFiles.length === 0) return
 
-    if (selectedFiles.length > maxFiles) {
-      setError(`最多只能上傳 ${maxFiles} 個檔案`)
+    // 檢查當前檔案數是否已達上限
+    if (files.length >= maxFiles) {
+      setError(`已達到最大檔案數量限制 (${maxFiles} 個)，請先刪除一些檔案後再上傳`)
+      return
+    }
+
+    // 檢查上傳後總檔案數是否會超過限制
+    if (files.length + selectedFiles.length > maxFiles) {
+      const remainingSlots = maxFiles - files.length
+      setError(`最多只能上傳 ${maxFiles} 個檔案，目前已有 ${files.length} 個檔案，還可以上傳 ${remainingSlots} 個檔案`)
       return
     }
 
@@ -43,49 +69,44 @@ const EvidenceUpload: React.FC<EvidenceUploadProps> = ({
     setIsDragging(false)  // 重置拖拉狀態
 
     try {
-      // 先刪除現有的舊檔案（實現覆蓋功能）
-      if (files.length > 0) {
-        const deletePromises = files.map(async (file) => {
-          try {
-            await deleteEvidence(file.id)
-          } catch (error) {
-            console.warn(`Failed to delete file ${file.id}:`, error)
-          }
-        })
-        await Promise.all(deletePromises)
-        
-        // 清理縮圖
-        setThumbnails(prev => {
-          const newThumbnails = { ...prev }
-          files.forEach(file => {
-            delete newThumbnails[file.id]
-          })
-          return newThumbnails
-        })
-      }
-
-      // 上傳新檔案
+      // 直接上傳新檔案，不刪除現有檔案（允許多檔案並存）
       const uploadPromises = Array.from(selectedFiles).map(async (file) => {
+        // 根據 kind 或 month 決定檔案類別
+        const category = kind === 'msds' ? 'msds' : 'usage_evidence'
+        
         return await uploadEvidence(file, {
           pageKey,
-          year: new Date().getFullYear()
+          year: new Date().getFullYear(),
+          category,
+          month: category === 'usage_evidence' ? month : undefined,
+          allowOverwrite: false  // 不覆蓋現有檔案
         })
       })
 
-      const uploadedFiles = await Promise.all(uploadPromises)
-      // 完全替換檔案列表（而不是添加到現有檔案）
-      onFilesChange(uploadedFiles)
+      await Promise.all(uploadPromises)
+      
+      // 上傳成功後重新載入對應類別的檔案列表
+      // 這樣可以確保檔案有正確的 status 屬性，並且不會污染其他類別
+      let updatedFilesList: EvidenceFile[]
+      if (kind === 'msds') {
+        updatedFilesList = await listMSDSFiles(pageKey)
+      } else if (month) {
+        updatedFilesList = await listUsageEvidenceFiles(pageKey, month)
+      } else {
+        // 回退到舊方法，但這不應該發生
+        updatedFilesList = []
+      }
+      
+      onFilesChange(updatedFilesList)
 
       // 顯示成功訊息
-      const message = files.length > 0 
-        ? `成功覆蓋並上傳 ${uploadedFiles.length} 個檔案`
-        : `成功上傳 ${uploadedFiles.length} 個檔案`
+      const message = `成功上傳 ${selectedFiles.length} 個檔案`
       setSuccessMessage(message)
       setTimeout(() => setSuccessMessage(null), 3000)
 
       // 為圖片檔案生成縮圖
-      uploadedFiles.forEach(file => {
-        if (file.mime_type.startsWith('image/')) {
+      updatedFilesList.forEach(file => {
+        if (file.mime_type.startsWith('image/') && !thumbnails[file.id]) {
           generateThumbnail(file)
         }
       })
@@ -136,6 +157,7 @@ const EvidenceUpload: React.FC<EvidenceUploadProps> = ({
   }
 
   const handleRemoveFile = async (fileId: string) => {
+    setDeletingFileId(fileId)
     try {
       await deleteEvidence(fileId)
       onFilesChange(files.filter(f => f.id !== fileId))
@@ -146,6 +168,10 @@ const EvidenceUpload: React.FC<EvidenceUploadProps> = ({
         delete newThumbnails[fileId]
         return newThumbnails
       })
+      
+      // 顯示成功訊息
+      setSuccessMessage('檔案已成功刪除')
+      setTimeout(() => setSuccessMessage(null), 3000)
     } catch (error) {
       console.error('Delete error:', error)
       let errorMessage = error instanceof Error ? error.message : '刪除失敗'
@@ -155,7 +181,18 @@ const EvidenceUpload: React.FC<EvidenceUploadProps> = ({
       }
       
       setError(errorMessage)
+    } finally {
+      setDeletingFileId(null)
+      setShowDeleteConfirm(null)
     }
+  }
+  
+  const confirmDelete = (fileId: string) => {
+    setShowDeleteConfirm(fileId)
+  }
+  
+  const cancelDelete = () => {
+    setShowDeleteConfirm(null)
   }
 
   const generateThumbnail = async (file: EvidenceFile) => {
@@ -224,13 +261,19 @@ const EvidenceUpload: React.FC<EvidenceUploadProps> = ({
     })
   })
 
+  // 檢查是否已達到檔案上限和狀態限制
+  const isAtMaxCapacity = files.length >= maxFiles
+  const isStatusUploadDisabled = !canUploadFiles(currentStatus)
+  const isStatusDeleteDisabled = !canDeleteFiles(currentStatus)
+  const isUploadDisabled = disabled || uploading || isAtMaxCapacity || isStatusUploadDisabled
+
   return (
     <div className={`space-y-3 ${className}`}>
       {/* 上傳區域 */}
       <div
         className={`
           relative border-2 border-dashed rounded-lg p-4 text-center transition-all duration-200
-          ${disabled || uploading
+          ${isUploadDisabled
             ? 'border-gray-200 bg-gray-50 cursor-not-allowed'
             : isDragging
             ? 'border-blue-500 bg-blue-50 scale-105 shadow-lg'
@@ -238,13 +281,13 @@ const EvidenceUpload: React.FC<EvidenceUploadProps> = ({
           }
         `}
         onClick={() => {
-          if (!disabled && !uploading && fileInputRef.current) {
+          if (!isUploadDisabled && fileInputRef.current) {
             fileInputRef.current.click()
           }
         }}
-        onDragOver={handleDragOver}
-        onDragLeave={handleDragLeave}
-        onDrop={handleDrop}
+        onDragOver={isUploadDisabled ? undefined : handleDragOver}
+        onDragLeave={isUploadDisabled ? undefined : handleDragLeave}
+        onDrop={isUploadDisabled ? undefined : handleDrop}
       >
         <input
           ref={fileInputRef}
@@ -253,7 +296,7 @@ const EvidenceUpload: React.FC<EvidenceUploadProps> = ({
           accept="image/*,application/pdf"
           onChange={(e) => handleFileSelect(e.target.files)}
           className="hidden"
-          disabled={disabled || uploading}
+          disabled={isUploadDisabled}
         />
 
         {uploading ? (
@@ -268,14 +311,19 @@ const EvidenceUpload: React.FC<EvidenceUploadProps> = ({
               isDragging ? 'text-blue-600 scale-125' : 'text-gray-500'
             }`} />
             <div className="text-sm">
-              <span className={disabled ? 'text-gray-400' : isDragging ? 'text-blue-700 font-semibold' : 'text-blue-600 font-medium'}>
-                {isDragging ? '拖放檔案到這裡' : '點擊或拖放檔案上傳'}
+              <span className={disabled || isStatusUploadDisabled ? 'text-gray-400' : isDragging ? 'text-blue-700 font-semibold' : 'text-blue-600 font-medium'}>
+                {isStatusUploadDisabled 
+                  ? `${currentStatus === 'submitted' ? '已提交' : currentStatus === 'approved' ? '已核准' : ''}狀態下無法上傳檔案`
+                  : isDragging ? '拖放檔案到這裡' : '點擊或拖放檔案上傳'
+                }
               </span>
-              <p className={`text-xs mt-1 transition-colors ${
-                isDragging ? 'text-blue-600' : 'text-gray-500'
-              }`}>
-                支援 JPG、PNG、WebP、HEIC、PDF 檔案，最大 10MB
-              </p>
+              {!isStatusUploadDisabled && (
+                <p className={`text-xs mt-1 transition-colors ${
+                  isDragging ? 'text-blue-600' : 'text-gray-500'
+                }`}>
+                  支援 JPG、PNG、WebP、HEIC、PDF 檔案，最大 10MB
+                </p>
+              )}
             </div>
           </div>
         )}
@@ -313,7 +361,7 @@ const EvidenceUpload: React.FC<EvidenceUploadProps> = ({
       {files.length > 0 && (
         <div className="space-y-2">
           <div className="text-sm font-medium text-gray-700">
-            還可上傳檔案 ({files.length}/{maxFiles})
+            已上傳檔案 ({files.length}/{maxFiles})
           </div>
           {files.map((file) => (
             <div
@@ -330,36 +378,104 @@ const EvidenceUpload: React.FC<EvidenceUploadProps> = ({
                     {formatFileSize(file.file_size)}
                   </div>
                 </div>
-                <div className="flex items-center space-x-1">
-                  {file.status === 'submitted' ? (
-                    <CheckCircle className="h-4 w-4 text-green-500" />
-                  ) : (
-                    <File className="h-4 w-4 text-blue-500" />
-                  )}
-                  <span className="text-xs text-gray-500">
-                    {file.status === 'submitted' ? '已提交' : '草稿'}
-                  </span>
-                </div>
               </div>
               
-              {file.status === 'draft' && (
-                <button
-                  onClick={() => handleRemoveFile(file.id)}
-                  className="ml-2 p-1 text-gray-400 hover:text-red-500 transition-colors"
-                  title="刪除檔案"
-                >
-                  <X className="h-4 w-4" />
-                </button>
-              )}
+              <button
+                onClick={() => {
+                  if (isStatusDeleteDisabled) {
+                    setError(`${currentStatus === 'submitted' ? '已提交' : currentStatus === 'approved' ? '已核准' : ''}狀態下無法刪除檔案`)
+                    setTimeout(() => setError(null), 3000)
+                  } else if (file.status === 'draft') {
+                    confirmDelete(file.id)
+                  } else {
+                    setError('只能刪除草稿狀態的檔案')
+                    setTimeout(() => setError(null), 3000)
+                  }
+                }}
+                disabled={deletingFileId === file.id || isStatusDeleteDisabled}
+                className={`ml-3 flex items-center space-x-1 px-2 py-1 text-xs font-medium rounded border transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
+                  (file.status === 'draft' && !isStatusDeleteDisabled)
+                    ? 'border-red-600 text-red-600 hover:bg-red-600 hover:text-white'
+                    : 'border-gray-300 text-gray-400 cursor-not-allowed'
+                }`}
+                title={
+                  isStatusDeleteDisabled 
+                    ? `${currentStatus === 'submitted' ? '已提交' : currentStatus === 'approved' ? '已核准' : ''}狀態下無法刪除檔案`
+                    : file.status === 'draft' ? '刪除檔案' : '已提交的檔案無法刪除'
+                }
+              >
+                {deletingFileId === file.id ? (
+                  <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-red-600"></div>
+                ) : (
+                  <Trash2 className="h-3 w-3" />
+                )}
+                <span>{deletingFileId === file.id ? '刪除中' : '刪除'}</span>
+              </button>
             </div>
           ))}
         </div>
       )}
 
-      {/* 檔案數量提示 */}
+      {/* 檔案數量提示和狀態提示 */}
       {files.length >= maxFiles && (
         <div className="text-xs text-amber-600 bg-amber-50 border border-amber-200 rounded p-2">
           已達到最大檔案數量限制 ({maxFiles} 個)
+        </div>
+      )}
+      
+      {isStatusUploadDisabled && (
+        <div className="text-xs text-blue-600 bg-blue-50 border border-blue-200 rounded p-2">
+          {currentStatus === 'submitted' && '已提交狀態：無法上傳或刪除檔案，如需修改請切換至草稿狀態'}
+          {currentStatus === 'approved' && '已核准狀態：唯讀模式，無法進行任何修改'}
+          {currentStatus === 'rejected' && '已駁回狀態：可重新編輯和上傳檔案'}
+        </div>
+      )}
+      
+      {/* 刪除確認對話框 */}
+      {showDeleteConfirm && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50 p-4">
+          <div className="bg-white rounded-lg shadow-lg max-w-md w-full">
+            <div className="p-6">
+              <div className="flex items-start space-x-3 mb-4">
+                <div className="w-10 h-10 rounded-full bg-red-100 flex items-center justify-center flex-shrink-0">
+                  <AlertCircle className="h-5 w-5 text-red-600" />
+                </div>
+                <div className="flex-1">
+                  <h3 className="text-lg font-semibold text-gray-900 mb-2">
+                    確認刪除檔案
+                  </h3>
+                  <p className="text-sm text-gray-500">
+                    確定要刪除此檔案嗎？此操作無法復原。
+                  </p>
+                </div>
+              </div>
+              <div className="flex justify-end space-x-3">
+                <button
+                  onClick={cancelDelete}
+                  className="px-4 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50 transition-colors font-medium"
+                >
+                  取消
+                </button>
+                <button
+                  onClick={() => handleRemoveFile(showDeleteConfirm)}
+                  disabled={deletingFileId !== null}
+                  className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors font-medium disabled:opacity-50 disabled:cursor-not-allowed flex items-center space-x-2"
+                >
+                  {deletingFileId === showDeleteConfirm ? (
+                    <>
+                      <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
+                      <span>刪除中...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Trash2 className="h-4 w-4" />
+                      <span>確定刪除</span>
+                    </>
+                  )}
+                </button>
+              </div>
+            </div>
+          </div>
         </div>
       )}
     </div>

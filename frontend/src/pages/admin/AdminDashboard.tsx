@@ -4,9 +4,11 @@ import UsersTab from './UsersTab'
 import UserEntriesTab from './UserEntriesTab'
 import AllEntriesTab from './AllEntriesTab'
 import CreateUserTab from './CreateUserTab'
+import EnhancedSubmissionManagement from './EnhancedSubmissionManagement'
+import UserSubmissionDetail from './UserSubmissionDetail'
 import { fetchUserCounters, UserCounters } from '../../api/adminMetrics'
 
-type TabType = 'users' | 'user-entries' | 'all-entries' | 'create-user'
+type TabType = 'users' | 'user-entries' | 'all-entries' | 'submissions' | 'user-submissions' | 'create-user'
 
 const AdminDashboard = () => {
   const [activeTab, setActiveTab] = useState<TabType>('users')
@@ -64,9 +66,15 @@ const AdminDashboard = () => {
       description: '管理系統使用者'
     },
     {
-      id: 'all-entries' as TabType,
-      label: '全部填報',
+      id: 'submissions' as TabType,
+      label: '填報審核',
       icon: <FileText className="w-4 h-4" />,
+      description: '檢視和審核填報資料'
+    },
+    {
+      id: 'all-entries' as TabType,
+      label: '填報總覽',
+      icon: <Activity className="w-4 h-4" />,
       description: '查看所有填報記錄'
     },
     {
@@ -83,10 +91,22 @@ const AdminDashboard = () => {
     setActiveTab('user-entries')
   }
 
+  const handleViewUserSubmissions = (userId: string, userName: string) => {
+    setSelectedUserId(userId)
+    setSelectedUserName(userName)
+    setActiveTab('user-submissions')
+  }
+
   const handleBackToUsers = () => {
     setSelectedUserId(null)
     setSelectedUserName('')
     setActiveTab('users')
+  }
+
+  const handleBackToSubmissions = () => {
+    setSelectedUserId(null)
+    setSelectedUserName('')
+    setActiveTab('submissions')
   }
 
   const renderTabContent = () => {
@@ -101,8 +121,18 @@ const AdminDashboard = () => {
             onBack={handleBackToUsers}
           />
         )
+      case 'submissions':
+        return <EnhancedSubmissionManagement onViewUserSubmissions={handleViewUserSubmissions} />
+      case 'user-submissions':
+        return (
+          <UserSubmissionDetail
+            userId={selectedUserId!}
+            userName={selectedUserName}
+            onBack={handleBackToSubmissions}
+          />
+        )
       case 'all-entries':
-        return <AllEntriesTab />
+        return <AllEntriesTab onViewUserSubmissions={handleViewUserEntries} />
       case 'create-user':
         return <CreateUserTab />
       default:
@@ -254,6 +284,16 @@ const AdminDashboard = () => {
               >
                 <FileText className="w-4 h-4" />
                 <span>{selectedUserName} 的填報</span>
+              </button>
+            )}
+            
+            {/* 動態的用戶審核分頁 */}
+            {activeTab === 'user-submissions' && selectedUserName && (
+              <button
+                className="flex items-center space-x-2 py-4 px-1 border-b-2 border-blue-500 text-blue-600 font-medium text-sm"
+              >
+                <FileText className="w-4 h-4" />
+                <span>{selectedUserName} 的審核</span>
               </button>
             )}
           </nav>

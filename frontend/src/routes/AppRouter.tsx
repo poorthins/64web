@@ -20,6 +20,11 @@ import AdminPage from '../pages/AdminPage'
 import UserDetailPage from '../pages/admin/UserDetailPage'
 import AdminRoute from '../components/AdminRoute'
 import UserRoute from '../components/UserRoute'
+import TestUserCheck from '../pages/TestUserCheck'
+import TestReviewAPI from '../pages/TestReviewAPI'
+import FixUserRoles from '../pages/FixUserRoles'
+import RoleBasedHomePage from '../components/RoleBasedHomePage'
+import '../utils/roleDebug' // 載入診斷工具
 
 function AppRouter() {
   return (
@@ -31,12 +36,8 @@ function AppRouter() {
             <Route path="/login" element={<LoginSimple />} />
             
             <Route path="/app" element={<ProtectedLayout />}>
-              {/* 根據用戶角色決定首頁內容 */}
-              <Route index element={
-                <AdminRoute fallback={<DashboardPage />}>
-                  <AdminPage />
-                </AdminRoute>
-              } />
+              {/* 根據用戶角色決定首頁內容 - 修復死循環問題 */}
+              <Route index element={<RoleBasedHomePage />} />
               
               {/* 管理員專用頁面 */}
               <Route path="admin" element={
@@ -107,6 +108,9 @@ function AppRouter() {
                 </UserRoute>
               } />
               <Route path="ping" element={<PingPage />} />
+              <Route path="test-users" element={<TestUserCheck />} />
+              <Route path="test-review-api" element={<TestReviewAPI />} />
+              <Route path="fix-user-roles" element={<FixUserRoles />} />
             </Route>
           </Routes>
         </NavigationProvider>

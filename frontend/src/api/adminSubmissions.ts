@@ -1,0 +1,582 @@
+import { supabase } from '../lib/supabaseClient'
+import { validateAuth, handleAPIError } from '../utils/authHelpers'
+
+export interface Submission {
+  id: string
+  period_start: string
+  period_end: string
+  category: string
+  unit: string
+  amount: number
+  notes: string
+  created_at: string
+  updated_at: string
+  owner_id: string
+  profiles: {
+    id: string
+    display_name: string
+    email?: string
+  } | null
+  entry_reviews: ReviewStatus[]
+}
+
+export interface ReviewStatus {
+  id: string
+  entry_id: string
+  status: 'pending' | 'approved' | 'needs_fix'
+  note: string
+  reviewed_by: string
+  created_at: string
+  reviewer_profiles: {
+    display_name: string
+  }
+}
+
+export interface UserWithSubmissions {
+  id: string
+  display_name: string
+  email?: string
+  is_active: boolean
+  role: string
+  submission_count: number
+  latest_submission_date?: string
+  pending_reviews: number
+  approved_reviews: number
+  needs_fix_reviews: number
+}
+
+export interface SubmissionStats {
+  total_submissions: number
+  pending_reviews: number
+  approved_reviews: number
+  needs_fix_reviews: number
+  total_users_with_submissions: number
+}
+
+/**
+ * 取得所有使用者及其填報統計
+ */
+export async function getAllUsersWithSubmissions(): Promise<UserWithSubmissions[]> {
+  try {
+    const authResult = await validateAuth()
+    if (authResult.error) throw authResult.error
+
+    // 取得所有用戶基本資料
+    const { data: profiles, error: profilesError } = await supabase
+      .from('profiles')
+      .select('id, display_name, email, is_active, role')
+
+    if (profilesError) {
+      throw handleAPIError(profilesError, '無法取得用戶列表')
+    }
+
+    // 取得所有填報記錄統計
+    const { data: submissions, error: submissionsError } = await supabase
+      .from('energy_entries')
+      .select(`
+        id,
+        owner_id,
+        created_at,
+        entry_reviews (
+          status
+        )
+      `)
+
+    if (submissionsError) {
+      throw handleAPIError(submissionsError, '無法取得填報統計')
+    }
+
+    // 建立用戶填報統計映射
+    const userSubmissionStats = new Map<string, {
+      count: number
+      latestDate?: string
+      pending: number
+      approved: number
+      needsFix: number
+    }>()
+
+    submissions?.forEach(submission => {
+      if (!submission.owner_id) return
+
+      const existing = userSubmissionStats.get(submission.owner_id) || {
+        count: 0,
+        pending: 0,
+        approved: 0,
+        needsFix: 0
+      }
+
+      existing.count++
+      
+      // 更新最新填報日期
+      if (!existing.latestDate || submission.created_at > existing.latestDate) {
+        existing.latestDate = submission.created_at
+      }
+
+      // 統計審核狀態
+      if (submission.entry_reviews && submission.entry_reviews.length > 0) {
+        // 取最新的審核狀態
+        const latestReview = submission.entry_reviews[submission.entry_reviews.length - 1]
+        switch (latestReview.status) {
+          case 'approved':
+            existing.approved++
+            break
+          case 'needs_fix':
+            existing.needsFix++
+            break
+          default:
+            existing.pending++
+        }
+      } else {
+        existing.pending++
+      }
+
+      userSubmissionStats.set(submission.owner_id, existing)
+    })
+
+    // 結合用戶資料與統計
+    const result: UserWithSubmissions[] = profiles?.map(profile => {
+      const stats = userSubmissionStats.get(profile.id) || {
+        count: 0,
+        pending: 0,
+        approved: 0,
+        needsFix: 0
+      }
+
+      return {
+        id: profile.id,
+        display_name: profile.display_name || '',
+        email: profile.email,
+        is_active: profile.is_active ?? true,
+        role: profile.role || 'user',
+        submission_count: stats.count,
+        latest_submission_date: stats.latestDate,
+        pending_reviews: stats.pending,
+        approved_reviews: stats.approved,
+        needs_fix_reviews: stats.needsFix
+      }
+    }) || []
+
+    return result.sort((a, b) => b.submission_count - a.submission_count)
+  } catch (error) {
+    console.error('Error in getAllUsersWithSubmissions:', error)
+    if (error instanceof Error) {
+      throw error
+    }
+    throw new Error('取得用戶填報列表時發生未知錯誤')
+  }
+}
+
+/**
+ * 取得特定用戶的所有填報記錄
+ */
+export async function getUserSubmissions(userId: string): Promise<Submission[]> {
+  try {
+    const authResult = await validateAuth()
+    if (authResult.error) throw authResult.error
+
+    const { data, error } = await supabase
+      .from('energy_entries')
+      .select(`
+        id,
+        period_start,
+        period_end,
+        category,
+        unit,
+        amount,
+        notes,
+        created_at,
+        updated_at,
+        owner_id,
+        profiles:owner_id (
+          id,
+          display_name,
+          email
+        ),
+        entry_reviews (
+          id,
+          entry_id,
+          status,
+          note,
+          reviewed_by,
+          created_at,
+          reviewer_profiles:profiles!entry_reviews_reviewed_by_fkey (
+            display_name
+          )
+        )
+      `)
+      .eq('owner_id', userId)
+      .order('created_at', { ascending: false })
+
+    if (error) {
+      throw handleAPIError(error, '無法取得用戶填報記錄')
+    }
+
+    return (data || []) as unknown as Submission[]
+  } catch (error) {
+    console.error('Error in getUserSubmissions:', error)
+    if (error instanceof Error) {
+      throw error
+    }
+    throw new Error('取得用戶填報記錄時發生未知錯誤')
+  }
+}
+
+/**
+ * 審核填報記錄
+ */
+export async function reviewSubmission(
+  entryId: string,
+  status: 'approved' | 'needs_fix',
+  note: string = ''
+): Promise<void> {
+  try {
+    const authResult = await validateAuth()
+    if (authResult.error) throw authResult.error
+
+    const { error: reviewError } = await supabase
+      .from('entry_reviews')
+      .insert({
+        entry_id: entryId,
+        status,
+        note,
+        reviewed_by: authResult.user?.id
+      })
+
+    if (reviewError) {
+      throw handleAPIError(reviewError, '無法建立審核記錄')
+    }
+
+    // 如果是核准狀態，鎖定該填報項目
+    if (status === 'approved') {
+      const { error: lockError } = await supabase
+        .from('energy_entries')
+        .update({
+          is_locked: true,
+          approved_at: new Date().toISOString(),
+          approved_by: authResult.user?.id
+        })
+        .eq('id', entryId)
+
+      if (lockError) {
+        console.warn('Failed to lock entry after approval:', lockError)
+        // 不拋出錯誤，因為審核記錄已經建立
+      }
+    }
+  } catch (error) {
+    console.error('Error in reviewSubmission:', error)
+    if (error instanceof Error) {
+      throw error
+    }
+    throw new Error('審核填報時發生未知錯誤')
+  }
+}
+
+/**
+ * 取得填報統計資料
+ */
+export async function getSubmissionStats(): Promise<SubmissionStats> {
+  try {
+    const authResult = await validateAuth()
+    if (authResult.error) throw authResult.error
+
+    const { data: submissions, error: submissionsError } = await supabase
+      .from('energy_entries')
+      .select(`
+        id,
+        owner_id,
+        entry_reviews (
+          status
+        )
+      `)
+
+    if (submissionsError) {
+      throw handleAPIError(submissionsError, '無法取得填報統計')
+    }
+
+    let totalSubmissions = 0
+    let pendingReviews = 0
+    let approvedReviews = 0
+    let needsFixReviews = 0
+    const uniqueUsers = new Set<string>()
+
+    submissions?.forEach(submission => {
+      totalSubmissions++
+      if (submission.owner_id) {
+        uniqueUsers.add(submission.owner_id)
+      }
+
+      if (submission.entry_reviews && submission.entry_reviews.length > 0) {
+        const latestReview = submission.entry_reviews[submission.entry_reviews.length - 1]
+        switch (latestReview.status) {
+          case 'approved':
+            approvedReviews++
+            break
+          case 'needs_fix':
+            needsFixReviews++
+            break
+          default:
+            pendingReviews++
+        }
+      } else {
+        pendingReviews++
+      }
+    })
+
+    return {
+      total_submissions: totalSubmissions,
+      pending_reviews: pendingReviews,
+      approved_reviews: approvedReviews,
+      needs_fix_reviews: needsFixReviews,
+      total_users_with_submissions: uniqueUsers.size
+    }
+  } catch (error) {
+    console.error('Error in getSubmissionStats:', error)
+    if (error instanceof Error) {
+      throw error
+    }
+    throw new Error('取得填報統計時發生未知錯誤')
+  }
+}
+
+/**
+ * 批量審核填報記錄
+ */
+export async function bulkReviewSubmissions(
+  entryIds: string[],
+  status: 'approved' | 'needs_fix',
+  note: string = ''
+): Promise<void> {
+  try {
+    const authResult = await validateAuth()
+    if (authResult.error) throw authResult.error
+
+    const reviewRecords = entryIds.map(entryId => ({
+      entry_id: entryId,
+      status,
+      note,
+      reviewed_by: authResult.user?.id
+    }))
+
+    const { error } = await supabase
+      .from('entry_reviews')
+      .insert(reviewRecords)
+
+    if (error) {
+      throw handleAPIError(error, '無法建立批量審核記錄')
+    }
+  } catch (error) {
+    console.error('Error in bulkReviewSubmissions:', error)
+    if (error instanceof Error) {
+      throw error
+    }
+    throw new Error('批量審核填報時發生未知錯誤')
+  }
+}
+
+/**
+ * 鎖定用戶的填報權限（通過後鎖定）
+ */
+export async function lockUserSubmissions(userId: string): Promise<void> {
+  try {
+    const authResult = await validateAuth()
+    if (authResult.error) throw authResult.error
+
+    const { error } = await supabase
+      .from('profiles')
+      .update({
+        submission_locked: true,
+        locked_at: new Date().toISOString(),
+        locked_by: authResult.user?.id
+      })
+      .eq('id', userId)
+
+    if (error) {
+      throw handleAPIError(error, '無法鎖定用戶填報權限')
+    }
+  } catch (error) {
+    console.error('Error in lockUserSubmissions:', error)
+    if (error instanceof Error) {
+      throw error
+    }
+    throw new Error('鎖定用戶填報權限時發生未知錯誤')
+  }
+}
+
+/**
+ * 解鎖用戶的填報權限
+ */
+export async function unlockUserSubmissions(userId: string): Promise<void> {
+  try {
+    const authResult = await validateAuth()
+    if (authResult.error) throw authResult.error
+
+    const { error } = await supabase
+      .from('profiles')
+      .update({
+        submission_locked: false,
+        unlocked_at: new Date().toISOString(),
+        unlocked_by: authResult.user?.id
+      })
+      .eq('id', userId)
+
+    if (error) {
+      throw handleAPIError(error, '無法解鎖用戶填報權限')
+    }
+  } catch (error) {
+    console.error('Error in unlockUserSubmissions:', error)
+    if (error instanceof Error) {
+      throw error
+    }
+    throw new Error('解鎖用戶填報權限時發生未知錯誤')
+  }
+}
+
+/**
+ * 檢查填報項目是否已鎖定
+ */
+export async function checkEntryLockStatus(entryId: string): Promise<boolean> {
+  try {
+    const authResult = await validateAuth()
+    if (authResult.error) throw authResult.error
+
+    const { data, error } = await supabase
+      .from('energy_entries')
+      .select('is_locked')
+      .eq('id', entryId)
+      .single()
+
+    if (error) {
+      throw handleAPIError(error, '無法檢查填報鎖定狀態')
+    }
+
+    return data?.is_locked || false
+  } catch (error) {
+    console.error('Error in checkEntryLockStatus:', error)
+    return false // 發生錯誤時預設為未鎖定
+  }
+}
+
+/**
+ * 批量處理用戶審核完成後的狀態更新
+ */
+export async function completeUserReview(
+  userId: string,
+  lockUser: boolean = true
+): Promise<void> {
+  try {
+    const authResult = await validateAuth()
+    if (authResult.error) throw authResult.error
+
+    // 檢查用戶所有填報是否都已通過
+    const { data: entries, error: entriesError } = await supabase
+      .from('energy_entries')
+      .select(`
+        id,
+        entry_reviews (
+          status,
+          created_at
+        )
+      `)
+      .eq('owner_id', userId)
+
+    if (entriesError) {
+      throw handleAPIError(entriesError, '無法檢查用戶填報狀態')
+    }
+
+    let allApproved = true
+    
+    if (entries) {
+      for (const entry of entries) {
+        if (!entry.entry_reviews || entry.entry_reviews.length === 0) {
+          allApproved = false
+          break
+        }
+
+        // 取得最新審核狀態
+        const latestReview = entry.entry_reviews.sort((a, b) => 
+          new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+        )[0]
+
+        if (latestReview.status !== 'approved') {
+          allApproved = false
+          break
+        }
+      }
+    }
+
+    // 如果所有填報都已通過且要求鎖定用戶，則鎖定
+    if (allApproved && lockUser) {
+      await lockUserSubmissions(userId)
+    }
+  } catch (error) {
+    console.error('Error in completeUserReview:', error)
+    if (error instanceof Error) {
+      throw error
+    }
+    throw new Error('完成用戶審核時發生未知錯誤')
+  }
+}
+
+/**
+ * 取得特定填報項目的詳細資訊（包含檔案）
+ */
+export async function getSubmissionDetail(entryId: string): Promise<Submission & { files?: any[] }> {
+  try {
+    const authResult = await validateAuth()
+    if (authResult.error) throw authResult.error
+
+    const { data: entry, error: entryError } = await supabase
+      .from('energy_entries')
+      .select(`
+        id,
+        period_start,
+        period_end,
+        category,
+        unit,
+        amount,
+        notes,
+        created_at,
+        updated_at,
+        owner_id,
+        is_locked,
+        approved_at,
+        profiles:owner_id (
+          id,
+          display_name,
+          email
+        ),
+        entry_reviews (
+          id,
+          entry_id,
+          status,
+          note,
+          reviewed_by,
+          created_at,
+          reviewer_profiles:profiles!entry_reviews_reviewed_by_fkey (
+            display_name
+          )
+        )
+      `)
+      .eq('id', entryId)
+      .single()
+
+    if (entryError) {
+      throw handleAPIError(entryError, '無法取得填報詳細資訊')
+    }
+
+    // TODO: 查詢關聯的檔案
+    // 這裡應該查詢檔案表來取得相關檔案
+    const files: any[] = []
+
+    return {
+      ...entry,
+      files
+    } as unknown as Submission & { files?: any[] }
+  } catch (error) {
+    console.error('Error in getSubmissionDetail:', error)
+    if (error instanceof Error) {
+      throw error
+    }
+    throw new Error('取得填報詳細資訊時發生未知錯誤')
+  }
+}

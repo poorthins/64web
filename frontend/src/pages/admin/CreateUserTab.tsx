@@ -1,13 +1,16 @@
 import { useState } from 'react'
-import { UserPlus, Mail, User, Building, Key } from 'lucide-react'
-import { supabase } from '../../lib/supabaseClient'
+import { UserPlus, Mail, User, Building, Key, Briefcase, Phone } from 'lucide-react'
+import { createUser, CreateUserData } from '../../api/adminUsers'
 
 const CreateUserTab: React.FC = () => {
-  const [formData, setFormData] = useState({
+  const [formData, setFormData] = useState<CreateUserData>({
     email: '',
-    displayName: '',
+    password: '',
+    display_name: '',
     company: '',
-    password: ''
+    job_title: '',
+    phone: '',
+    role: 'user'
   })
   const [loading, setLoading] = useState(false)
   const [success, setSuccess] = useState<string | null>(null)
@@ -15,48 +18,32 @@ const CreateUserTab: React.FC = () => {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     
-    if (!formData.email || !formData.displayName) {
+    if (!formData.email || !formData.display_name) {
       alert('請填入必填欄位')
       return
+    }
+
+    // 如果沒有提供密碼，使用預設密碼
+    const submitData = {
+      ...formData,
+      password: formData.password || 'TempPassword123!'
     }
 
     try {
       setLoading(true)
       setSuccess(null)
       
-      const { data: { session } } = await supabase.auth.getSession()
+      const newUser = await createUser(submitData)
       
-      if (!session?.access_token) {
-        throw new Error('No access token')
-      }
-
-      const response = await fetch('/api/admin/create-user', {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${session.access_token}`,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          email: formData.email,
-          displayName: formData.displayName,
-          company: formData.company,
-          password: formData.password || 'TempPassword123!'
-        })
-      })
-
-      if (!response.ok) {
-        const error = await response.json()
-        throw new Error(error.error || 'Failed to create user')
-      }
-
-      const data = await response.json()
-      
-      setSuccess(`用戶建立成功！用戶ID: ${data.user_id}`)
+      setSuccess(`用戶建立成功！用戶：${newUser.display_name} (${newUser.email})`)
       setFormData({
         email: '',
-        displayName: '',
+        password: '',
+        display_name: '',
         company: '',
-        password: ''
+        job_title: '',
+        phone: '',
+        role: 'user'
       })
     } catch (error) {
       console.error('Error creating user:', error)
@@ -66,7 +53,7 @@ const CreateUserTab: React.FC = () => {
     }
   }
 
-  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
     const { name, value } = e.target
     setFormData(prev => ({
       ...prev,
@@ -130,7 +117,7 @@ const CreateUserTab: React.FC = () => {
 
           {/* Display Name */}
           <div>
-            <label htmlFor="displayName" className="block text-sm font-medium text-gray-700 mb-2">
+            <label htmlFor="display_name" className="block text-sm font-medium text-gray-700 mb-2">
               顯示名稱 <span className="text-red-500">*</span>
             </label>
             <div className="relative">
@@ -139,9 +126,9 @@ const CreateUserTab: React.FC = () => {
               </div>
               <input
                 type="text"
-                id="displayName"
-                name="displayName"
-                value={formData.displayName}
+                id="display_name"
+                name="display_name"
+                value={formData.display_name}
                 onChange={handleInputChange}
                 required
                 className="block w-full pl-10 pr-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
@@ -150,25 +137,87 @@ const CreateUserTab: React.FC = () => {
             </div>
           </div>
 
-          {/* Company */}
+          {/* Company and Job Title Row */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {/* Company */}
+            <div>
+              <label htmlFor="company" className="block text-sm font-medium text-gray-700 mb-2">
+                公司名稱
+              </label>
+              <div className="relative">
+                <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                  <Building className="h-5 w-5 text-gray-400" />
+                </div>
+                <input
+                  type="text"
+                  id="company"
+                  name="company"
+                  value={formData.company}
+                  onChange={handleInputChange}
+                  className="block w-full pl-10 pr-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  placeholder="ABC 公司"
+                />
+              </div>
+            </div>
+
+            {/* Job Title */}
+            <div>
+              <label htmlFor="job_title" className="block text-sm font-medium text-gray-700 mb-2">
+                職稱
+              </label>
+              <div className="relative">
+                <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                  <Briefcase className="h-5 w-5 text-gray-400" />
+                </div>
+                <input
+                  type="text"
+                  id="job_title"
+                  name="job_title"
+                  value={formData.job_title}
+                  onChange={handleInputChange}
+                  className="block w-full pl-10 pr-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  placeholder="經理"
+                />
+              </div>
+            </div>
+          </div>
+
+          {/* Phone */}
           <div>
-            <label htmlFor="company" className="block text-sm font-medium text-gray-700 mb-2">
-              公司名稱
+            <label htmlFor="phone" className="block text-sm font-medium text-gray-700 mb-2">
+              電話號碼
             </label>
             <div className="relative">
               <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                <Building className="h-5 w-5 text-gray-400" />
+                <Phone className="h-5 w-5 text-gray-400" />
               </div>
               <input
-                type="text"
-                id="company"
-                name="company"
-                value={formData.company}
+                type="tel"
+                id="phone"
+                name="phone"
+                value={formData.phone}
                 onChange={handleInputChange}
                 className="block w-full pl-10 pr-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                placeholder="ABC 公司"
+                placeholder="02-1234-5678"
               />
             </div>
+          </div>
+
+          {/* Role */}
+          <div>
+            <label htmlFor="role" className="block text-sm font-medium text-gray-700 mb-2">
+              用戶角色
+            </label>
+            <select
+              id="role"
+              name="role"
+              value={formData.role}
+              onChange={handleInputChange}
+              className="block w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+            >
+              <option value="user">使用者</option>
+              <option value="admin">管理員</option>
+            </select>
           </div>
 
           {/* Password */}
