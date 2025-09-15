@@ -128,7 +128,9 @@
       "Bash(cat:*)",
       "Bash(npm run:*)",
       "Bash(git checkout:*)",
-      "Bash(kill:*)"
+      "Bash(kill:*)",
+      "Bash(node:*)",
+      "Bash(awk:*)"
     ],
     "deny": [],
     "ask": []

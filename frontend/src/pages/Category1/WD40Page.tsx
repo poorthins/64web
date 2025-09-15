@@ -14,7 +14,6 @@ import { supabase } from '../../lib/supabaseClient'
 import { designTokens } from '../../utils/designTokens'
 import { debugRLSOperation, diagnoseAuthState } from '../../utils/authDiagnostics'
 import { logDetailedAuthStatus } from '../../utils/authHelpers'
-import EvidenceFileManager, { FileManagerData } from '../../components/common/EvidenceFileManager'
 
 
 // 自定義 debounce 函式
@@ -45,6 +44,7 @@ const WD40Page = () => {
   const [currentEntryId, setCurrentEntryId] = useState<string | null>(null)
   const [initialStatus, setInitialStatus] = useState<EntryStatus>('submitted')
   const [toast, setToast] = useState<{ message: string; type: ToastType } | null>(null)
+  const [existingEntry, setExistingEntry] = useState<any>(null)
   
   // 前端狀態管理 Hook
   const frontendStatus = useFrontendStatus({
@@ -79,7 +79,6 @@ const WD40Page = () => {
       files: []
     }))
   )
-  const [fileManagerData, setFileManagerData] = useState<FileManagerData | null>(null)
 
   const pageKey = 'wd40'
   
@@ -142,9 +141,18 @@ const WD40Page = () => {
           msdsFilesCount: msdsFiles?.length || 0
         })
 
-        // 如果有已提交記錄
-        if (existingEntry && existingEntry.status !== 'draft') {
-          setHasSubmittedBefore(true)
+        // 如果有現有記錄，載入資料
+        if (existingEntry) {
+          console.log('✅ [WD40] Loading existing entry:', {
+            id: existingEntry.id,
+            status: existingEntry.status,
+            hasPayload: !!existingEntry.payload,
+            monthlyKeys: Object.keys(existingEntry.payload?.monthly || {})
+          })
+
+          setExistingEntry(existingEntry)
+          // 只有非草稿狀態才算真正提交過
+          setHasSubmittedBefore(existingEntry.status !== 'draft')
           setCurrentEntryId(existingEntry.id)
           setInitialStatus(existingEntry.status as EntryStatus)
 
@@ -190,7 +198,7 @@ const WD40Page = () => {
             })
 
             // 診斷資料庫內容
-            await debugDatabaseContent(existingEntry.id)
+            await debugDatabaseContent()
 
             // 載入已關聯的檔案
             try {
@@ -200,56 +208,44 @@ const WD40Page = () => {
                 files: entryFiles.map(f => ({
                   id: f.id,
                   name: f.file_name,
-                  path: f.file_path,
+                  month: f.month,
+                  page_key: f.page_key,
                   entry_id: f.entry_id
                 }))
               })
-              
-              // 從檔案路徑分類檔案
-              const msdsEntryFiles = entryFiles.filter(f => f.file_path.includes('/msds/'))
-              const monthlyEntryFiles = entryFiles.filter(f => f.file_path.includes('/usage_evidence/'))
-              
-              console.log('📋 [WD40] File classification:', {
+
+              // 基於資料庫欄位分類檔案（新方法）
+              const msdsEntryFiles = entryFiles.filter(f => !f.month) // month = null 表示 MSDS
+              const monthlyEntryFiles = entryFiles.filter(f => f.month && f.month >= 1 && f.month <= 12)
+
+              console.log('📋 [WD40] File classification (database-based):', {
                 msdsCount: msdsEntryFiles.length,
                 monthlyCount: monthlyEntryFiles.length,
-                msdsPaths: msdsEntryFiles.map(f => f.file_path),
-                monthlyPaths: monthlyEntryFiles.map(f => f.file_path)
+                msdsFiles: msdsEntryFiles.map(f => ({ id: f.id, name: f.file_name, month: f.month })),
+                monthlyFiles: monthlyEntryFiles.map(f => ({ id: f.id, name: f.file_name, month: f.month }))
               })
-              
+
               // 設置 MSDS 檔案
-              const allMsdsFiles = [...msdsFiles, ...msdsEntryFiles]
-              setMsdsFiles(allMsdsFiles)
-              console.log('📋 [WD40] Total MSDS files after merge:', allMsdsFiles.length)
-              
+              setMsdsFiles(msdsEntryFiles)
+              console.log('📋 [WD40] Set MSDS files (database-based):', msdsEntryFiles.length)
+
               // 分配月份檔案到對應月份
               const updatedMonthlyData = restoredMonthlyData.map((data, index) => {
                 const month = index + 1
-                const monthFiles = monthlyEntryFiles.filter(file => {
-                  // 從檔案路徑提取月份：/usage_evidence/{month}/
-                  const monthMatch = file.file_path.match(/\/usage_evidence\/(\d+)\//)
-                  const extractedMonth = monthMatch ? parseInt(monthMatch[1]) : null
-                  console.log(`📅 [WD40] File ${file.file_name} path analysis:`, {
-                    path: file.file_path,
-                    monthMatch: monthMatch?.[0],
-                    extractedMonth,
-                    targetMonth: month,
-                    matches: extractedMonth === month
-                  })
-                  return extractedMonth === month
-                })
-                
+                const monthFiles = monthlyEntryFiles.filter(file => file.month === month)
+
                 if (monthFiles.length > 0) {
-                  console.log(`📅 [WD40] Month ${month} assigned ${monthFiles.length} files:`, 
-                    monthFiles.map(f => f.file_name))
+                  console.log(`📅 [WD40] Month ${month} assigned ${monthFiles.length} files:`,
+                    monthFiles.map(f => `${f.file_name} (month: ${f.month})`))
                 }
-                
+
                 return {
                   ...data,
                   files: monthFiles
                 }
               })
-              
-              console.log('📅 [WD40] Monthly file distribution:', 
+
+              console.log('📅 [WD40] Monthly file distribution (database-based):',
                 updatedMonthlyData.map((data, i) => `月${i+1}: ${data.files.length}個檔案`).join(', ')
               )
               setMonthlyData(updatedMonthlyData)
@@ -261,6 +257,12 @@ const WD40Page = () => {
           }
         } else {
           // 新記錄處理
+          console.log('📝 [WD40] No existing entry found, creating new record')
+          setExistingEntry(null)
+          setHasSubmittedBefore(false)
+          setCurrentEntryId(null)
+          setInitialStatus('draft' as EntryStatus)
+
           const initialMsdsFiles = msdsFiles || []
           setMsdsFiles(initialMsdsFiles)
 
@@ -936,53 +938,6 @@ const WD40Page = () => {
           </div>
         </div>
 
-        {/* 檔案管理系統 (使用共用元件測試) */}
-        <div
-          className="rounded-lg border p-6"
-          style={{
-            backgroundColor: designTokens.colors.cardBg,
-            borderColor: designTokens.colors.border,
-            boxShadow: designTokens.shadows.sm
-          }}
-        >
-          <div className="mb-6">
-            <h2
-              className="text-xl font-medium mb-2"
-              style={{ color: designTokens.colors.textPrimary }}
-            >
-              🧪 檔案管理系統測試
-            </h2>
-            <div className="bg-amber-50 border border-amber-200 rounded-lg p-3">
-              <p className="text-base text-amber-700">
-                <strong>開發測試：</strong>這是新的共用檔案管理元件，用於測試和驗證檔案載入功能。
-                它會自動載入已關聯的檔案並與現有檔案上傳功能共存。
-              </p>
-            </div>
-          </div>
-
-          <EvidenceFileManager
-            pageKey={pageKey}
-            entryId={currentEntryId}
-            year={year}
-            onFilesChange={setFileManagerData}
-            currentStatus={currentStatus}
-            supportedTypes={['msds', 'usage_evidence']}
-            className="bg-gray-50 p-4 rounded-lg"
-          />
-
-          {/* 調試資訊 */}
-          {fileManagerData && (
-            <div className="mt-4 bg-gray-100 p-3 rounded text-xs">
-              <strong>檔案統計：</strong>
-              <div>MSDS 檔案: {fileManagerData.msds.length} 個</div>
-              <div>月份檔案: {Object.values(fileManagerData.monthly).reduce((sum, files) => sum + files.length, 0)} 個</div>
-              <div>分配情況: {Object.entries(fileManagerData.monthly)
-                .filter(([_, files]) => files.length > 0)
-                .map(([month, files]) => `${month}月:${files.length}個`)
-                .join(', ') || '無'}</div>
-            </div>
-          )}
-        </div>
 
         {/* 底部空間，避免內容被固定底部欄遮擋 */}
         <div className="h-20"></div>

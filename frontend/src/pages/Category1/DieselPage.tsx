@@ -325,7 +325,8 @@ export default function DieselPage() {
   }
 
   return (
-    <div className="min-h-screen bg-green-50">
+    <>
+      <div className="min-h-screen bg-green-50">
       {/* 主要內容區域 */}
       <div className="max-w-4xl mx-auto px-6 py-8 space-y-6">
 
@@ -553,8 +554,8 @@ export default function DieselPage() {
         <div className="h-20"></div>
       </div>
 
-      {/* 統一底部操作欄 */}
-      <BottomActionBar
+        {/* 統一底部操作欄 */}
+        <BottomActionBar
         currentStatus={currentStatus}
         currentEntryId={currentEntryId}
         isUpdating={false}
@@ -565,6 +566,6 @@ export default function DieselPage() {
         onClear={handleClear}
         designTokens={designTokens}
       />
-    </div>
+    </>
   )
 }

@@ -19,7 +19,7 @@ function getCategoryFromPageKey(pageKey: string): string {
 export interface FileMetadata {
   pageKey: string
   year: number
-  category: 'msds' | 'usage_evidence'
+  category: 'msds' | 'usage_evidence' | 'heat_value_evidence'
   month?: number  // 僅用於 usage_evidence，表示月份 (1-12)
 }
 
@@ -36,8 +36,9 @@ export interface EvidenceFile {
   mime_type: string
   file_size: number
   created_at: string
+  month?: number | null  // 新增：月份欄位，NULL 表示 MSDS
+  page_key?: string      // 新增：頁面標識符，也可能從 join 取得
   // Join fields from energy_entries
-  page_key?: string  // Available when joined with energy_entries
   status?: 'draft' | 'submitted' | 'approved' | 'rejected'  // From energy_entries
   period_year?: number  // From energy_entries
 }
@@ -338,7 +339,9 @@ async function uploadEvidenceWithValidation(file: File, meta: FileMetadata & { e
       file_path: uploadData.path,
       file_name: file.name,
       mime_type: resolvedType,
-      file_size: file.size
+      file_size: file.size,
+      page_key: meta.pageKey,
+      month: meta.category === 'usage_evidence' ? meta.month : null
     }
 
     const { data: dbData, error: dbError } = await supabase
@@ -368,8 +371,8 @@ async function uploadEvidenceWithValidation(file: File, meta: FileMetadata & { e
  * 取得指定頁面和類別的草稿檔案清單
  */
 export async function listEvidenceByCategory(
-  pageKey: string, 
-  category: 'msds' | 'usage_evidence',
+  pageKey: string,
+  category: 'msds' | 'usage_evidence' | 'heat_value_evidence',
   month?: number
 ): Promise<EvidenceFile[]> {
   try {
@@ -733,19 +736,33 @@ export async function getEntryFiles(entryId: string): Promise<EvidenceFile[]> {
     if (authResult.error || !authResult.user) {
       throw authResult.error || new Error('使用者未登入')
     }
-    
+
     const { data, error } = await supabase
       .from('entry_files')
       .select('*')
       .eq('entry_id', entryId)
       .order('created_at', { ascending: false })
-    
+
     if (error) {
       throw handleAPIError(error, '取得檔案失敗')
     }
-    
+
+    console.log('📁 [getEntryFiles] Raw data from database:', {
+      entryId,
+      count: data?.length || 0,
+      files: data?.map(f => ({
+        id: f.id,
+        name: f.file_name,
+        month: f.month,
+        page_key: f.page_key,
+        has_month: f.month !== undefined,
+        has_page_key: f.page_key !== undefined
+      })) || []
+    })
+
     return data || []
   } catch (error) {
+    console.error('❌ [getEntryFiles] Error:', error)
     if (error instanceof Error) {
       throw error
     }

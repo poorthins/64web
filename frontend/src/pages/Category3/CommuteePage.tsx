@@ -216,6 +216,7 @@ export default function CommutePage() {
   };
 
   return (
+    <>
     <div className="min-h-screen bg-green-50">
       <div className="max-w-4xl mx-auto px-6 py-8 space-y-6">
 
@@ -494,23 +495,23 @@ export default function CommutePage() {
         <div className="h-20"></div>
       </div>
 
-        {/* 底部操作欄 */}
-        <BottomActionBar
-          currentStatus={currentStatus}
-          currentEntryId={currentEntryId}
-          isUpdating={false}
-          editPermissions={editPermissions}
-          submitting={submitting}
-          onSubmit={handleSubmit}
-          onClear={handleClear}
-          hasAnyData={hasAnyData}
-          designTokens={designTokens}
-        />
+      {/* 底部操作欄 */}
+      <BottomActionBar
+        currentStatus={currentStatus}
+        currentEntryId={currentEntryId}
+        isUpdating={false}
+        editPermissions={editPermissions}
+        submitting={submitting}
+        onSubmit={handleSubmit}
+        onClear={handleClear}
+        hasAnyData={hasAnyData}
+        designTokens={designTokens}
+      />
 
-        {/* 圖片放大 Modal - 用戶上傳的圖片 */}
-        {enlargedImageIndex !== null && (
-          <div className="fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-50">
-            <div className="relative max-w-4xl max-h-screen p-4">
+      {/* 圖片放大 Modal - 用戶上傳的圖片 */}
+      {enlargedImageIndex !== null && (
+        <div className="fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-50">
+          <div className="relative max-w-4xl max-h-screen p-4">
               <img
                 src={previewUrls[enlargedImageIndex]}
                 alt={`放大檢視 - 截圖 ${enlargedImageIndex + 1}`}
@@ -564,10 +565,10 @@ export default function CommutePage() {
           </div>
         )}
 
-        {/* 圖片放大 Modal - 範例圖片 */}
-        {enlargedExampleImage && (
-          <div className="fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-50">
-            <div className="relative max-w-4xl max-h-screen p-4">
+      {/* 圖片放大 Modal - 範例圖片 */}
+      {enlargedExampleImage && (
+        <div className="fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-50">
+          <div className="relative max-w-4xl max-h-screen p-4">
               <img
                 src={enlargedExampleImage}
                 alt="放大檢視 - 範例圖片"
@@ -597,6 +598,6 @@ export default function CommutePage() {
           </div>
         )}
       </div>
-    </div>
+    </>
   );
 }

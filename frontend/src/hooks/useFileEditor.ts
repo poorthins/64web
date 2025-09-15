@@ -107,7 +107,7 @@ export function useFileEditor({ entryId, pageKey, month, fileType = 'usage_evide
           state.pendingDeletes.map(id => {
             // Find the file to get its file_path
             const fileToDelete = state.originalFiles.find(f => f.id === id)
-            return deleteEvidenceFile(id, fileToDelete?.file_path || '')
+            return deleteEvidenceFile(id)
           })
         )
         

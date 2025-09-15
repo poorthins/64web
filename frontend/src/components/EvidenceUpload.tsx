@@ -213,7 +213,7 @@ const EvidenceUpload: React.FC<EvidenceUploadProps> = ({
       const isAssociatedFile = file.entry_id && file.entry_id !== ''
       
       if (isAssociatedFile) {
-        await deleteEvidenceFile(file.id, file.file_path)
+        await deleteEvidenceFile(file.id)
       } else {
         await deleteEvidence(fileId)
       }
@@ -454,14 +454,10 @@ const EvidenceUpload: React.FC<EvidenceUploadProps> = ({
               </div>
               
               <button
-                onClick={() => {
-                  if (confirm('確定要刪除這個檔案嗎？')) {
-                    handleRemoveFile(file.id)
-                  }
-                }}
-                disabled={deletingFileId === file.id}
+                onClick={() => confirmDelete(file.id)}
+                disabled={deletingFileId === file.id || isStatusDeleteDisabled}
                 className="ml-3 flex items-center space-x-1 px-2 py-1 text-xs font-medium rounded border border-red-600 text-red-600 hover:bg-red-600 hover:text-white transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                title="刪除檔案"
+                title={isStatusDeleteDisabled ? "當前狀態下無法刪除檔案" : "刪除檔案"}
               >
                 {deletingFileId === file.id ? (
                   <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-red-600"></div>
@@ -516,7 +512,12 @@ const EvidenceUpload: React.FC<EvidenceUploadProps> = ({
                   取消
                 </button>
                 <button
-                  onClick={() => handleRemoveFile(showDeleteConfirm)}
+                  onClick={() => {
+                    if (showDeleteConfirm) {
+                      handleRemoveFile(showDeleteConfirm)
+                      setShowDeleteConfirm(null)
+                    }
+                  }}
                   disabled={deletingFileId !== null}
                   className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors font-medium disabled:opacity-50 disabled:cursor-not-allowed flex items-center space-x-2"
                 >
