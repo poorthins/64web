@@ -1,5 +1,6 @@
 import { supabase } from '../lib/supabaseClient'
 import { User, Session } from '@supabase/supabase-js'
+import { diagnoseAuthState, conditionalLog, isDiagnosticMode } from './authDiagnostics'
 
 export interface AuthResult {
   user: User | null
@@ -18,13 +19,26 @@ export interface RLSError {
 
 /**
  * 統一的認證檢查函數 - 使用 getSession 確保一致性
+ * 增強版包含詳細診斷功能
  */
 export async function validateAuth(): Promise<AuthResult> {
   try {
+    conditionalLog('🔍 [validateAuth] 開始認證檢查...')
+    
+    // 在診斷模式下進行完整診斷
+    if (isDiagnosticMode()) {
+      const diagnosis = await diagnoseAuthState()
+      conditionalLog('🔍 [validateAuth] 詳細診斷結果:', diagnosis)
+    }
+    
     const { data: { session }, error } = await supabase.auth.getSession()
     
     if (error) {
       console.error('Auth validation error:', error)
+      conditionalLog('❌ [validateAuth] 認證檢查失敗:', {
+        errorMessage: error.message,
+        errorCode: error.code || 'UNKNOWN'
+      })
       return {
         user: null,
         session: null,
@@ -33,6 +47,10 @@ export async function validateAuth(): Promise<AuthResult> {
     }
 
     if (!session?.user) {
+      conditionalLog('❌ [validateAuth] Session 或 User 不存在:', {
+        hasSession: !!session,
+        hasUser: !!session?.user
+      })
       return {
         user: null,
         session: null,
@@ -43,17 +61,32 @@ export async function validateAuth(): Promise<AuthResult> {
     // 驗證 session 是否已過期
     if (session.expires_at && session.expires_at * 1000 < Date.now()) {
       console.warn('Session expired, attempting refresh...')
+      conditionalLog('⏰ [validateAuth] Session 已過期，嘗試刷新:', {
+        expiresAt: new Date(session.expires_at * 1000).toLocaleString(),
+        now: new Date().toLocaleString(),
+        expiredBy: Date.now() - (session.expires_at * 1000)
+      })
       
       // 嘗試刷新 session
       const { data: refreshData, error: refreshError } = await supabase.auth.refreshSession()
       
       if (refreshError || !refreshData.session) {
+        conditionalLog('❌ [validateAuth] Session 刷新失敗:', {
+          refreshError: refreshError?.message,
+          hasNewSession: !!refreshData.session
+        })
         return {
           user: null,
           session: null,
           error: new Error('Session 已過期，請重新登入')
         }
       }
+
+      conditionalLog('✅ [validateAuth] Session 刷新成功:', {
+        newUserId: refreshData.session.user.id,
+        newExpiresAt: refreshData.session.expires_at ? 
+          new Date(refreshData.session.expires_at * 1000).toLocaleString() : 'N/A'
+      })
 
       return {
         user: refreshData.session.user,
@@ -62,6 +95,13 @@ export async function validateAuth(): Promise<AuthResult> {
       }
     }
 
+    conditionalLog('✅ [validateAuth] 認證檢查成功:', {
+      userId: session.user.id,
+      email: session.user.email,
+      expiresAt: session.expires_at ? 
+        new Date(session.expires_at * 1000).toLocaleString() : 'N/A'
+    })
+
     return {
       user: session.user,
       session: session,
@@ -69,6 +109,11 @@ export async function validateAuth(): Promise<AuthResult> {
     }
   } catch (error) {
     console.error('Unexpected error in validateAuth:', error)
+    conditionalLog('💥 [validateAuth] 未預期的錯誤:', {
+      errorType: error?.constructor?.name,
+      errorMessage: error instanceof Error ? error.message : String(error),
+      stack: error instanceof Error ? error.stack : undefined
+    })
     return {
       user: null,
       session: null,
@@ -266,5 +311,57 @@ export async function logAuthStatus(): Promise<void> {
     console.groupEnd()
   } catch (error) {
     console.error('Error logging auth status:', error)
+  }
+}
+
+/**
+ * 詳細認證狀態日誌（增強版）
+ * 包含更全面的診斷資訊
+ */
+export async function logDetailedAuthStatus(): Promise<void> {
+  try {
+    console.group('🔍 詳細認證狀態診斷')
+    
+    // 使用完整診斷功能
+    const diagnosis = await diagnoseAuthState()
+    
+    console.log('📊 認證狀態總覽:', {
+      isAuthenticated: diagnosis.isAuthenticated,
+      hasUser: !!diagnosis.user,
+      hasSession: !!diagnosis.session,
+      hasErrors: !!(diagnosis.userError || diagnosis.sessionError)
+    })
+    
+    if (diagnosis.user) {
+      console.log('👤 用戶資訊:', {
+        id: diagnosis.user.id,
+        email: diagnosis.user.email,
+        emailConfirmed: diagnosis.user.email_confirmed_at ? '已確認' : '未確認',
+        lastSignIn: diagnosis.user.last_sign_in_at || 'N/A'
+      })
+    }
+    
+    if (diagnosis.session) {
+      console.log('🎫 Session 資訊:', {
+        userId: diagnosis.session.user?.id,
+        provider: diagnosis.session.user?.app_metadata?.provider || 'N/A',
+        role: diagnosis.session.user?.role || 'N/A'
+      })
+    }
+    
+    console.log('⏰ Token 狀態:', diagnosis.tokenStatus)
+    console.log('💾 本地儲存狀態:', diagnosis.localStorageStatus)
+    
+    if (diagnosis.userError) {
+      console.error('❌ User 錯誤:', diagnosis.userError)
+    }
+    
+    if (diagnosis.sessionError) {
+      console.error('❌ Session 錯誤:', diagnosis.sessionError)
+    }
+    
+    console.groupEnd()
+  } catch (error) {
+    console.error('Error in detailed auth status logging:', error)
   }
 }

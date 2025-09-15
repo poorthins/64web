@@ -12,9 +12,17 @@ import ReportsPage from '../pages/ReportsPage'
 import WD40Page from '../pages/Category1/WD40Page'
 import AcetylenePage from '../pages/Category1/AcetylenePage'
 import RefrigerantPage from '../pages/Category1/RefrigerantPage'
+import SepticTankPage from '../pages/Category1/SepticTankPage'
+import NaturalGasPage from '../pages/Category1/NaturalGasPage'
+import UreaPage from '../pages/Category1/UreaPage'
+import GasolinePage from '../pages/Category1/GasolinePage'
+import DieselPage from '../pages/Category1/DieselPage'
+import DieselGeneratorPage from '../pages/Category1/DieselGeneratorPage'
+import LPGPage from '../pages/Category1/LPGPage'
+import WeldingRodPage from '../pages/Category1/WeldingRodPage'
+import FireExtinguisherPage from '../pages/Category1/FireExtinguisherPage'
 import ElectricityBillPage from '../pages/Category2/ElectricityBillPage'
 import CommutePage from '../pages/Category3/CommuteePage'
-import SepticTankPage from '../pages/Category1/SepticTankPage'
 import PingPage from '../pages/PingPage'
 import AdminPage from '../pages/AdminPage'
 import UserDetailPage from '../pages/admin/UserDetailPage'
@@ -105,6 +113,42 @@ function AppRouter() {
               <Route path="septictank" element={
                 <UserRoute>
                   <SepticTankPage />
+                </UserRoute>
+              } />
+              <Route path="natural_gas" element={
+                <UserRoute>
+                  <NaturalGasPage />
+                </UserRoute>
+              } />
+              <Route path="urea" element={
+                <UserRoute>
+                  <UreaPage />
+                </UserRoute>
+              } />
+              <Route path="gasoline" element={
+                <UserRoute>
+                  <GasolinePage />
+                </UserRoute>
+              } />
+              <Route path="diesel" element={
+                <UserRoute>
+                  <DieselPage />
+                </UserRoute>
+              } />
+              <Route path="diesel_generator" element={
+                <UserRoute>
+                  <DieselGeneratorPage />
+                </UserRoute>
+              } />
+              <Route path="lpg" element={<LPGPage />} />
+              <Route path="welding_rod" element={
+                <UserRoute>
+                  <WeldingRodPage />
+                </UserRoute>
+              } />
+              <Route path="fire_extinguisher" element={
+                <UserRoute>
+                  <FireExtinguisherPage />
                 </UserRoute>
               } />
               <Route path="ping" element={<PingPage />} />

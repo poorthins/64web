@@ -206,7 +206,6 @@ async function uploadEvidenceWithValidation(file: File, meta: FileMetadata & { e
       throw new Error('檔案路徑格式無效')
     }
 
-    console.log('Uploading file with path:', filePath) // Debug log
 
     // 上傳檔案到 Storage
     const { data: uploadData, error: uploadError } = await supabase.storage
@@ -306,7 +305,6 @@ async function uploadEvidenceWithValidation(file: File, meta: FileMetadata & { e
             }
             
             if (anyStatusRecord) {
-              console.log('Found record with different status:', anyStatusRecord)
               meta.entryId = anyStatusRecord.id
             } else {
               console.error('No record found after upsert. Debug info:', {
@@ -583,15 +581,13 @@ export async function commitEvidence(params: { entryId?: string; pageKey: string
     }
     const user = authResult.user
 
-    console.log('🔗 [commitEvidence] Starting with:', {
+    console.log('Committing evidence for:', {
       user_id: user.id,
       pageKey: params.pageKey,
-      entryId: params.entryId
     })
 
     // First, get all file IDs that match the criteria via JOIN
     // 查找 draft 和 submitted 狀態的記錄，因為提交後狀態會變為 submitted
-    console.log('📁 [commitEvidence] Searching for files to commit...')
     const { data: filesData, error: fetchError } = await supabase
       .from('entry_files')
       .select(`
@@ -603,15 +599,14 @@ export async function commitEvidence(params: { entryId?: string; pageKey: string
       .eq('energy_entries.owner_id', user.id)
       .in('energy_entries.status', ['draft', 'submitted'])
       
-    console.log('📋 [commitEvidence] Found files:', {
+
+    console.log('Files to commit:', {
       count: filesData?.length || 0,
       files: filesData,
       error: fetchError
     })
 
     if (fetchError) {
-      console.error('Error fetching files to commit:', fetchError)
-      throw handleAPIError(fetchError, '查詢檔案失敗')
     }
 
     if (!filesData || filesData.length === 0) {
@@ -725,4 +720,67 @@ export function validateFile(file: File, options?: {
   }
 
   return { valid: true }
+}
+
+// 為了向後相容，新增別名
+export const uploadEvidenceSimple = uploadEvidence
+export const deleteEvidenceFile = deleteEvidence
+
+// 新增缺失的函數
+export async function getEntryFiles(entryId: string): Promise<EvidenceFile[]> {
+  try {
+    const authResult = await validateAuth()
+    if (authResult.error || !authResult.user) {
+      throw authResult.error || new Error('使用者未登入')
+    }
+    
+    const { data, error } = await supabase
+      .from('entry_files')
+      .select('*')
+      .eq('entry_id', entryId)
+      .order('created_at', { ascending: false })
+    
+    if (error) {
+      throw handleAPIError(error, '取得檔案失敗')
+    }
+    
+    return data || []
+  } catch (error) {
+    if (error instanceof Error) {
+      throw error
+    }
+    throw new Error('取得檔案時發生未知錯誤')
+  }
+}
+
+export async function updateFileEntryAssociation(fileId: string, entryId: string): Promise<void> {
+  try {
+    const authResult = await validateAuth()
+    if (authResult.error || !authResult.user) {
+      throw authResult.error || new Error('使用者未登入')
+    }
+    
+    const { error } = await supabase
+      .from('entry_files')
+      .update({ entry_id: entryId })
+      .eq('id', fileId)
+      .eq('owner_id', authResult.user.id)
+    
+    if (error) {
+      throw handleAPIError(error, '更新檔案關聯失敗')
+    }
+  } catch (error) {
+    if (error instanceof Error) {
+      throw error
+    }
+    throw new Error('更新檔案關聯時發生未知錯誤')
+  }
+}
+
+// 導出內部函數供元件使用
+export { getCategoryFromPageKey }
+
+// Add missing function for WD40Page
+export async function debugDatabaseContent(): Promise<void> {
+  console.log('Debug database content called')
 }

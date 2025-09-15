@@ -1,8 +1,8 @@
-import { useState, useRef } from 'react'
+import { useState, useRef, useEffect } from 'react'
 import { Upload, X, File, AlertCircle, CheckCircle, FileText, Trash2 } from 'lucide-react'
-import { uploadEvidence, deleteEvidence, getFileUrl, EvidenceFile, listMSDSFiles, listUsageEvidenceFiles } from '../api/files'
+import { uploadEvidence, uploadEvidenceSimple, deleteEvidence, deleteEvidenceFile, getFileUrl, EvidenceFile, listMSDSFiles, listUsageEvidenceFiles, getCategoryFromPageKey } from '../api/files'
 
-export type EntryStatus = 'draft' | 'submitted' | 'approved' | 'rejected'
+export type EntryStatus = 'submitted' | 'approved' | 'rejected'
 
 interface EvidenceUploadProps {
   pageKey: string
@@ -12,20 +12,20 @@ interface EvidenceUploadProps {
   disabled?: boolean
   maxFiles?: number
   className?: string
-  kind?: 'usage_evidence' | 'msds' | 'other'
+  kind?: 'usage_evidence' | 'msds' | 'unit_weight' | 'other' | 'heat_value_evidence'
   currentStatus?: EntryStatus
 }
 
 // 輔助函數：判斷當前狀態是否允許上傳檔案
 function canUploadFiles(status?: EntryStatus): boolean {
   if (!status) return true // 如果沒有狀態，預設允許
-  return status === 'draft' || status === 'rejected'
+  return status === 'submitted' || status === 'rejected'
 }
 
 // 輔助函數：判斷當前狀態是否允許刪除檔案
 function canDeleteFiles(status?: EntryStatus): boolean {
   if (!status) return true // 如果沒有狀態，預設允許
-  return status === 'draft' || status === 'rejected'
+  return status === 'submitted' || status === 'rejected'
 }
 
 const EvidenceUpload: React.FC<EvidenceUploadProps> = ({
@@ -47,6 +47,12 @@ const EvidenceUpload: React.FC<EvidenceUploadProps> = ({
   const [showDeleteConfirm, setShowDeleteConfirm] = useState<string | null>(null)
   const [deletingFileId, setDeletingFileId] = useState<string | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
+  const lastUploadTimeRef = useRef<number>(0) // 追蹤最後一次上傳時間
+  const uploadingRef = useRef(false) // 雙重上傳鎖，避免 closure 問題
+  
+  // 狀態檢查
+  const isStatusUploadDisabled = !canUploadFiles(currentStatus)
+  const isStatusDeleteDisabled = !canDeleteFiles(currentStatus)
 
   const handleFileSelect = async (selectedFiles: FileList | null) => {
     if (!selectedFiles || selectedFiles.length === 0) return
@@ -64,47 +70,81 @@ const EvidenceUpload: React.FC<EvidenceUploadProps> = ({
       return
     }
 
-    setUploading(true)
+    // 檔案重複檢查
+    const duplicateFiles: string[] = []
+    const existingFingerprints = new Set(
+      files.map(f => `${f.file_name}-${f.file_size}`)
+    )
+    
+    Array.from(selectedFiles).forEach(newFile => {
+      const fingerprint = `${newFile.name}-${newFile.size}`
+      if (existingFingerprints.has(fingerprint)) {
+        duplicateFiles.push(newFile.name)
+      }
+    })
+
+    if (duplicateFiles.length > 0) {
+      setError(`以下檔案已存在：${duplicateFiles.join(', ')}`)
+      return
+    }
+
+    // 立即清除 input value，避免瀏覽器快取問題
+    if (fileInputRef.current) {
+      fileInputRef.current.value = ''
+    }
+
     setError(null)
-    setIsDragging(false)  // 重置拖拉狀態
+    setIsDragging(false)
+
+    // 直接上傳邏輯
+    if (uploadingRef.current || uploading) {
+      console.log('上傳中，忽略新請求')
+      return
+    }
+
+    // 防抖保護
+    const now = Date.now()
+    if (now - lastUploadTimeRef.current < 1000) {
+      console.log('上傳過於頻繁，忽略')
+      return
+    }
+    lastUploadTimeRef.current = now
+
+    uploadingRef.current = true
+    setUploading(true)
 
     try {
-      // 直接上傳新檔案，不刪除現有檔案（允許多檔案並存）
       const uploadPromises = Array.from(selectedFiles).map(async (file) => {
-        // 根據 kind 或 month 決定檔案類別
-        const category = kind === 'msds' ? 'msds' : 'usage_evidence'
-        
+        const category = kind === 'msds' ? 'msds' : kind === 'heat_value_evidence' ? 'heat_value_evidence' : 'usage_evidence'
         return await uploadEvidence(file, {
           pageKey,
           year: new Date().getFullYear(),
           category,
           month: category === 'usage_evidence' ? month : undefined,
-          allowOverwrite: false  // 不覆蓋現有檔案
+          allowOverwrite: false
         })
       })
 
       await Promise.all(uploadPromises)
-      
-      // 上傳成功後重新載入對應類別的檔案列表
-      // 這樣可以確保檔案有正確的 status 屬性，並且不會污染其他類別
+
+      // 清除錯誤狀態，因為上傳成功
+      setError(null)
+
       let updatedFilesList: EvidenceFile[]
       if (kind === 'msds') {
         updatedFilesList = await listMSDSFiles(pageKey)
       } else if (month) {
         updatedFilesList = await listUsageEvidenceFiles(pageKey, month)
       } else {
-        // 回退到舊方法，但這不應該發生
         updatedFilesList = []
       }
       
       onFilesChange(updatedFilesList)
 
-      // 顯示成功訊息
       const message = `成功上傳 ${selectedFiles.length} 個檔案`
       setSuccessMessage(message)
       setTimeout(() => setSuccessMessage(null), 3000)
 
-      // 為圖片檔案生成縮圖
       updatedFilesList.forEach(file => {
         if (file.mime_type.startsWith('image/') && !thumbnails[file.id]) {
           generateThumbnail(file)
@@ -114,13 +154,13 @@ const EvidenceUpload: React.FC<EvidenceUploadProps> = ({
       console.error('Upload error:', error)
       let errorMessage = error instanceof Error ? error.message : '上傳失敗'
       
-      // 友善化錯誤訊息
       if (errorMessage.includes('401') || errorMessage.includes('403')) {
         errorMessage = '請重新登入或檢查權限'
       }
       
       setError(errorMessage)
     } finally {
+      uploadingRef.current = false
       setUploading(false)
       if (fileInputRef.current) {
         fileInputRef.current.value = ''
@@ -148,7 +188,11 @@ const EvidenceUpload: React.FC<EvidenceUploadProps> = ({
     e.stopPropagation()
     setIsDragging(false)
     
-    if (disabled || uploading) return
+    // 提前檢查狀態，避免不必要的處理
+    if (disabled || uploading) {
+      console.log('拖放被禁用：disabled=' + disabled + ', uploading=' + uploading)
+      return
+    }
     
     const droppedFiles = e.dataTransfer.files
     if (droppedFiles && droppedFiles.length > 0) {
@@ -158,18 +202,33 @@ const EvidenceUpload: React.FC<EvidenceUploadProps> = ({
 
   const handleRemoveFile = async (fileId: string) => {
     setDeletingFileId(fileId)
+
+    // 刪除邏輯
     try {
-      await deleteEvidence(fileId)
-      onFilesChange(files.filter(f => f.id !== fileId))
+      const file = files.find(f => f.id === fileId)
+      if (!file) {
+        throw new Error('找不到要刪除的檔案')
+      }
+
+      const isAssociatedFile = file.entry_id && file.entry_id !== ''
       
-      // 清理縮圖
+      if (isAssociatedFile) {
+        await deleteEvidenceFile(file.id, file.file_path)
+      } else {
+        await deleteEvidence(fileId)
+      }
+
+      onFilesChange(files.filter(f => f.id !== fileId))
+
       setThumbnails(prev => {
         const newThumbnails = { ...prev }
         delete newThumbnails[fileId]
         return newThumbnails
       })
-      
-      // 顯示成功訊息
+
+      // 清除錯誤狀態，因為刪除成功
+      setError(null)
+
       setSuccessMessage('檔案已成功刪除')
       setTimeout(() => setSuccessMessage(null), 3000)
     } catch (error) {
@@ -183,7 +242,6 @@ const EvidenceUpload: React.FC<EvidenceUploadProps> = ({
       setError(errorMessage)
     } finally {
       setDeletingFileId(null)
-      setShowDeleteConfirm(null)
     }
   }
   
@@ -253,18 +311,16 @@ const EvidenceUpload: React.FC<EvidenceUploadProps> = ({
   }
 
   // 為現有的圖片檔案生成縮圖
-  useState(() => {
+  useEffect(() => {
     files.forEach(file => {
       if (file.mime_type.startsWith('image/') && !thumbnails[file.id]) {
         generateThumbnail(file)
       }
     })
-  })
+  }, [files]) // 添加依賴，當 files 變更時重新生成縮圖
 
   // 檢查是否已達到檔案上限和狀態限制
   const isAtMaxCapacity = files.length >= maxFiles
-  const isStatusUploadDisabled = !canUploadFiles(currentStatus)
-  const isStatusDeleteDisabled = !canDeleteFiles(currentStatus)
   const isUploadDisabled = disabled || uploading || isAtMaxCapacity || isStatusUploadDisabled
 
   return (
@@ -280,8 +336,12 @@ const EvidenceUpload: React.FC<EvidenceUploadProps> = ({
             : 'border-gray-300 hover:border-blue-400 hover:bg-blue-50 cursor-pointer'
           }
         `}
-        onClick={() => {
-          if (!isUploadDisabled && fileInputRef.current) {
+        onClick={(e) => {
+          // 防止事件冒泡
+          e.stopPropagation()
+          
+          // 再次檢查上傳狀態
+          if (!isUploadDisabled && !uploading && fileInputRef.current) {
             fileInputRef.current.click()
           }
         }}
@@ -294,7 +354,12 @@ const EvidenceUpload: React.FC<EvidenceUploadProps> = ({
           type="file"
           multiple
           accept="image/*,application/pdf"
-          onChange={(e) => handleFileSelect(e.target.files)}
+          onChange={(e) => {
+            // 事件處理器中再次檢查狀態
+            if (!uploading && e.target.files) {
+              handleFileSelect(e.target.files)
+            }
+          }}
           className="hidden"
           disabled={isUploadDisabled}
         />
@@ -363,16 +428,24 @@ const EvidenceUpload: React.FC<EvidenceUploadProps> = ({
           <div className="text-sm font-medium text-gray-700">
             已上傳檔案 ({files.length}/{maxFiles})
           </div>
-          {files.map((file) => (
+          
+          {files.map((file, index) => (
             <div
-              key={file.id}
-              className="flex items-center justify-between p-3 bg-gray-50 border border-gray-200 rounded-lg"
+              key={`${file.id}-${index}`}
+              className={`flex items-center justify-between p-3 rounded-lg transition-all ${
+                file.entry_id 
+                  ? 'bg-blue-50 border border-blue-200' 
+                  : 'bg-gray-50 border border-gray-200'
+              }`}
             >
               <div className="flex items-center space-x-3 flex-1 min-w-0">
                 {renderFilePreview(file)}
                 <div className="flex-1 min-w-0">
                   <div className="text-sm font-medium text-gray-900" title={file.file_name}>
                     {truncateFileName(file.file_name)}
+                    {file.entry_id && (
+                      <span className="ml-2 text-xs text-blue-600">(已提交)</span>
+                    )}
                   </div>
                   <div className="text-xs text-gray-500">
                     {formatFileSize(file.file_size)}
@@ -382,27 +455,13 @@ const EvidenceUpload: React.FC<EvidenceUploadProps> = ({
               
               <button
                 onClick={() => {
-                  if (isStatusDeleteDisabled) {
-                    setError(`${currentStatus === 'submitted' ? '已提交' : currentStatus === 'approved' ? '已核准' : ''}狀態下無法刪除檔案`)
-                    setTimeout(() => setError(null), 3000)
-                  } else if (file.status === 'draft') {
-                    confirmDelete(file.id)
-                  } else {
-                    setError('只能刪除草稿狀態的檔案')
-                    setTimeout(() => setError(null), 3000)
+                  if (confirm('確定要刪除這個檔案嗎？')) {
+                    handleRemoveFile(file.id)
                   }
                 }}
-                disabled={deletingFileId === file.id || isStatusDeleteDisabled}
-                className={`ml-3 flex items-center space-x-1 px-2 py-1 text-xs font-medium rounded border transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
-                  (file.status === 'draft' && !isStatusDeleteDisabled)
-                    ? 'border-red-600 text-red-600 hover:bg-red-600 hover:text-white'
-                    : 'border-gray-300 text-gray-400 cursor-not-allowed'
-                }`}
-                title={
-                  isStatusDeleteDisabled 
-                    ? `${currentStatus === 'submitted' ? '已提交' : currentStatus === 'approved' ? '已核准' : ''}狀態下無法刪除檔案`
-                    : file.status === 'draft' ? '刪除檔案' : '已提交的檔案無法刪除'
-                }
+                disabled={deletingFileId === file.id}
+                className="ml-3 flex items-center space-x-1 px-2 py-1 text-xs font-medium rounded border border-red-600 text-red-600 hover:bg-red-600 hover:text-white transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                title="刪除檔案"
               >
                 {deletingFileId === file.id ? (
                   <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-red-600"></div>
@@ -425,7 +484,7 @@ const EvidenceUpload: React.FC<EvidenceUploadProps> = ({
       
       {isStatusUploadDisabled && (
         <div className="text-xs text-blue-600 bg-blue-50 border border-blue-200 rounded p-2">
-          {currentStatus === 'submitted' && '已提交狀態：無法上傳或刪除檔案，如需修改請切換至草稿狀態'}
+          {currentStatus === 'submitted' && '已提交狀態：如需修改檔案請使用檔案編輯功能'}
           {currentStatus === 'approved' && '已核准狀態：唯讀模式，無法進行任何修改'}
           {currentStatus === 'rejected' && '已駁回狀態：可重新編輯和上傳檔案'}
         </div>

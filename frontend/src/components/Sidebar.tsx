@@ -21,6 +21,7 @@ const sidebarData: SidebarItemWithIcon[] = [
       { id: 'acetylene', title: '乙炔' },
       { id: 'refrigerant', title: '冷媒' },
       { id: 'septictank', title: '化糞池' },
+      { id: 'natural_gas', title: '天然氣' },
       { id: 'urea', title: '尿素' },
       { id: 'diesel_generator', title: '柴油(發電機)' },
       { id: 'diesel', title: '柴油' },
@@ -57,7 +58,7 @@ const sidebarData: SidebarItemWithIcon[] = [
 ];
 
 export default function Sidebar() {
-  const [expandedItems, setExpandedItems] = useState<string[]>([]);
+  const [expandedItems, setExpandedItems] = useState<string[]>(['category1']);
   const { selectItem } = useNavigation();
   const navigate = useNavigate();
   const location = useLocation();
@@ -98,7 +99,7 @@ export default function Sidebar() {
             }
           }}
           className={`
-            w-full text-left transition-all duration-300 rounded-lg mx-2 my-1 relative overflow-hidden group
+            w-full text-left transition-all duration-300 rounded-lg mr-2 my-1 relative overflow-hidden group
             ${level === 0 
               ? `px-4 py-4 text-white font-medium text-sm
                  ${hasChildren ? 'flex items-center justify-between' : ''}
@@ -141,13 +142,9 @@ export default function Sidebar() {
           )}
         </button>
         
-        {hasChildren && (
-          <div className={`overflow-hidden transition-all duration-300 ease-in-out ${
-            isExpanded ? 'max-h-96 opacity-100' : 'max-h-0 opacity-0'
-          }`}>
-            <div className="py-2 space-y-1">
-              {item.children!.map(child => renderSidebarItem(child, level + 1))}
-            </div>
+        {hasChildren && isExpanded && (
+          <div className="py-2 space-y-1">
+            {item.children!.map(child => renderSidebarItem(child, level + 1))}
           </div>
         )}
       </div>
@@ -155,7 +152,7 @@ export default function Sidebar() {
   };
 
   return (
-    <div className="w-64 xl:w-64 lg:w-56 md:w-48 sm:w-44 bg-gradient-to-b from-brand-500 to-brand-600 h-screen fixed left-0 top-0 shadow-2xl overflow-y-auto z-10">
+    <div className="w-64 xl:w-64 lg:w-56 md:w-48 sm:w-44 bg-gradient-to-b from-brand-500 to-brand-600 h-screen fixed left-0 top-0 shadow-2xl overflow-y-auto overflow-x-hidden z-10">
       <div className="p-6 border-b border-brand-400/30 backdrop-blur-sm">
         <button 
           onClick={() => navigate('/app')}
@@ -168,17 +165,17 @@ export default function Sidebar() {
       
       <nav className="mt-6 px-3">
         <div className="space-y-2">
-          {/* 只有非管理員才顯示範疇一、二、三 */}
-          {!isAdmin && sidebarData.map(item => renderSidebarItem(item))}
+          {/* 所有使用者都顯示範疇一、二、三 */}
+          {sidebarData.map(item => renderSidebarItem(item))}
           
-          {/* 管理員顯示簡化的導航 */}
+          {/* 管理員顯示額外提示 */}
           {isAdmin && (
-            <div className="text-center py-8">
+            <div className="mt-8 text-center py-4 border-t border-brand-400/30">
               <div className="text-white/60 text-sm">
                 管理員模式
               </div>
-              <div className="mt-2 text-white/40 text-xs">
-                系統管理功能
+              <div className="mt-1 text-white/40 text-xs">
+                具備系統管理功能
               </div>
             </div>
           )}

@@ -12,6 +12,7 @@ const CreateUserTab: React.FC = () => {
     phone: '',
     role: 'user'
   })
+  const [dieselGeneratorMode, setDieselGeneratorMode] = useState<'refuel' | 'test'>('refuel')
   const [loading, setLoading] = useState(false)
   const [success, setSuccess] = useState<string | null>(null)
 
@@ -26,7 +27,10 @@ const CreateUserTab: React.FC = () => {
     // 如果沒有提供密碼，使用預設密碼
     const submitData = {
       ...formData,
-      password: formData.password || 'TempPassword123!'
+      password: formData.password || 'TempPassword123!',
+      filling_config: {
+        diesel_generator_mode: dieselGeneratorMode
+      }
     }
 
     try {
@@ -45,6 +49,7 @@ const CreateUserTab: React.FC = () => {
         phone: '',
         role: 'user'
       })
+      setDieselGeneratorMode('refuel')
     } catch (error) {
       console.error('Error creating user:', error)
       alert(`建立用戶時發生錯誤: ${error instanceof Error ? error.message : '未知錯誤'}`)
@@ -241,6 +246,26 @@ const CreateUserTab: React.FC = () => {
             </div>
             <p className="mt-1 text-sm text-gray-500">
               若不指定密碼，系統將使用預設密碼：TempPassword123!
+            </p>
+          </div>
+
+          {/* Diesel Generator Mode */}
+          <div>
+            <label htmlFor="dieselGeneratorMode" className="block text-sm font-medium text-gray-700 mb-2">
+              柴油發電機記錄模式
+            </label>
+            <select
+              id="dieselGeneratorMode"
+              value={dieselGeneratorMode}
+              onChange={(e) => setDieselGeneratorMode(e.target.value as 'refuel' | 'test')}
+              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500"
+              required
+            >
+              <option value="refuel">加油記錄（記錄實際加油量）</option>
+              <option value="test">測試記錄（記錄測試耗油量）</option>
+            </select>
+            <p className="mt-1 text-sm text-gray-500">
+              此設定決定用戶在柴油發電機頁面看到的記錄類型
             </p>
           </div>
 

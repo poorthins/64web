@@ -1,207 +1,235 @@
-# 企業級架構設計文檔
+# 碳足跡盤查系統 - 實際架構文檔
+
+---
+title: 系統實際架構
+version: 2.0
+last_updated: 2025-09-12
+author: System Architecture
+---
 
 ## 專案概述
-這是一個碳排放追蹤系統的企業級架構重構方案，旨在提升系統的可擴展性、可維護性和可靠性。
+基於 React + Supabase 的碳排放追蹤系統，採用現代化 JAMstack 架構，支援企業級碳足跡盤查業務。
 
-## 現有架構問題
-1. **單體式結構**：所有後端邏輯集中在單一 app.py 文件
-2. **缺乏分層架構**：沒有明確的業務邏輯層、數據訪問層分離
-3. **無依賴注入**：組件之間耦合度高
-4. **錯誤處理不足**：缺乏統一的錯誤處理機制
-5. **無測試架構**：沒有單元測試和集成測試
-6. **缺乏監控**：無日誌記錄、性能監控和錯誤追蹤
-7. **配置管理簡陋**：僅使用 .env 文件
-8. **無 API 文檔**：缺乏 API 規範和文檔
+## 系統特色
+1. **現代化架構**：React 18 + TypeScript + Supabase 全端解決方案
+2. **分層設計**：前端元件化，後端 RLS 政策控制
+3. **類型安全**：完整的 TypeScript 覆蓋
+4. **安全性**：Row Level Security 確保資料安全
+5. **測試框架**：Vitest + Playwright 完整測試覆蓋
+6. **監控機制**：認證診斷工具和錯誤追蹤
+7. **文檔完整**：API 文檔、架構文檔、開發指引
+8. **模組化設計**：14個能源類別獨立管理
 
-## 新架構設計
+## 實際系統架構
 
-### 1. 後端架構 (Python/Flask)
+### 1. 整體架構圖
 
 ```
-backend/
-├── src/
-│   ├── api/                    # API 層
-│   │   ├── __init__.py
-│   │   ├── v1/                 # API 版本控制
-│   │   │   ├── __init__.py
-│   │   │   ├── auth/           # 認證相關 API
-│   │   │   ├── admin/          # 管理員 API
-│   │   │   ├── carbon/         # 碳排計算 API
-│   │   │   └── users/          # 用戶相關 API
-│   │   └── middleware/         # 中間件
-│   │       ├── auth.py         # 認證中間件
-│   │       ├── cors.py         # CORS 中間件
-│   │       ├── error_handler.py # 錯誤處理
-│   │       └── rate_limiter.py # 速率限制
-│   │
-│   ├── core/                   # 核心業務邏輯
-│   │   ├── __init__.py
-│   │   ├── config.py           # 配置管理
-│   │   ├── constants.py        # 常量定義
-│   │   ├── exceptions.py       # 自定義異常
-│   │   └── dependencies.py     # 依賴注入
-│   │
-│   ├── domain/                 # 領域模型
-│   │   ├── __init__.py
-│   │   ├── entities/           # 實體定義
-│   │   │   ├── user.py
-│   │   │   ├── carbon_entry.py
-│   │   │   └── review.py
-│   │   ├── repositories/       # 資料庫介面
-│   │   │   ├── base.py
-│   │   │   ├── user_repository.py
-│   │   │   └── carbon_repository.py
-│   │   └── services/           # 業務服務
-│   │       ├── auth_service.py
-│   │       ├── carbon_service.py
-│   │       └── admin_service.py
-│   │
-│   ├── infrastructure/         # 基礎設施層
-│   │   ├── __init__.py
-│   │   ├── database/           # 數據庫實現
-│   │   │   ├── supabase_client.py
-│   │   │   └── repositories/   # 具體實現
-│   │   ├── cache/              # 緩存層
-│   │   │   ├── redis_client.py
-│   │   │   └── cache_service.py
-│   │   ├── logging/            # 日誌系統
-│   │   │   ├── logger.py
-│   │   │   └── handlers.py
-│   │   └── monitoring/         # 監控系統
-│   │       ├── metrics.py
-│   │       └── health_check.py
-│   │
-│   └── utils/                  # 工具函數
-│       ├── __init__.py
-│       ├── validators.py       # 數據驗證
-│       ├── serializers.py      # 序列化工具
-│       └── helpers.py          # 輔助函數
+Frontend (React + TypeScript)
+├── UI Components (14 Energy Categories)
+├── State Management (Context API + Local State)
+├── API Layer (Supabase Client)
+└── Routing (React Router + Protection)
+              ↓ HTTP/WebSocket
+Supabase Backend
+├── Authentication (Supabase Auth)
+├── Database (PostgreSQL + RLS)
+├── Storage (File Management)
+└── Edge Functions (Business Logic)
+              ↓ SQL Queries
+PostgreSQL Database
+├── profiles (Users & Roles)
+├── energy_entries (Energy Data)  
+├── entry_files (Evidence Files)
+└── review_history (Audit Trail)
+```
+
+### 2. 前端架構 (實際實作)
+
+```
+frontend/src/
+├── api/                        # Supabase API 整合層
+│   ├── entries.ts              # 能源記錄 CRUD
+│   ├── files.ts                # 檔案管理（含編輯功能）
+│   ├── adminUsers.ts           # 用戶管理
+│   ├── adminSubmissions.ts     # 提交管理
+│   └── adminMetrics.ts         # 統計資料
 │
-├── tests/                      # 測試目錄
-│   ├── unit/                   # 單元測試
-│   ├── integration/            # 集成測試
-│   └── e2e/                    # 端到端測試
+├── components/                 # 共用元件庫
+│   ├── EvidenceUpload.tsx      # 檔案上傳元件
+│   ├── StatusIndicator.tsx     # 狀態顯示元件
+│   ├── BottomActionBar.tsx     # 底部操作欄
+│   ├── Sidebar.tsx             # 主導航
+│   └── Toast.tsx               # 通知系統
 │
-├── migrations/                 # 數據庫遷移
-├── scripts/                    # 部署和維護腳本
-├── docs/                       # API 文檔
-├── requirements/               # 依賴管理
-│   ├── base.txt               # 基礎依賴
-│   ├── dev.txt                # 開發依賴
-│   └── prod.txt               # 生產依賴
-├── Dockerfile                  # Docker 配置
-├── docker-compose.yml          # Docker Compose 配置
-├── .env.example               # 環境變量示例
-├── pytest.ini                 # 測試配置
-└── app.py                     # 應用入口
-
-```
-
-### 2. 前端架構 (React/TypeScript)
-
-```
-frontend/
-├── src/
-│   ├── app/                    # 應用核心
-│   │   ├── App.tsx
-│   │   ├── providers/          # Context Providers
-│   │   └── routes/             # 路由配置
-│   │
-│   ├── features/               # 功能模塊（按領域組織）
-│   │   ├── auth/               # 認證功能
-│   │   │   ├── components/
-│   │   │   ├── hooks/
-│   │   │   ├── services/
-│   │   │   ├── stores/
-│   │   │   └── types/
-│   │   ├── admin/              # 管理功能
-│   │   ├── carbon/             # 碳排計算
-│   │   └── dashboard/          # 儀表板
-│   │
-│   ├── shared/                 # 共享資源
-│   │   ├── components/         # 通用組件
-│   │   ├── hooks/              # 通用 Hooks
-│   │   ├── services/           # API 服務
-│   │   ├── stores/             # 全局狀態管理
-│   │   ├── types/              # TypeScript 類型
-│   │   └── utils/              # 工具函數
-│   │
-│   ├── infrastructure/         # 基礎設施
-│   │   ├── api/                # API 客戶端
-│   │   │   ├── client.ts       # Axios 實例
-│   │   │   └── interceptors.ts # 請求攔截器
-│   │   ├── config/             # 配置管理
-│   │   ├── monitoring/         # 前端監控
-│   │   └── i18n/               # 國際化
-│   │
-│   └── styles/                 # 樣式文件
-│       ├── globals.css
-│       └── themes/
+├── pages/                      # 頁面元件
+│   ├── Category1/              # 範疇一（12個能源類別）
+│   ├── Category2/              # 範疇二（1個能源類別）
+│   ├── Category3/              # 範疇三（1個能源類別）
+│   ├── admin/                  # 管理頁面
+│   └── Dashboard.tsx           # 用戶儀表板
 │
-├── public/                     # 靜態資源
-├── tests/                      # 測試文件
-│   ├── unit/                   # 單元測試
-│   ├── integration/            # 集成測試
-│   └── e2e/                    # E2E 測試
-├── .storybook/                 # Storybook 配置
-└── cypress/                    # Cypress E2E 測試
-
+├── contexts/                   # 全域狀態管理
+│   ├── AuthContext.tsx         # 認證狀態
+│   └── NavigationContext.tsx   # 導航狀態
+│
+├── hooks/                      # 自訂 Hooks
+│   ├── useEditPermissions.ts   # 編輯權限
+│   ├── useUserProfile.ts       # 用戶資料
+│   └── useStatusManager.ts     # 狀態管理
+│
+├── utils/                      # 工具函數
+│   ├── authHelpers.ts          # 認證工具
+│   ├── authDiagnostics.ts      # 診斷工具
+│   ├── categoryConstants.ts    # 類別定義
+│   └── designTokens.ts         # 設計系統
+│
+└── lib/                        # 外部服務配置
+    └── supabaseClient.ts       # Supabase 用戶端
 ```
 
-## 技術棧升級
+### 3. 後端架構 (Supabase)
 
-### 後端技術棧
-- **框架**: Flask → FastAPI (更好的性能和類型支持)
-- **ORM**: 原生 SQL → SQLAlchemy (更好的數據庫抽象)
-- **驗證**: 手動驗證 → Pydantic (自動驗證和序列化)
-- **API 文檔**: 無 → OpenAPI/Swagger (自動生成)
-- **緩存**: 無 → Redis (提升性能)
-- **任務隊列**: 無 → Celery (異步任務處理)
-- **監控**: 無 → Prometheus + Grafana
-- **日誌**: print → structlog (結構化日誌)
-- **測試**: 無 → pytest + coverage
+```
+Supabase Services
+├── Authentication Service
+│   ├── User Registration & Login
+│   ├── Role-Based Access Control
+│   └── Session Management
+│
+├── Database Service (PostgreSQL)
+│   ├── Row Level Security Policies
+│   ├── Triggers (Status Tracking)
+│   └── Functions (Business Logic)
+│
+├── Storage Service
+│   ├── Evidence File Storage
+│   ├── Access Control Policies
+│   └── File Metadata Management
+│
+└── Edge Functions (Minimal)
+    └── Advanced Business Logic
+```
+
+## 當前技術棧
 
 ### 前端技術棧
-- **狀態管理**: Context API → Zustand/Redux Toolkit
-- **數據獲取**: fetch → React Query/SWR
-- **表單處理**: 手動 → React Hook Form + Zod
-- **UI 組件**: 自定義 → Ant Design/Material-UI
-- **測試**: Playwright → Jest + React Testing Library + Cypress
-- **文檔**: 無 → Storybook
-- **錯誤監控**: 無 → Sentry
-- **性能監控**: 無 → Web Vitals
+```json
+{
+  "核心框架": {
+    "React": "^18.2.0",
+    "TypeScript": "^5.2.2", 
+    "Vite": "^5.2.0"
+  },
+  "狀態管理": {
+    "@tanstack/react-query": "^5.12.2",
+    "zustand": "^4.4.7"
+  },
+  "表單處理": {
+    "react-hook-form": "^7.48.2",
+    "zod": "^3.22.4"
+  },
+  "UI/樣式": {
+    "tailwindcss": "^3.4.3",
+    "lucide-react": "^0.542.0",
+    "recharts": "^2.10.3"
+  },
+  "測試框架": {
+    "vitest": "^1.0.4",
+    "@playwright/test": "^1.40.0",
+    "storybook": "^7.6.3"
+  }
+}
+```
 
-## 實施計劃
+### 後端服務 (Supabase)
+```json
+{
+  "認證服務": "Supabase Auth",
+  "資料庫": "PostgreSQL 15 + Row Level Security",
+  "儲存服務": "Supabase Storage",
+  "即時通訊": "Supabase Realtime",
+  "邊緣函數": "Supabase Edge Functions",
+  "API": "PostgREST (Auto-generated)"
+}
+```
 
-### 第一階段：基礎架構搭建（1-2 週）
-1. 建立新的項目結構
-2. 設置開發環境和工具鏈
-3. 配置 CI/CD 管道
-4. 建立基礎的日誌和監控系統
+### 開發工具
+```json
+{
+  "代碼品質": ["ESLint", "Prettier", "TypeScript"],
+  "版本控制": "Git",
+  "CI/CD": "GitHub Actions",
+  "監控": "Supabase Dashboard + 自訂診斷工具",
+  "文檔": "Markdown + JSDoc"
+}
+```
 
-### 第二階段：後端重構（2-3 週）
-1. 將現有代碼按新架構重組
-2. 實現依賴注入和服務層
-3. 添加數據驗證和錯誤處理
-4. 編寫單元測試和集成測試
+## 已實現功能
 
-### 第三階段：前端重構（2-3 週）
-1. 按功能模塊重組代碼
-2. 實現狀態管理和數據獲取層
-3. 優化組件結構和性能
-4. 添加測試和文檔
+### ✅ 核心功能完成
+1. **認證系統**：完整的用戶認證與角色管理
+2. **能源記錄管理**：14個能源類別的完整 CRUD 功能
+3. **檔案管理系統**：上傳、刪除、編輯佐證檔案
+4. **審核工作流**：管理員審核、狀態追蹤
+5. **權限控制**：基於 RLS 的資料安全機制
 
-### 第四階段：部署和優化（1-2 週）
-1. 容器化應用
-2. 設置 Kubernetes 部署
-3. 性能優化和負載測試
-4. 安全審計和加固
+### ✅ 架構優化完成
+1. **模組化設計**：元件化、API 層分離
+2. **錯誤處理**：統一的錯誤處理和恢復機制
+3. **診斷工具**：認證狀態監控和 RLS 錯誤分析
+4. **測試框架**：單元測試、集成測試、E2E 測試
+5. **文檔系統**：完整的 API 文檔和架構文檔
 
-## 預期效益
+### ✅ 最新功能更新
+1. **移除草稿功能**：簡化狀態流程
+2. **檔案編輯功能**：已提交記錄的檔案管理
+3. **錯誤恢復機制**：Promise.allSettled 批量操作
+4. **狀態簡化**：submitted → approved/rejected
 
-1. **可擴展性**：模塊化設計便於添加新功能
-2. **可維護性**：清晰的代碼結構和文檔
-3. **可靠性**：完善的錯誤處理和監控
-4. **性能**：緩存和優化提升響應速度
-5. **安全性**：統一的認證和授權機制
-6. **開發效率**：自動化測試和部署流程
+## 系統優勢
+
+### 1. 技術優勢
+- **現代化技術棧**：React 18 + TypeScript + Supabase 的完美組合
+- **類型安全**：端到端的 TypeScript 覆蓋，減少運行時錯誤
+- **即時同步**：Supabase Realtime 支援即時資料更新
+- **自動化 API**：PostgREST 自動生成 RESTful API
+
+### 2. 安全優勢
+- **Row Level Security**：資料庫層級的安全控制
+- **角色基礎權限**：細粒度的權限管理
+- **認證診斷工具**：快速定位認證問題
+- **審計追蹤**：完整的操作記錄
+
+### 3. 開發優勢
+- **模組化架構**：14個能源類別獨立管理
+- **元件重用**：統一的 UI 元件庫
+- **錯誤恢復**：Promise.allSettled 模式處理批量操作
+- **診斷工具**：開發階段的詳細調試資訊
+
+### 4. 維護優勢
+- **文檔完整**：API、架構、開發指引一應俱全
+- **測試覆蓋**：單元測試、整合測試、E2E 測試
+- **監控機制**：系統健康度監控
+- **版本控制**：清晰的變更歷史追蹤
+
+## 相關文檔
+
+- [API 文檔](./API_DOCUMENTATION.md) - 完整的 API 函數說明
+- [前端架構文檔](./FRONTEND_ARCHITECTURE.md) - 前端系統架構詳解  
+- [資料庫架構文檔](./DATABASE_SCHEMA.md) - 資料庫結構和 RLS 政策
+- [前端開發指引](./FRONTEND_DEVELOPMENT_GUIDE.md) - 開發最佳實踐
+- [認證診斷工具](./AUTH_DIAGNOSTICS_USAGE.md) - 認證問題診斷工具
+- [設置指南](./SETUP.md) - 環境設置和部署指南
+
+## 版本歷史
+
+| 版本 | 日期 | 變更內容 | 作者 |
+|------|------|----------|------|
+| 2.0 | 2025-09-12 | 更新為實際架構，移除理論設計 | System |
+| 1.0 | 2025-09-09 | 初始企業架構設計 | System |
+
+---
+**最後更新**: 2025-09-12  
+**架構狀態**: 穩定運行  
+**維護團隊**: 全端開發組

@@ -1,50 +1,21 @@
-import { useState, useEffect, useCallback, useRef } from 'react'
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Upload, AlertCircle, CheckCircle, Loader2, X, Trash2 } from 'lucide-react'
 import EvidenceUpload from '../../components/EvidenceUpload'
 import StatusSwitcher, { EntryStatus, canEdit, canUploadFiles, getButtonText } from '../../components/StatusSwitcher'
+import StatusIndicator from '../../components/StatusIndicator'
 import Toast, { ToastType } from '../../components/Toast'
+import BottomActionBar from '../../components/BottomActionBar'
 import { useEditPermissions } from '../../hooks/useEditPermissions'
-import { useStatusManager } from '../../hooks/useStatusManager'
-import { loadDraftWithFallback, saveDraftWithBackup, cleanupAfterSubmission, DraftPayload } from '../../api/drafts'
-import { listMSDSFiles, listUsageEvidenceFiles, commitEvidence, deleteEvidence, EvidenceFile } from '../../api/files'
+import { useFrontendStatus } from '../../hooks/useFrontendStatus'
+import { listMSDSFiles, listUsageEvidenceFiles, commitEvidence, deleteEvidence, getEntryFiles, updateFileEntryAssociation, debugDatabaseContent, EvidenceFile } from '../../api/files'
 import { upsertEnergyEntry, sumMonthly, UpsertEntryInput, updateEntryStatus, getEntryByPageKeyAndYear } from '../../api/entries'
+import { supabase } from '../../lib/supabaseClient'
+import { designTokens } from '../../utils/designTokens'
+import { debugRLSOperation, diagnoseAuthState } from '../../utils/authDiagnostics'
+import { logDetailedAuthStatus } from '../../utils/authHelpers'
+import EvidenceFileManager, { FileManagerData } from '../../components/common/EvidenceFileManager'
 
-// 設計 tokens - 基於山椒魚永續工程 LOGO 配色
-const designTokens = {
-  colors: {
-    background: '#f8fffe',
-    cardBg: '#ffffff',
-    border: '#e0f2f1',
-    textPrimary: '#1f2937',
-    textSecondary: '#546e7a',
-    accentPrimary: '#4caf50',
-    accentSecondary: '#26a69a',
-    accentLight: '#e8f5e8',
-    accentBlue: '#5dade2',
-    error: '#ef4444',
-    warning: '#f59e0b',
-    success: '#10b981'
-  },
-  spacing: {
-    xs: '4px',
-    sm: '8px',
-    md: '16px',
-    lg: '24px',
-    xl: '32px',
-    xxl: '48px'
-  },
-  shadows: {
-    sm: '0 1px 2px 0 rgb(0 0 0 / 0.05)',
-    md: '0 4px 6px -1px rgb(0 0 0 / 0.1)',
-    lg: '0 10px 15px -3px rgb(0 0 0 / 0.1)'
-  },
-  borderRadius: {
-    sm: '6px',
-    md: '8px',
-    lg: '12px'
-  }
-}
 
 // 自定義 debounce 函式
 function debounce<T extends (...args: any[]) => any>(func: T, wait: number): T {
@@ -68,16 +39,15 @@ const WD40Page = () => {
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [success, setSuccess] = useState<string | null>(null)
-  const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false)
   const [hasSubmittedBefore, setHasSubmittedBefore] = useState(false)
   const [showSuccessModal, setShowSuccessModal] = useState(false)
   const [showClearConfirmModal, setShowClearConfirmModal] = useState(false)
   const [currentEntryId, setCurrentEntryId] = useState<string | null>(null)
-  const [initialStatus, setInitialStatus] = useState<EntryStatus>('draft')
+  const [initialStatus, setInitialStatus] = useState<EntryStatus>('submitted')
   const [toast, setToast] = useState<{ message: string; type: ToastType } | null>(null)
   
-  // 狀態管理 Hook
-  const statusManager = useStatusManager({
+  // 前端狀態管理 Hook
+  const frontendStatus = useFrontendStatus({
     initialStatus,
     entryId: currentEntryId,
     onStatusChange: (newStatus) => {
@@ -94,7 +64,7 @@ const WD40Page = () => {
     }
   })
 
-  const { currentStatus, isUpdating, handleSubmitSuccess, handleDataModified } = statusManager
+  const { currentStatus, handleDataChanged, handleSubmitSuccess, isInitialLoad } = frontendStatus
   
   // 表單資料
   const [year] = useState(new Date().getFullYear())
@@ -109,90 +79,209 @@ const WD40Page = () => {
       files: []
     }))
   )
+  const [fileManagerData, setFileManagerData] = useState<FileManagerData | null>(null)
 
   const pageKey = 'wd40'
-  const isInitialLoad = useRef(true)
   
   // 編輯權限控制
-  const editPermissions = useEditPermissions(currentStatus)
+  const editPermissions = useEditPermissions(currentStatus || 'draft')
+  
+  // 判斷是否有資料
+  const hasAnyData = useMemo(() => {
+    const hasMonthlyData = monthlyData?.some(m => m.quantity > 0) || false
+    const hasBasicData = unitCapacity > 0 || carbonRate > 0
+    const hasFiles = (msdsFiles?.length || 0) > 0
+    return hasMonthlyData || hasBasicData || hasFiles
+  }, [monthlyData, unitCapacity, carbonRate, msdsFiles])
+  
+  // 允許所有狀態編輯
+  const isReadOnly = false
 
   const monthNames = [
     '1月', '2月', '3月', '4月', '5月', '6月',
     '7月', '8月', '9月', '10月', '11月', '12月'
   ]
 
-  // 載入草稿和檔案
+  // 組件清理 - 確保離開頁面時清除所有狀態
+  useEffect(() => {
+    return () => {
+      // 重置所有表單狀態
+      setUnitCapacity(0)
+      setCarbonRate(0)
+      setMsdsFiles([])
+      setMonthlyData(Array.from({ length: 12 }, (_, i) => ({
+        month: i + 1,
+        quantity: 0,
+        totalUsage: 0,
+        files: []
+      })))
+      setError(null)
+      setSuccess(null)
+    }
+  }, [])
+
+  // 載入檔案和資料（支援完整編輯功能）
   useEffect(() => {
     const loadData = async () => {
       try {
         setLoading(true)
         setError(null)
 
-        // 載入草稿
-        const draft = await loadDraftWithFallback(pageKey)
-        if (draft) {
-          if (draft.unitCapacity) setUnitCapacity(draft.unitCapacity)
-          if (draft.carbonRate) setCarbonRate(draft.carbonRate)
-        }
+        // 並行載入基本資料
+        const [msdsFiles, existingEntry] = await Promise.all([
+          listMSDSFiles(pageKey),
+          getEntryByPageKeyAndYear(pageKey, year)
+        ])
 
-        // 載入 MSDS 檔案
-        const msdsFilesList = await listMSDSFiles(pageKey)
-        setMsdsFiles(msdsFilesList)
+        console.log('🔍 [WD40] Loading entry:', {
+          existingEntry: existingEntry ? {
+            id: existingEntry.id,
+            status: existingEntry.status,
+            hasPayload: !!existingEntry.payload
+          } : null,
+          msdsFilesCount: msdsFiles?.length || 0
+        })
 
-        // 檢查是否已有提交的記錄
-        const existingEntry = await getEntryByPageKeyAndYear(pageKey, year)
-        if (existingEntry) {
-          setInitialStatus(existingEntry.status as EntryStatus)
-          setCurrentEntryId(existingEntry.id)
+        // 如果有已提交記錄
+        if (existingEntry && existingEntry.status !== 'draft') {
           setHasSubmittedBefore(true)
-          
-          // 如果有已提交的記錄，從 payload 中載入數據
+          setCurrentEntryId(existingEntry.id)
+          setInitialStatus(existingEntry.status as EntryStatus)
+
+          // 載入表單資料
           if (existingEntry.payload?.monthly) {
             const entryMonthly = existingEntry.payload.monthly
-            const entryUnitCapacity = existingEntry.payload.notes?.match(/單位容量: ([\d.]+)/)?.[1]
-            const entryCarbonRate = existingEntry.payload.notes?.match(/含碳率: ([\d.]+)/)?.[1]
             
-            if (entryUnitCapacity) setUnitCapacity(parseFloat(entryUnitCapacity))
-            if (entryCarbonRate) setCarbonRate(parseFloat(entryCarbonRate))
-          }
-        }
-
-        // 載入各月份的使用證明檔案，同時保留草稿中的數量資料
-        const updatedMonthlyData = await Promise.all(
-          Array.from({ length: 12 }, async (_, i) => {
-            const month = i + 1
-            const usageFiles = await listUsageEvidenceFiles(pageKey, month)
+            // 解析 notes 中的參數
+            let loadedUnitCapacity = 0
+            let loadedCarbonRate = 0
             
-            // 優先從已提交記錄中取得數量資料，其次是草稿
-            let quantity = 0
-            if (existingEntry?.payload?.monthly?.[month.toString()]) {
-              // 從已提交記錄計算回原始數量（總使用量 / 單位容量）
-              const totalUsage = existingEntry.payload.monthly[month.toString()]
-              const entryUnitCapacity = existingEntry.payload.notes?.match(/單位容量: ([\d.]+)/)?.[1]
-              if (entryUnitCapacity && parseFloat(entryUnitCapacity) > 0) {
-                quantity = totalUsage / parseFloat(entryUnitCapacity)
+            if (existingEntry.payload.notes) {
+              const unitCapacityMatch = existingEntry.payload.notes.match(/單位容量: ([\d.]+)/)
+              const carbonRateMatch = existingEntry.payload.notes.match(/含碳率: ([\d.]+)/)
+              
+              if (unitCapacityMatch) {
+                loadedUnitCapacity = parseFloat(unitCapacityMatch[1]) || 0
+                setUnitCapacity(loadedUnitCapacity)
               }
-            } else if (draft?.monthly?.[month.toString()]) {
-              quantity = draft.monthly[month.toString()]
+              if (carbonRateMatch) {
+                loadedCarbonRate = parseFloat(carbonRateMatch[1]) || 0
+                setCarbonRate(loadedCarbonRate)
+              }
             }
             
-            const totalUsage = quantity * (unitCapacity || draft?.unitCapacity || 0)
+            // 恢復各月份的數量資料（使用正確的 unitCapacity 值）
+            const restoredMonthlyData = monthlyData.map((data, index) => {
+              const monthKey = (index + 1).toString()
+              const monthUsage = entryMonthly[monthKey] || 0
+              const calculatedQuantity = (monthUsage > 0 && loadedUnitCapacity > 0) ? monthUsage / loadedUnitCapacity : 0
+              
+              return {
+                ...data,
+                quantity: calculatedQuantity,
+                totalUsage: monthUsage
+              }
+            })
             
-            return {
-              month,
-              quantity,
-              totalUsage,
-              files: usageFiles
+            console.log('📝 [WD40] Entry details:', {
+              entryId: existingEntry.id,
+              payloadKeys: Object.keys(existingEntry.payload || {}),
+              monthlyKeys: Object.keys(existingEntry.payload?.monthly || {})
+            })
+
+            // 診斷資料庫內容
+            await debugDatabaseContent(existingEntry.id)
+
+            // 載入已關聯的檔案
+            try {
+              const entryFiles = await getEntryFiles(existingEntry.id)
+              console.log('📁 [WD40] Loaded entry files:', {
+                totalCount: entryFiles.length,
+                files: entryFiles.map(f => ({
+                  id: f.id,
+                  name: f.file_name,
+                  path: f.file_path,
+                  entry_id: f.entry_id
+                }))
+              })
+              
+              // 從檔案路徑分類檔案
+              const msdsEntryFiles = entryFiles.filter(f => f.file_path.includes('/msds/'))
+              const monthlyEntryFiles = entryFiles.filter(f => f.file_path.includes('/usage_evidence/'))
+              
+              console.log('📋 [WD40] File classification:', {
+                msdsCount: msdsEntryFiles.length,
+                monthlyCount: monthlyEntryFiles.length,
+                msdsPaths: msdsEntryFiles.map(f => f.file_path),
+                monthlyPaths: monthlyEntryFiles.map(f => f.file_path)
+              })
+              
+              // 設置 MSDS 檔案
+              const allMsdsFiles = [...msdsFiles, ...msdsEntryFiles]
+              setMsdsFiles(allMsdsFiles)
+              console.log('📋 [WD40] Total MSDS files after merge:', allMsdsFiles.length)
+              
+              // 分配月份檔案到對應月份
+              const updatedMonthlyData = restoredMonthlyData.map((data, index) => {
+                const month = index + 1
+                const monthFiles = monthlyEntryFiles.filter(file => {
+                  // 從檔案路徑提取月份：/usage_evidence/{month}/
+                  const monthMatch = file.file_path.match(/\/usage_evidence\/(\d+)\//)
+                  const extractedMonth = monthMatch ? parseInt(monthMatch[1]) : null
+                  console.log(`📅 [WD40] File ${file.file_name} path analysis:`, {
+                    path: file.file_path,
+                    monthMatch: monthMatch?.[0],
+                    extractedMonth,
+                    targetMonth: month,
+                    matches: extractedMonth === month
+                  })
+                  return extractedMonth === month
+                })
+                
+                if (monthFiles.length > 0) {
+                  console.log(`📅 [WD40] Month ${month} assigned ${monthFiles.length} files:`, 
+                    monthFiles.map(f => f.file_name))
+                }
+                
+                return {
+                  ...data,
+                  files: monthFiles
+                }
+              })
+              
+              console.log('📅 [WD40] Monthly file distribution:', 
+                updatedMonthlyData.map((data, i) => `月${i+1}: ${data.files.length}個檔案`).join(', ')
+              )
+              setMonthlyData(updatedMonthlyData)
+            } catch (fileError) {
+              console.error('❌ [WD40] Failed to load entry files:', fileError)
+              // 即使檔案載入失敗，也要設置恢復的月份資料
+              setMonthlyData(restoredMonthlyData)
             }
-          })
-        )
-        
-        setMonthlyData(updatedMonthlyData)
+          }
+        } else {
+          // 新記錄處理
+          const initialMsdsFiles = msdsFiles || []
+          setMsdsFiles(initialMsdsFiles)
+
+          // 載入暫存檔案
+          const monthlyFilesArray = await Promise.all(
+            Array.from({ length: 12 }, (_, i) => 
+              listUsageEvidenceFiles(pageKey, i + 1)
+            )
+          )
+
+          const updatedMonthlyData = monthlyData.map((data, index) => ({
+            ...data,
+            files: monthlyFilesArray[index] || []
+          }))
+          setMonthlyData(updatedMonthlyData)
+        }
 
         isInitialLoad.current = false
       } catch (error) {
-        console.error('Error loading data:', error)
-        setError(error instanceof Error ? error.message : '載入資料失敗')
+        console.error('載入資料失敗:', error)
+        setError(error instanceof Error ? error.message : '載入失敗')
       } finally {
         setLoading(false)
       }
@@ -211,60 +300,25 @@ const WD40Page = () => {
     )
   }, [unitCapacity])
 
-  // 建立草稿 payload
-  const createDraftPayload = useCallback((): DraftPayload => {
-    const monthly: { [key: string]: number } = {}
-    monthlyData.forEach(data => {
-      monthly[data.month.toString()] = data.quantity
-    })
-
-    return {
-      year,
-      unitCapacity,
-      carbonRate,
-      monthly
-    }
-  }, [year, unitCapacity, carbonRate, monthlyData])
-
-  // 自動保存草稿（debounced）
-  const debouncedSaveDraft = useCallback(
-    debounce(async (payload: DraftPayload) => {
-      if (isInitialLoad.current) return
-      
-      try {
-        await saveDraftWithBackup(pageKey, payload)
-        setHasUnsavedChanges(false)
-      } catch (error) {
-        console.warn('Auto-save failed:', error)
-      }
-    }, 2000),
-    []
-  )
-
-  // 監聽表單變更
-  useEffect(() => {
-    if (!isInitialLoad.current) {
-      setHasUnsavedChanges(true)
-      const payload = createDraftPayload()
-      debouncedSaveDraft(payload)
-      
-      // 觸發狀態檢測 - 如果在已提交狀態下修改資料，自動回退為草稿
-      handleDataModified()
-    }
-  }, [unitCapacity, carbonRate, monthlyData, createDraftPayload, debouncedSaveDraft, handleDataModified])
+  // 草稿功能已完全移除
 
   // 離開頁面提醒
   useEffect(() => {
     const handleBeforeUnload = (e: BeforeUnloadEvent) => {
-      if (hasUnsavedChanges) {
+      // 檢查是否有填寫資料但未提交
+      const hasData = unitCapacity > 0 || carbonRate > 0 || 
+                     monthlyData.some(d => d.quantity > 0) ||
+                     msdsFiles.length > 0
+      
+      if (hasData && !hasSubmittedBefore) {
         e.preventDefault()
-        e.returnValue = '你有尚未提交的變更，是否離開？'
+        e.returnValue = '您有資料尚未提交，離開將會遺失資料。是否確定離開？'
       }
     }
 
     window.addEventListener('beforeunload', handleBeforeUnload)
     return () => window.removeEventListener('beforeunload', handleBeforeUnload)
-  }, [hasUnsavedChanges])
+  }, [unitCapacity, carbonRate, monthlyData, msdsFiles, hasSubmittedBefore])
 
   const updateMonthData = (index: number, field: 'quantity', value: number) => {
     setMonthlyData(prev => {
@@ -282,24 +336,15 @@ const WD40Page = () => {
     })
   }
 
+
   const handleMonthFilesChange = (month: number, files: EvidenceFile[]) => {
     setMonthlyData(prev => prev.map(data => 
       data.month === month ? { ...data, files } : data
     ))
-    
-    // 檔案變更時也觸發狀態檢測
-    if (!isInitialLoad.current) {
-      handleDataModified()
-    }
   }
 
   const handleMsdsFilesChange = (files: EvidenceFile[]) => {
     setMsdsFiles(files)
-    
-    // MSDS 檔案變更時也觸發狀態檢測
-    if (!isInitialLoad.current) {
-      handleDataModified()
-    }
   }
 
   const getTotalUsage = () => {
@@ -331,6 +376,8 @@ const WD40Page = () => {
   }
 
   const handleSubmit = async () => {
+    console.log('=== WD-40 提交除錯開始 ===')
+    
     const errors = validateData()
     if (errors.length > 0) {
       setError('請修正以下問題：\n' + errors.join('\n'))
@@ -342,15 +389,36 @@ const WD40Page = () => {
     setSuccess(null)
 
     try {
-      // 1. 準備每月數據
+      // 步驟1：詳細認證狀態診斷
+      console.log('🔍 執行詳細認證診斷...')
+      await logDetailedAuthStatus()
+      
+      const authDiagnosis = await diagnoseAuthState()
+      if (!authDiagnosis.isAuthenticated) {
+        console.error('❌ 認證診斷失敗:', authDiagnosis)
+        throw new Error(`認證失效: ${authDiagnosis.userError?.message || authDiagnosis.sessionError?.message || '未知原因'}`)
+      }
+
+      // 步驟2：檢查當前表單狀態
+      console.log('📊 當前表單狀態:', {
+        pageKey,
+        year,
+        unitCapacity,
+        carbonRate,
+        monthlyDataCount: monthlyData.length,
+        hasData: monthlyData.some(d => d.quantity > 0)
+      })
+
+      // 步驟3：準備每月數據
       const monthly: Record<string, number> = {}
       monthlyData.forEach(data => {
         if (data.quantity > 0) {
           monthly[data.month.toString()] = data.totalUsage
         }
       })
+      console.log('📋 處理後的每月數據:', monthly)
 
-      // 2. 建立填報輸入資料
+      // 步驟4：建立填報輸入資料
       const entryInput: UpsertEntryInput = {
         page_key: pageKey,
         period_year: year,
@@ -358,36 +426,177 @@ const WD40Page = () => {
         monthly: monthly,
         notes: `單位容量: ${unitCapacity} ML/瓶, 含碳率: ${carbonRate}%`
       }
+      console.log('📝 準備提交的 entryInput:', entryInput)
 
-      // 3. 新增或更新 energy_entries (保持現有狀態，讓狀態管理器處理轉換)
-      const { entry_id } = await upsertEnergyEntry(entryInput, true)
+      // 步驟5：使用診斷包裝執行關鍵操作
+      const { entry_id } = await debugRLSOperation(
+        '新增或更新能源填報記錄',
+        async () => await upsertEnergyEntry(entryInput, true)
+      )
+      console.log('✅ upsertEnergyEntry 完成，entry_id:', entry_id)
 
-      // 4. 設置 entryId（如果是新建的記錄）
+      // 步驟6：設置 entryId（如果是新建的記錄）
       if (!currentEntryId) {
         setCurrentEntryId(entry_id)
       }
 
-      // 5. 提交所有檔案（更新檔案的 entry_id 關聯）
-      await commitEvidence({
-        entryId: entry_id,
-        pageKey: pageKey
+      // 步驟7：使用改進的錯誤恢復機制關聯檔案
+      const allFiles = [
+        ...msdsFiles,
+        ...monthlyData.flatMap(m => m.files)
+      ]
+      
+      console.log('🔗 [WD40] All files before association:', {
+        totalFiles: allFiles.length,
+        msdsFilesCount: msdsFiles.length,
+        monthlyFilesCount: monthlyData.flatMap(m => m.files).length,
+        fileDetails: allFiles.map(f => ({
+          id: f.id,
+          name: f.file_name,
+          entry_id: f.entry_id || 'NOT_ASSOCIATED',
+          hasEntryId: !!f.entry_id
+        }))
       })
+      
+      const unassociatedFiles = allFiles.filter(f => !f.entry_id)
+      console.log('📎 [WD40] Unassociated files to link:', {
+        count: unassociatedFiles.length,
+        files: unassociatedFiles.map(f => ({
+          id: f.id,
+          name: f.file_name,
+          path: f.file_path
+        }))
+      })
+      
+      if (unassociatedFiles.length > 0) {
+        
+        // 使用 Promise.allSettled 允許部分失敗
+        const results = await Promise.allSettled(
+          unassociatedFiles.map(file => 
+            updateFileEntryAssociation(file.id, entry_id)
+          )
+        )
+        
+        // 統計結果
+        const succeeded = results.filter(r => r.status === 'fulfilled').length
+        const failed = results.filter(r => r.status === 'rejected').length
+        
+        console.log('✅ [WD40] Association results:', {
+          totalAttempts: results.length,
+          succeeded,
+          failed,
+          detailedResults: results.map((result, index) => ({
+            fileId: unassociatedFiles[index].id,
+            fileName: unassociatedFiles[index].file_name,
+            status: result.status,
+            error: result.status === 'rejected' ? result.reason : null
+          }))
+        })
+        
+        // 記錄失敗詳情並提供用戶反饋
+        if (failed > 0) {
+          const failures = results
+            .map((r, i) => ({ result: r, file: unassociatedFiles[i] }))
+            .filter(({ result }) => result.status === 'rejected')
+            .map(({ file, result }) => ({
+              fileName: file.file_name,
+              error: (result as PromiseRejectedResult).reason
+            }))
+          
+          console.error('檔案關聯失敗詳情:', failures)
+          
+          // 設置用戶可見的警告
+          if (succeeded > 0) {
+            setToast({ 
+              message: `部分檔案關聯成功 (${succeeded}/${unassociatedFiles.length})，${failed} 個檔案關聯失敗`, 
+              type: 'error' 
+            })
+          } else {
+            setToast({ 
+              message: `所有檔案關聯失敗，請檢查網路連線後重新提交`, 
+              type: 'error' 
+            })
+          }
+        } else {
+          setToast({ 
+            message: `所有檔案 (${succeeded} 個) 已成功關聯`, 
+            type: 'success' 
+          })
+        }
+        
+        // 更新本地檔案狀態（標記成功關聯的）
+        const successfulIndices = results
+          .map((r, i) => ({ result: r, index: i }))
+          .filter(({ result }) => result.status === 'fulfilled')
+          .map(({ index }) => index)
+        
+        successfulIndices.forEach(index => {
+          unassociatedFiles[index].entry_id = entry_id
+        })
+        
+        // 更新本地狀態
+        setMsdsFiles(prev => prev.map(f => {
+          const updated = unassociatedFiles.find(uf => uf.id === f.id)
+          return updated ? { ...f, entry_id: updated.entry_id } : f
+        }))
+        
+        setMonthlyData(prev => prev.map(monthData => ({
+          ...monthData,
+          files: monthData.files.map(f => {
+            const updated = unassociatedFiles.find(uf => uf.id === f.id)
+            return updated ? { ...f, entry_id: updated.entry_id } : f
+          })
+        })))
+      }
 
-      // 6. 自動清理草稿資料（提交成功後）
-      await cleanupAfterSubmission(pageKey)
+      // 步驟8：自動清理草稿資料（提交成功後）
+      // 草稿清理功能已移除
 
-      // 7. 處理狀態轉換 - 自動將狀態改為已提交
+      // 步驟9：處理狀態轉換 - 提交成功時自動更新狀態
       await handleSubmitSuccess()
 
-      // 8. 計算並顯示成功訊息
+      // 步驟10：計算並顯示成功訊息
       const totalUsage = sumMonthly(monthly)
-      setSuccess(`年度總使用量：${totalUsage.toFixed(2)} ML`)
-      setHasUnsavedChanges(false)
+      console.log('📊 計算總使用量:', totalUsage)
+      
+      setSuccess(`提交成功！年度總使用量：${totalUsage.toFixed(2)} ML`)
+      
       setHasSubmittedBefore(true)
       setShowSuccessModal(true)
+      
+      console.log('=== ✅ WD-40 提交成功完成 ===')
 
     } catch (error) {
-      console.error('Submit error:', error)
+      console.error('=== ❌ WD-40 提交失敗 ===')
+      console.error('錯誤類型:', error?.constructor?.name)
+      console.error('錯誤訊息:', error instanceof Error ? error.message : String(error))
+      console.error('完整錯誤物件:', error)
+      
+      // 失敗後的詳細認證診斷
+      console.log('🔍 執行失敗後的認證診斷...')
+      try {
+        await logDetailedAuthStatus()
+      } catch (diagError) {
+        console.error('診斷過程中發生錯誤:', diagError)
+      }
+      
+      // 檢查是否為 RLS 錯誤
+      if (error instanceof Error && (
+        error.message.toLowerCase().includes('rls') ||
+        error.message.toLowerCase().includes('row level security') ||
+        error.message.toLowerCase().includes('permission') ||
+        error.message.toLowerCase().includes('policy')
+      )) {
+        console.error('🚨 檢測到 RLS 權限錯誤！')
+        console.error('💡 可能原因分析:', {
+          認證狀態: '檢查 auth.uid() 是否為 null',
+          RLS政策: '檢查相關表格的 RLS 政策設定',
+          時機問題: '可能在 token 過期瞬間執行操作',
+          建議: '查看上方詳細診斷結果找出根本原因'
+        })
+      }
+      
+      console.log('=== 🔍 除錯結束 ===')
       setError(error instanceof Error ? error.message : '提交失敗')
     } finally {
       setSubmitting(false)
@@ -395,8 +604,15 @@ const WD40Page = () => {
   }
 
   const handleStatusChange = async (newStatus: EntryStatus) => {
-    // 使用狀態管理器的更新函數
-    await statusManager.updateStatus(newStatus)
+    // 手動狀態變更（會更新資料庫）
+    try {
+      if (currentEntryId) {
+        await updateEntryStatus(currentEntryId, newStatus)
+      }
+      frontendStatus.setFrontendStatus(newStatus)
+    } catch (error) {
+      setError(error instanceof Error ? error.message : '狀態更新失敗')
+    }
   }
 
   const handleClearAll = () => {
@@ -410,7 +626,6 @@ const WD40Page = () => {
       files: []
     })))
     
-    setHasUnsavedChanges(false)
     setHasSubmittedBefore(false)
     setError(null)
     setSuccess(null)
@@ -445,13 +660,13 @@ const WD40Page = () => {
         {/* 頁面標題 - 無背景框 */}
         <div className="text-center mb-8">
           <h1 
-            className="text-3xl font-semibold mb-3" 
+            className="text-4xl font-semibold mb-3" 
             style={{ color: designTokens.colors.textPrimary }}
           >
             WD-40 使用數量填報
           </h1>
           <p 
-            className="text-base" 
+            className="text-lg" 
             style={{ color: designTokens.colors.textSecondary }}
           >
             請上傳 MSDS 文件並填入各月份使用數據進行碳排放計算
@@ -474,13 +689,13 @@ const WD40Page = () => {
               />
               <div>
                 <h3 
-                  className="text-sm font-medium mb-1" 
+                  className="text-base font-medium mb-1" 
                   style={{ color: designTokens.colors.accentBlue }}
                 >
                   資料已提交
                 </h3>
                 <p 
-                  className="text-sm" 
+                  className="text-base" 
                   style={{ color: designTokens.colors.textSecondary }}
                 >
                   您可以繼續編輯資料，修改後請再次點擊「提交填報」以更新記錄。
@@ -500,7 +715,7 @@ const WD40Page = () => {
           }}
         >
           <h2 
-            className="text-xl font-medium mb-6" 
+            className="text-2xl font-medium mb-6" 
             style={{ color: designTokens.colors.textPrimary }}
           >
             MSDS 安全資料表與基本參數
@@ -510,7 +725,7 @@ const WD40Page = () => {
             {/* MSDS 檔案上傳 */}
             <div>
               <label 
-                className="block text-sm font-medium mb-3" 
+                className="block text-base font-medium mb-3" 
                 style={{ color: designTokens.colors.textPrimary }}
               >
                 MSDS 安全資料表
@@ -518,10 +733,10 @@ const WD40Page = () => {
               <EvidenceUpload
                 pageKey={pageKey}
                 files={msdsFiles}
-                onFilesChange={handleMsdsFilesChange}
+                onFilesChange={setMsdsFiles}
                 maxFiles={3}
-                disabled={submitting || !editPermissions.canUploadFiles}
                 kind="msds"
+                disabled={submitting}
               />
             </div>
             
@@ -529,7 +744,7 @@ const WD40Page = () => {
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
               <div>
                 <label 
-                  className="block text-sm font-medium mb-2" 
+                  className="block text-base font-medium mb-2" 
                   style={{ color: designTokens.colors.textPrimary }}
                 >
                   單位容量 (ML/瓶)
@@ -544,8 +759,9 @@ const WD40Page = () => {
                     const numValue = inputValue === '' ? 0 : parseFloat(inputValue)
                     setUnitCapacity(isNaN(numValue) ? 0 : numValue)
                   }}
+                  disabled={isReadOnly}
                   className={`w-full px-4 py-3 border rounded-lg focus:outline-none focus:ring-2 focus:border-transparent transition-all ${
-                    !editPermissions.canEdit ? 'bg-gray-100 cursor-not-allowed' : ''
+                    isReadOnly ? 'bg-gray-100 cursor-not-allowed' : ''
                   }`}
                   style={{ 
                     color: designTokens.colors.textPrimary,
@@ -563,13 +779,12 @@ const WD40Page = () => {
                     (e.target as HTMLInputElement).style.boxShadow = 'none'
                   }}
                   placeholder="請輸入單位容量"
-                  disabled={submitting || !editPermissions.canEdit}
                 />
               </div>
               
               <div>
                 <label 
-                  className="block text-sm font-medium mb-2" 
+                  className="block text-base font-medium mb-2" 
                   style={{ color: designTokens.colors.textPrimary }}
                 >
                   含碳率 (%)
@@ -585,8 +800,9 @@ const WD40Page = () => {
                     const numValue = inputValue === '' ? 0 : parseFloat(inputValue)
                     setCarbonRate(isNaN(numValue) ? 0 : numValue)
                   }}
+                  disabled={isReadOnly}
                   className={`w-full px-4 py-3 border rounded-lg focus:outline-none focus:ring-2 focus:border-transparent transition-all ${
-                    !editPermissions.canEdit ? 'bg-gray-100 cursor-not-allowed' : ''
+                    isReadOnly ? 'bg-gray-100 cursor-not-allowed' : ''
                   }`}
                   style={{ 
                     color: designTokens.colors.textPrimary,
@@ -604,7 +820,6 @@ const WD40Page = () => {
                     (e.target as HTMLInputElement).style.boxShadow = 'none'
                   }}
                   placeholder="請輸入含碳率"
-                  disabled={submitting || !editPermissions.canEdit}
                 />
               </div>
             </div>
@@ -621,7 +836,7 @@ const WD40Page = () => {
           }}
         >
           <h2 
-            className="text-xl font-medium mb-6" 
+            className="text-2xl font-medium mb-6" 
             style={{ color: designTokens.colors.textPrimary }}
           >
             月份使用量數據
@@ -647,7 +862,7 @@ const WD40Page = () => {
                   </h3>
                   {data.totalUsage > 0 && (
                     <span 
-                      className="text-sm font-medium px-2 py-1 rounded"
+                      className="text-base font-medium px-2 py-1 rounded"
                       style={{ 
                         color: designTokens.colors.accentSecondary,
                         backgroundColor: designTokens.colors.accentLight
@@ -661,7 +876,7 @@ const WD40Page = () => {
                 <div className="space-y-4">
                   <div>
                     <label 
-                      className="block text-sm font-medium mb-2" 
+                      className="block text-base font-medium mb-2" 
                       style={{ color: designTokens.colors.textPrimary }}
                     >
                       使用數量 (瓶)
@@ -676,8 +891,9 @@ const WD40Page = () => {
                         const numValue = inputValue === '' ? 0 : parseFloat(inputValue)
                         updateMonthData(index, 'quantity', isNaN(numValue) ? 0 : numValue)
                       }}
+                      disabled={isReadOnly}
                       className={`w-full px-3 py-2 border rounded-md focus:outline-none focus:ring-2 focus:border-transparent transition-all ${
-                        !editPermissions.canEdit ? 'bg-gray-100 cursor-not-allowed' : ''
+                        isReadOnly ? 'bg-gray-100 cursor-not-allowed' : ''
                       }`}
                       style={{ 
                         color: designTokens.colors.textPrimary,
@@ -694,13 +910,12 @@ const WD40Page = () => {
                         (e.target as HTMLInputElement).style.boxShadow = 'none'
                       }}
                       placeholder="0"
-                      disabled={submitting || !editPermissions.canEdit}
                     />
                   </div>
 
                   <div>
                     <label 
-                      className="block text-sm font-medium mb-2" 
+                      className="block text-base font-medium mb-2" 
                       style={{ color: designTokens.colors.textPrimary }}
                     >
                       使用證明
@@ -711,14 +926,62 @@ const WD40Page = () => {
                       files={data.files}
                       onFilesChange={(files) => handleMonthFilesChange(data.month, files)}
                       maxFiles={3}
-                      disabled={submitting || !editPermissions.canUploadFiles}
                       kind="usage_evidence"
+                      disabled={submitting}
                     />
                   </div>
                 </div>
               </div>
             ))}
           </div>
+        </div>
+
+        {/* 檔案管理系統 (使用共用元件測試) */}
+        <div
+          className="rounded-lg border p-6"
+          style={{
+            backgroundColor: designTokens.colors.cardBg,
+            borderColor: designTokens.colors.border,
+            boxShadow: designTokens.shadows.sm
+          }}
+        >
+          <div className="mb-6">
+            <h2
+              className="text-xl font-medium mb-2"
+              style={{ color: designTokens.colors.textPrimary }}
+            >
+              🧪 檔案管理系統測試
+            </h2>
+            <div className="bg-amber-50 border border-amber-200 rounded-lg p-3">
+              <p className="text-base text-amber-700">
+                <strong>開發測試：</strong>這是新的共用檔案管理元件，用於測試和驗證檔案載入功能。
+                它會自動載入已關聯的檔案並與現有檔案上傳功能共存。
+              </p>
+            </div>
+          </div>
+
+          <EvidenceFileManager
+            pageKey={pageKey}
+            entryId={currentEntryId}
+            year={year}
+            onFilesChange={setFileManagerData}
+            currentStatus={currentStatus}
+            supportedTypes={['msds', 'usage_evidence']}
+            className="bg-gray-50 p-4 rounded-lg"
+          />
+
+          {/* 調試資訊 */}
+          {fileManagerData && (
+            <div className="mt-4 bg-gray-100 p-3 rounded text-xs">
+              <strong>檔案統計：</strong>
+              <div>MSDS 檔案: {fileManagerData.msds.length} 個</div>
+              <div>月份檔案: {Object.values(fileManagerData.monthly).reduce((sum, files) => sum + files.length, 0)} 個</div>
+              <div>分配情況: {Object.entries(fileManagerData.monthly)
+                .filter(([_, files]) => files.length > 0)
+                .map(([month, files]) => `${month}月:${files.length}個`)
+                .join(', ') || '無'}</div>
+            </div>
+          )}
         </div>
 
         {/* 底部空間，避免內容被固定底部欄遮擋 */}
@@ -745,12 +1008,12 @@ const WD40Page = () => {
                 </div>
                 <div className="flex-1">
                   <h3 
-                    className="text-lg font-semibold mb-2"
+                    className="text-xl font-semibold mb-2"
                     style={{ color: designTokens.colors.textPrimary }}
                   >
                     發生錯誤
                   </h3>
-                  <div className="text-sm space-y-1">
+                  <div className="text-base space-y-1">
                     {error.split('\n').map((line, index) => (
                       <div key={index}>
                         {line.startsWith('請修正以下問題：') ? (
@@ -839,12 +1102,12 @@ const WD40Page = () => {
                   style={{ backgroundColor: '#f8f9fa' }}
                 >
                   <p 
-                    className="text-sm mb-2 font-medium"
+                    className="text-base mb-2 font-medium"
                     style={{ color: designTokens.colors.textPrimary }}
                   >
                     您的資料已成功儲存，您可以：
                   </p>
-                  <ul className="text-sm space-y-1">
+                  <ul className="text-base space-y-1">
                     <li style={{ color: designTokens.colors.textSecondary }}>
                       • 隨時回來查看或修改資料
                     </li>
@@ -895,13 +1158,13 @@ const WD40Page = () => {
                 </div>
                 <div className="flex-1">
                   <h3 
-                    className="text-lg font-semibold mb-2"
+                    className="text-xl font-semibold mb-2"
                     style={{ color: designTokens.colors.textPrimary }}
                   >
                     確認清除
                   </h3>
                   <p 
-                    className="text-sm"
+                    className="text-base"
                     style={{ color: designTokens.colors.textSecondary }}
                   >
                     清除後，這一頁所有資料都會被移除，確定要繼續嗎？
@@ -938,144 +1201,19 @@ const WD40Page = () => {
         </div>
       )}
 
-      {/* 底部操作欄 - 所有元素在同一行 */}
-      <div className="fixed bottom-0 left-64 xl:left-64 lg:left-56 md:left-48 sm:left-44 right-4 z-40">
-        <div 
-          className="border-t"
-          style={{ 
-            backgroundColor: designTokens.colors.cardBg,
-            borderColor: designTokens.colors.border,
-            boxShadow: designTokens.shadows.lg
-          }}
-        >
-          <div className="max-w-4xl mx-auto px-6 py-4">
-            <div className="flex items-center justify-between">
-              {/* 左側: 自動儲存狀態 */}
-              <div className="flex items-center space-x-2">
-                {hasUnsavedChanges ? (
-                  <>
-                    <div 
-                      className="w-2 h-2 rounded-full animate-pulse"
-                      style={{ backgroundColor: designTokens.colors.warning }}
-                    ></div>
-                    <span 
-                      className="text-sm"
-                      style={{ color: designTokens.colors.textSecondary }}
-                    >
-                      自動儲存中...
-                    </span>
-                  </>
-                ) : (
-                  <>
-                    <div 
-                      className="w-2 h-2 rounded-full"
-                      style={{ backgroundColor: designTokens.colors.success }}
-                    ></div>
-                    <span 
-                      className="text-sm"
-                      style={{ color: designTokens.colors.textSecondary }}
-                    >
-                      已自動儲存
-                    </span>
-                  </>
-                )}
-              </div>
-              
-              {/* 中間: 狀態切換器 */}
-              <div className="flex items-center">
-                {currentEntryId && (
-                  <div className="flex items-center space-x-2">
-                    {isUpdating && (
-                      <Loader2 className="w-4 h-4 animate-spin text-blue-600" />
-                    )}
-                    <StatusSwitcher
-                      currentStatus={currentStatus}
-                      onStatusChange={handleStatusChange}
-                      disabled={submitting || isUpdating}
-                      className="bg-white rounded-lg px-4 py-2 border"
-                    />
-                  </div>
-                )}
-              </div>
-              
-              {/* 右側: 操作按鈕 */}
-              <div className="flex items-center space-x-3">
-                {/* 清除按鈕 - 只在可編輯狀態下顯示 */}
-                {editPermissions.canEdit && (
-                  <button 
-                    onClick={() => setShowClearConfirmModal(true)}
-                    disabled={submitting || isUpdating}
-                    className="px-4 py-2 border rounded-lg disabled:cursor-not-allowed transition-colors flex items-center space-x-2 font-medium disabled:opacity-50"
-                    style={{ 
-                      borderColor: designTokens.colors.border,
-                      color: designTokens.colors.textSecondary
-                    }}
-                    onMouseEnter={(e) => {
-                      if (!submitting) {
-                        (e.target as HTMLButtonElement).style.backgroundColor = '#f3f4f6';
-                      }
-                    }}
-                    onMouseLeave={(e) => {
-                      if (!submitting) {
-                        (e.target as HTMLButtonElement).style.backgroundColor = 'transparent';
-                      }
-                    }}
-                  >
-                    <Trash2 className="w-4 h-4" />
-                    <span>清除</span>
-                  </button>
-                )}
-                
-                {/* 提交按鈕 - 根據狀態顯示不同文字 */}
-                {editPermissions.canEdit ? (
-                  <button 
-                    onClick={handleSubmit}
-                    disabled={submitting || isUpdating}
-                    className="px-6 py-2 text-white rounded-lg disabled:cursor-not-allowed transition-colors flex items-center space-x-2 font-medium disabled:opacity-50"
-                    style={{ 
-                      backgroundColor: (submitting || isUpdating) ? '#9ca3af' : designTokens.colors.accentPrimary
-                    }}
-                    onMouseEnter={(e) => {
-                      if (!submitting && !isUpdating) {
-                        (e.target as HTMLButtonElement).style.backgroundColor = '#388e3c';
-                      }
-                    }}
-                    onMouseLeave={(e) => {
-                      if (!submitting && !isUpdating) {
-                        (e.target as HTMLButtonElement).style.backgroundColor = designTokens.colors.accentPrimary;
-                      }
-                    }}
-                  >
-                    {submitting ? (
-                      <>
-                        <Loader2 className="w-4 h-4 animate-spin" />
-                        <span>提交中...</span>
-                      </>
-                    ) : (
-                      <>
-                        <Upload className="w-4 h-4" />
-                        <span>
-                          {currentStatus === 'draft' ? '提交填報' : 
-                           currentStatus === 'rejected' ? '更新提交' : 
-                           '更新提交'}
-                        </span>
-                      </>
-                    )}
-                  </button>
-                ) : (
-                  <div 
-                    className="px-6 py-2 text-white rounded-lg flex items-center space-x-2 font-medium"
-                    style={{ backgroundColor: '#4caf50' }}
-                  >
-                    <CheckCircle className="w-4 h-4" />
-                    <span>已核准</span>
-                  </div>
-                )}
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
+      {/* 底部操作欄 */}
+      <BottomActionBar
+        currentStatus={currentStatus}
+        currentEntryId={currentEntryId}
+        isUpdating={false}
+        hasSubmittedBefore={hasSubmittedBefore}
+        hasAnyData={hasAnyData}
+        editPermissions={editPermissions}
+        submitting={submitting}
+        onSubmit={handleSubmit}
+        onClear={() => setShowClearConfirmModal(true)}
+        designTokens={designTokens}
+      />
 
       {/* Toast 通知 */}
       {toast && (

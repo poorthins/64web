@@ -1,293 +1,343 @@
-# 企業級架構實施指南
+# 碳足跡盤查系統 - 實作指南
+
+---
+title: 系統實作指南
+version: 2.0
+last_updated: 2025-09-12
+author: Implementation Team
+---
 
 ## 概述
 
-本指南提供了將現有碳排放追蹤系統升級為企業級架構的詳細步驟。整個過程分為多個階段，確保平滑過渡且不影響現有功能。
+本指南提供碳足跡盤查系統的實際實作步驟、最佳實踐，以及新功能開發指引。系統基於 React + Supabase 架構，已完成完整的功能實作。
 
-## 目前完成的工作
+## 系統完成狀態
 
-### ✅ 已完成項目
+### ✅ 核心功能實作完成
 
-1. **架構設計文檔** (`ARCHITECTURE.md`)
-   - 完整的企業級架構設計
-   - 技術棧選擇和升級計劃
-   - 預期效益分析
+1. **認證系統** 
+   - 完整的 Supabase Auth 整合
+   - 角色基礎權限控制 (admin/user)
+   - 增強認證診斷工具
+   - Row Level Security 政策實施
 
-2. **後端基礎架構**
-   - 建立了分層架構目錄結構
-   - 核心配置管理系統 (`backend/src/core/config.py`)
-   - 自定義異常處理 (`backend/src/core/exceptions.py`)
-   - 結構化日誌系統 (`backend/src/infrastructure/logging/logger.py`)
-   - 領域實體模型：
-     - 用戶實體 (`backend/src/domain/entities/user.py`)
-     - 碳排放實體 (`backend/src/domain/entities/carbon_entry.py`)
-   - 資料庫存儲庫基礎介面 (`backend/src/domain/repositories/base.py`)
-   - 錯誤處理中間件 (`backend/src/api/middleware/error_handler.py`)
-   - 更新的依賴管理 (`backend/requirements/base.txt`)
+2. **能源記錄管理系統**
+   - 14個能源類別完整實作
+   - 月度資料填報功能
+   - 提交、審核工作流
+   - 資料驗證和錯誤處理
 
-3. **容器化和部署**
-   - Docker 配置 (`backend/Dockerfile`)
-   - Docker Compose 配置 (`docker-compose.yml`)
-   - 包含 Redis、Celery、Prometheus、Grafana 等服務
+3. **檔案管理系統**
+   - 檔案上傳至 Supabase Storage
+   - 佐證檔案關聯功能
+   - **新功能**: 檔案編輯與重新關聯
+   - 錯誤恢復機制 (Promise.allSettled)
 
-4. **前端基礎架構**
-   - 建立了功能模塊化的目錄結構
-   - API 客戶端基礎架構 (`frontend/src/infrastructure/api/client.ts`)
-   - 錯誤邊界組件 (`frontend/src/shared/components/ErrorBoundary.tsx`)
-   - 更新的依賴和配置：
-     - 添加了企業級依賴 (`frontend/package.json`)
-     - 配置了路徑別名 (`frontend/vite.config.ts`)
+4. **管理員功能**
+   - 用戶管理介面
+   - 提交審核系統
+   - 統計報表功能
+   - 系統監控面板
 
-## 下一步實施計劃
+### ✅ 架構優化完成
 
-### 第一階段：後端服務層實現（1週）
+1. **前端架構優化**
+   - 模組化元件設計
+   - 統一的 API 層
+   - 錯誤處理機制
+   - 狀態管理策略
 
-#### 1.1 實現認證服務
-```bash
-# 創建文件
-backend/src/domain/services/auth_service.py
-backend/src/infrastructure/auth/jwt_handler.py
-backend/src/api/v1/auth/routes.py
+2. **後端服務整合**
+   - Supabase 完整整合
+   - RLS 政策實施
+   - 觸發器和函數
+   - Storage 政策配置
+
+3. **開發工具完善**
+   - TypeScript 完整覆蓋
+   - 測試框架建立 (Vitest + Playwright)
+   - 認證診斷工具
+   - 完整文檔系統
+
+## 新功能開發指南
+
+### 檔案編輯功能實作範例
+
+#### 1. API 層實作
+新增檔案管理 API 函數：
+
+```typescript
+// src/api/files.ts
+export async function getEntryFiles(entryId: string): Promise<EvidenceFile[]> {
+  console.log('🔍 [getEntryFiles] Querying entry_files for entry_id:', entryId)
+  const { data, error } = await supabase
+    .from('entry_files')
+    .select('*')
+    .eq('entry_id', entryId)
+    .order('created_at', { ascending: false })
+  
+  if (error) throw error
+  return data || []
+}
+
+export async function updateFileEntryAssociation(
+  fileId: string, 
+  entryId: string
+): Promise<void> {
+  const { error } = await supabase
+    .from('entry_files')
+    .update({ entry_id: entryId })
+    .eq('id', fileId)
+  
+  if (error) throw error
+}
 ```
 
-#### 1.2 實現用戶管理服務
-```bash
-# 創建文件
-backend/src/domain/services/user_service.py
-backend/src/domain/repositories/user_repository.py
-backend/src/infrastructure/database/repositories/user_repository_impl.py
-backend/src/api/v1/users/routes.py
+#### 2. 錯誤恢復機制實作
+使用 Promise.allSettled 處理批量操作：
+
+```typescript
+// 批量檔案關聯，支援部分失敗
+const results = await Promise.allSettled(
+  unassociatedFiles.map(file => 
+    updateFileEntryAssociation(file.id, entry_id)
+  )
+)
+
+const failed = results
+  .filter(result => result.status === 'rejected')
+  .map((result, index) => ({ 
+    index, 
+    error: (result as PromiseRejectedResult).reason 
+  }))
+
+if (failed.length > 0) {
+  console.warn('部分檔案關聯失敗:', failed)
+  // 實施用戶通知邏輯
+}
 ```
 
-#### 1.3 實現碳排放管理服務
-```bash
-# 創建文件
-backend/src/domain/services/carbon_service.py
-backend/src/domain/repositories/carbon_repository.py
-backend/src/infrastructure/database/repositories/carbon_repository_impl.py
-backend/src/api/v1/carbon/routes.py
+#### 3. 前端元件整合
+在頁面元件中整合檔案編輯功能：
+
+```typescript
+// 載入現有檔案
+useEffect(() => {
+  if (existingEntry?.id) {
+    loadAssociatedFiles(existingEntry.id)
+  }
+}, [existingEntry])
+
+const loadAssociatedFiles = async (entryId: string) => {
+  try {
+    const files = await getEntryFiles(entryId)
+    // 分類檔案到對應月份
+    categorizeFiles(files)
+  } catch (error) {
+    console.error('載入檔案失敗:', error)
+  }
+}
 ```
 
-### 第二階段：前端功能模塊實現（1週）
+### 狀態管理簡化實作
 
-#### 2.1 認證功能模塊
-```bash
-# 創建文件
-frontend/src/features/auth/services/authService.ts
-frontend/src/features/auth/stores/authStore.ts
-frontend/src/features/auth/components/LoginForm.tsx
-frontend/src/features/auth/hooks/useAuth.ts
+#### 移除 Draft 狀態
+```typescript
+// 舊版本 - 包含 draft 狀態
+type EntryStatus = 'draft' | 'submitted' | 'under_review' | 'approved' | 'rejected'
+
+// 新版本 - 簡化狀態
+type EntryStatus = 'submitted' | 'approved' | 'rejected'
+
+// 提交邏輯簡化
+const handleSubmit = async () => {
+  // 直接提交為 submitted 狀態
+  const { entry_id } = await upsertEnergyEntry({
+    ...entryInput,
+    // 不再有保存草稿選項
+  })
+}
 ```
 
-#### 2.2 管理功能模塊
-```bash
-# 遷移現有管理功能到新架構
-frontend/src/features/admin/services/adminService.ts
-frontend/src/features/admin/stores/adminStore.ts
-frontend/src/features/admin/components/[遷移現有組件]
+### 認證診斷工具實作
+
+#### 自動診斷啟用
+```typescript
+// src/utils/authDiagnostics.ts
+export function isDiagnosticMode(): boolean {
+  return (
+    import.meta.env.DEV || // 開發環境自動啟用
+    import.meta.env.VITE_AUTH_DIAGNOSTIC === 'true' ||
+    localStorage.getItem('auth_diagnostic_mode') === 'true'
+  )
+}
+
+export async function diagnoseAuthState() {
+  if (!isDiagnosticMode()) return null
+  
+  // 詳細的認證狀態檢查
+  const userResult = await supabase.auth.getUser()
+  const sessionResult = await supabase.auth.getSession()
+  
+  return {
+    isAuthenticated: !!(userResult.data.user && sessionResult.data.session),
+    user: userResult.data.user,
+    session: sessionResult.data.session,
+    // ... 其他診斷資訊
+  }
+}
 ```
 
-#### 2.3 碳排放功能模塊
+## 開發環境設置
+
+### 1. 前端開發環境
 ```bash
-# 遷移現有碳排放功能
-frontend/src/features/carbon/services/carbonService.ts
-frontend/src/features/carbon/stores/carbonStore.ts
-frontend/src/features/carbon/components/[遷移現有組件]
-```
-
-### 第三階段：測試和監控（3-4天）
-
-#### 3.1 後端測試
-```bash
-# 單元測試
-backend/tests/unit/test_services.py
-backend/tests/unit/test_repositories.py
-
-# 集成測試
-backend/tests/integration/test_api.py
-backend/tests/integration/test_database.py
-```
-
-#### 3.2 前端測試
-```bash
-# 組件測試
-frontend/src/features/*/components/*.test.tsx
-
-# 集成測試
-frontend/tests/integration/*.test.ts
-
-# E2E 測試
-frontend/tests/e2e/*.spec.ts
-```
-
-#### 3.3 監控設置
-```bash
-# Prometheus 配置
-monitoring/prometheus.yml
-
-# Grafana 儀表板
-monitoring/grafana/dashboards/
-```
-
-### 第四階段：遷移和部署（3-4天）
-
-#### 4.1 數據遷移
-1. 備份現有數據
-2. 運行遷移腳本
-3. 驗證數據完整性
-
-#### 4.2 漸進式部署
-1. 部署到測試環境
-2. 執行完整測試套件
-3. 灰度發布到生產環境
-4. 監控和回滾計劃
-
-## 關鍵實施步驟
-
-### 1. 環境準備
-```bash
-# 安裝後端依賴
-cd backend
-pip install -r requirements/base.txt
-
-# 安裝前端依賴
+# 切換到前端目錄
 cd frontend
+
+# 安裝依賴
 npm install
-```
 
-### 2. 配置環境變量
-```bash
-# 複製環境變量模板
-cp backend/.env.example backend/.env
-cp frontend/.env.example frontend/.env
+# 設定環境變數
+cp .env.example .env
+# 編輯 .env 填入 Supabase 連接資訊
+VITE_SUPABASE_URL=your_supabase_project_url
+VITE_SUPABASE_ANON_KEY=your_supabase_anon_key
 
-# 編輯並填入實際值
-```
-
-### 3. 啟動開發環境
-```bash
-# 使用 Docker Compose
-docker-compose up -d
-
-# 或分別啟動服務
-# 後端
-cd backend
-python app.py
-
-# 前端
-cd frontend
+# 啟動開發服務器
 npm run dev
 ```
 
-### 4. 運行測試
-```bash
-# 後端測試
-cd backend
-pytest
+### 2. Supabase 設置
+```sql
+-- 設置 RLS 政策
+-- 確保 energy_entries 表的 RLS 政策
+CREATE POLICY "Users can view own entries" ON energy_entries
+  FOR SELECT USING (auth.uid() = owner_id);
 
-# 前端測試
-cd frontend
+-- 確保 review_history 的插入政策
+CREATE POLICY "Allow insert for review history" ON review_history
+  FOR INSERT WITH CHECK (true);
+```
+
+### 3. 開發工具設置
+```bash
+# TypeScript 檢查
+npm run type-check
+
+# 代碼格式檢查
+npm run lint
+
+# 運行測試
 npm run test
+
+# E2E 測試
 npm run test:e2e
 ```
 
-## 遷移策略
+## 部署和維護
 
-### 1. 代碼遷移
-- 保持現有 API 端點不變
-- 逐步將邏輯從 `app.py` 遷移到服務層
-- 使用適配器模式包裝現有功能
+### 1. 生產部署
+```bash
+# 建置生產版本
+npm run build
 
-### 2. 數據庫遷移
-- 使用 Alembic 管理數據庫版本
-- 創建向後兼容的遷移腳本
-- 保留原有表結構，逐步優化
+# 部署到 Vercel（推薦）
+vercel --prod
 
-### 3. 前端遷移
-- 保持現有路由結構
-- 逐個功能模塊遷移
-- 使用功能開關控制新舊版本
+# 或部署到其他平台
+# 上傳 dist/ 資料夾到靜態網站服務
+```
 
-## 風險管理
+### 2. 監控和診斷
+```typescript
+// 開啟診斷模式進行除錯
+localStorage.setItem('auth_diagnostic_mode', 'true')
 
-### 潛在風險
-1. **數據遷移失敗**
-   - 緩解：完整備份、回滾計劃
-   
-2. **性能下降**
-   - 緩解：性能測試、緩存優化
-   
-3. **用戶體驗中斷**
-   - 緩解：漸進式部署、功能開關
+// 檢查 Supabase 連接
+const { data, error } = await supabase
+  .from('profiles')
+  .select('count')
+  .single()
+```
 
-### 回滾計劃
-1. 保留舊版本代碼和部署
-2. 數據庫備份和還原程序
-3. 快速切換機制
+### 3. 效能最佳化
+```typescript
+// 使用 React.memo 避免不必要重渲染
+export const StatusIndicator = React.memo(({ status }) => {
+  // 元件實作
+})
 
-## 監控指標
+// 程式碼分割
+const AdminDashboard = lazy(() => import('./admin/AdminDashboard'))
+```
 
-### 關鍵性能指標 (KPIs)
-- API 響應時間 < 200ms (P95)
-- 錯誤率 < 0.1%
-- 可用性 > 99.9%
-- 並發用戶數支持 > 1000
+## 故障排除指南
 
-### 監控工具
-- **Prometheus**: 系統指標
-- **Grafana**: 可視化儀表板
-- **Sentry**: 錯誤追蹤
-- **ELK Stack**: 日誌分析
+### 常見問題解決
 
-## 維護計劃
+#### 1. RLS 權限錯誤
+```bash
+# 檢查用戶權限
+SELECT auth.uid(), auth.role();
 
-### 日常維護
-- 監控儀表板檢查
-- 日誌審查
-- 性能優化
-- 安全更新
+# 檢查 RLS 政策
+SELECT * FROM pg_policies WHERE tablename = 'energy_entries';
+```
 
-### 定期審查
-- 月度性能報告
-- 季度架構審查
-- 年度技術債務評估
+#### 2. 檔案上傳失敗
+```typescript
+// 檢查 Storage 政策
+const { data, error } = await supabase.storage
+  .from('evidence')
+  .list('test', { limit: 1 })
+```
 
-## 團隊培訓
+#### 3. 認證問題診斷
+```typescript
+// 使用診斷工具
+import { diagnoseAuthState } from './utils/authDiagnostics'
+const diagnosis = await diagnoseAuthState()
+console.log('認證診斷:', diagnosis)
+```
 
-### 開發團隊
-1. 新架構概述
-2. 開發規範和最佳實踐
-3. 測試策略
-4. 部署流程
+## 開發最佳實踐
 
-### 運維團隊
-1. 容器化和編排
-2. 監控和告警
-3. 故障排除
-4. 備份和恢復
+### 1. 程式碼規範
+- 使用 TypeScript 嚴格模式
+- 遵循 ESLint 規則
+- 統一的錯誤處理模式
 
-## 成功標準
+### 2. 元件設計原則
+- 單一職責原則
+- Props 介面清晰
+- 錯誤邊界保護
 
-1. **技術指標**
-   - 所有測試通過
-   - 性能達標
-   - 零數據丟失
+### 3. 狀態管理
+- 最小狀態原則
+- 狀態就近管理
+- 避免不必要的全域狀態
 
-2. **業務指標**
-   - 用戶滿意度維持或提升
-   - 系統穩定性提升
-   - 開發效率提升 30%
+### 4. 安全考量
+- 永遠驗證用戶輸入
+- 依賴後端 RLS 政策
+- 不在前端存儲敏感資料
 
-## 時間表總覽
+## 相關文檔
 
-| 階段 | 時間 | 主要任務 |
-|------|------|----------|
-| 第一階段 | 第1週 | 後端服務層實現 |
-| 第二階段 | 第2週 | 前端功能模塊實現 |
-| 第三階段 | 第3週前半 | 測試和監控設置 |
-| 第四階段 | 第3週後半 | 遷移和部署 |
-| 穩定期 | 第4週 | 監控、優化和文檔完善 |
+- [API 文檔](./API_DOCUMENTATION.md) - 完整的 API 說明
+- [前端架構文檔](./FRONTEND_ARCHITECTURE.md) - 前端系統架構
+- [資料庫架構](./DATABASE_SCHEMA.md) - 資料庫設計
+- [認證診斷工具](./AUTH_DIAGNOSTICS_USAGE.md) - 認證問題診斷
 
-## 結論
+## 版本歷史
 
-這個企業級架構升級將顯著提升系統的可擴展性、可維護性和可靠性。通過分階段實施和充分的測試，我們可以確保平滑過渡，同時為未來的增長奠定堅實基礎。
+| 版本 | 日期 | 變更內容 | 作者 |
+|------|------|----------|------|
+| 2.0 | 2025-09-12 | 更新為實際實作指南，移除理論架構 | System |
+| 1.0 | 2025-09-09 | 初始企業架構實施指南 | System |
+
+---
+**最後更新**: 2025-09-12  
+**狀態**: 實作完成  
+**維護團隊**: 全端開發組

@@ -56,7 +56,6 @@ export function useStatusManager({
 
       // 顯示成功訊息
       const statusLabels: Record<EntryStatus, string> = {
-        draft: '草稿',
         submitted: '已提交',
         approved: '已核准',
         rejected: '已駁回'
@@ -69,8 +68,6 @@ export function useStatusManager({
         // 根據狀態轉換提供更具體的訊息
         if (newStatus === 'submitted') {
           message = '資料已提交，等待審核'
-        } else if (newStatus === 'draft') {
-          message = '狀態已回退為草稿，可繼續編輯'
         } else {
           message = `狀態已更新為「${statusLabels[newStatus]}」`
         }
@@ -95,8 +92,7 @@ export function useStatusManager({
   const canAutoTransition = useCallback((fromStatus: EntryStatus, toStatus: EntryStatus): boolean => {
     // 定義允許的自動轉換路徑
     const allowedTransitions: Record<EntryStatus, EntryStatus[]> = {
-      draft: ['submitted'], // 草稿可以自動轉為已提交
-      submitted: ['draft'], // 已提交可以自動回退為草稿
+      submitted: [], // 已提交不允許自動轉換
       approved: [], // 已核准不允許自動轉換
       rejected: ['submitted'] // 已駁回可以自動轉為已提交
     }
@@ -111,7 +107,7 @@ export function useStatusManager({
     }
   }, [currentStatus, canAutoTransition, updateStatus])
 
-  // 處理資料被修改時的狀態回退
+  // 處理資料被修改時的狀態處理
   const handleDataModified = useCallback(async (): Promise<void> => {
     // 防止過於頻繁的狀態更新
     const now = Date.now()
@@ -120,11 +116,9 @@ export function useStatusManager({
     }
     lastModifiedTimeRef.current = now
 
-    // 只有在已提交狀態下才需要回退為草稿
-    if (currentStatus === 'submitted' && canAutoTransition(currentStatus, 'draft')) {
-      await updateStatus('draft', '資料已修改')
-    }
-  }, [currentStatus, canAutoTransition, updateStatus])
+    // 資料修改時的狀態處理（不再回退為草稿）
+    // 可以在這裡加入其他狀態處理邏輯
+  }, [])
 
   return {
     currentStatus,

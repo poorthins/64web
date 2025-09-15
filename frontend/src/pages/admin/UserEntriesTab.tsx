@@ -117,11 +117,11 @@ const UserEntriesTab: React.FC<UserEntriesTabProps> = ({ userId, userName, onBac
   }
 
   const getLatestReviewStatus = (entry: Submission) => {
-    if (!entry.entry_reviews || entry.entry_reviews.length === 0) {
+    if (!entry.review_history || entry.review_history.length === 0) {
       return { status: 'pending', note: '', icon: <AlertTriangle className="h-4 w-4 text-yellow-500" /> }
     }
 
-    const latest = entry.entry_reviews.sort((a, b) => 
+    const latest = entry.review_history.sort((a, b) => 
       new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
     )[0]
 
@@ -497,9 +497,9 @@ const UserEntriesTab: React.FC<UserEntriesTabProps> = ({ userId, userName, onBac
                     
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-2">審核歷史</label>
-                      {entry.entry_reviews && entry.entry_reviews.length > 0 ? (
+                      {entry.review_history && entry.review_history.length > 0 ? (
                         <div className="space-y-2">
-                          {entry.entry_reviews.map((review) => (
+                          {entry.review_history.map((review) => (
                             <div key={review.id} className="border rounded-lg p-3 bg-gray-50">
                               <div className="flex items-center justify-between">
                                 <div className="flex items-center gap-2">

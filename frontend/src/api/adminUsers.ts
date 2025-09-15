@@ -30,6 +30,10 @@ export interface UserUpdateData {
   is_active?: boolean
 }
 
+export interface FillingConfig {
+  diesel_generator_mode: 'refuel' | 'test'
+}
+
 export interface CreateUserData {
   email: string
   password: string
@@ -38,6 +42,7 @@ export interface CreateUserData {
   job_title?: string
   phone?: string
   role?: string
+  filling_config?: FillingConfig
 }
 
 /**
@@ -312,7 +317,8 @@ export async function createUser(userData: CreateUserData): Promise<UserProfile>
       job_title: userData.job_title,
       phone: userData.phone,
       role: userData.role || 'user',
-      is_active: true
+      is_active: true,
+      filling_config: userData.filling_config || { diesel_generator_mode: 'refuel' }
     }
 
     const { data: profileResult, error: profileError } = await supabase

@@ -17,7 +17,7 @@ export interface Submission {
     display_name: string
     email?: string
   } | null
-  entry_reviews: ReviewStatus[]
+  review_history: ReviewStatus[]
 }
 
 export interface ReviewStatus {
@@ -77,7 +77,7 @@ export async function getAllUsersWithSubmissions(): Promise<UserWithSubmissions[
         id,
         owner_id,
         created_at,
-        entry_reviews (
+        review_history (
           status
         )
       `)
@@ -113,9 +113,9 @@ export async function getAllUsersWithSubmissions(): Promise<UserWithSubmissions[
       }
 
       // 統計審核狀態
-      if (submission.entry_reviews && submission.entry_reviews.length > 0) {
+      if (submission.review_history && submission.review_history.length > 0) {
         // 取最新的審核狀態
-        const latestReview = submission.entry_reviews[submission.entry_reviews.length - 1]
+        const latestReview = submission.review_history[submission.review_history.length - 1]
         switch (latestReview.status) {
           case 'approved':
             existing.approved++
@@ -192,14 +192,14 @@ export async function getUserSubmissions(userId: string): Promise<Submission[]> 
           display_name,
           email
         ),
-        entry_reviews (
+        review_history (
           id,
           entry_id,
           status,
           note,
           reviewed_by,
           created_at,
-          reviewer_profiles:profiles!entry_reviews_reviewed_by_fkey (
+          reviewer_profiles:profiles!review_history_reviewed_by_fkey (
             display_name
           )
         )
@@ -234,7 +234,7 @@ export async function reviewSubmission(
     if (authResult.error) throw authResult.error
 
     const { error: reviewError } = await supabase
-      .from('entry_reviews')
+      .from('review_history')
       .insert({
         entry_id: entryId,
         status,
@@ -284,7 +284,7 @@ export async function getSubmissionStats(): Promise<SubmissionStats> {
       .select(`
         id,
         owner_id,
-        entry_reviews (
+        review_history (
           status
         )
       `)
@@ -305,8 +305,8 @@ export async function getSubmissionStats(): Promise<SubmissionStats> {
         uniqueUsers.add(submission.owner_id)
       }
 
-      if (submission.entry_reviews && submission.entry_reviews.length > 0) {
-        const latestReview = submission.entry_reviews[submission.entry_reviews.length - 1]
+      if (submission.review_history && submission.review_history.length > 0) {
+        const latestReview = submission.review_history[submission.review_history.length - 1]
         switch (latestReview.status) {
           case 'approved':
             approvedReviews++
@@ -358,7 +358,7 @@ export async function bulkReviewSubmissions(
     }))
 
     const { error } = await supabase
-      .from('entry_reviews')
+      .from('review_history')
       .insert(reviewRecords)
 
     if (error) {
@@ -472,7 +472,7 @@ export async function completeUserReview(
       .from('energy_entries')
       .select(`
         id,
-        entry_reviews (
+        review_history (
           status,
           created_at
         )
@@ -487,13 +487,13 @@ export async function completeUserReview(
     
     if (entries) {
       for (const entry of entries) {
-        if (!entry.entry_reviews || entry.entry_reviews.length === 0) {
+        if (!entry.review_history || entry.review_history.length === 0) {
           allApproved = false
           break
         }
 
         // 取得最新審核狀態
-        const latestReview = entry.entry_reviews.sort((a, b) => 
+        const latestReview = entry.review_history.sort((a, b) => 
           new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
         )[0]
 
@@ -545,14 +545,14 @@ export async function getSubmissionDetail(entryId: string): Promise<Submission &
           display_name,
           email
         ),
-        entry_reviews (
+        review_history (
           id,
           entry_id,
           status,
           note,
           reviewed_by,
           created_at,
-          reviewer_profiles:profiles!entry_reviews_reviewed_by_fkey (
+          reviewer_profiles:profiles!review_history_reviewed_by_fkey (
             display_name
           )
         )
@@ -564,7 +564,6 @@ export async function getSubmissionDetail(entryId: string): Promise<Submission &
       throw handleAPIError(entryError, '無法取得填報詳細資訊')
     }
 
-    // TODO: 查詢關聯的檔案
     // 這裡應該查詢檔案表來取得相關檔案
     const files: any[] = []
 

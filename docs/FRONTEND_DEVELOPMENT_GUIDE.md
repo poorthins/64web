@@ -1,15 +1,39 @@
 # 山椒魚組織型碳足跡盤查系統 - 前端開發指引
 
+---
+title: 前端開發指引
+version: 2.0
+last_updated: 2025-09-12
+author: Frontend Development Team
+---
+
 ## 專案概述
 
 這是一個企業級碳排放盤查和能源管理系統，專門用於企業進行範疇一、二、三的碳足跡追蹤作業。系統採用現代化的 JAMstack 架構，基於 React + TypeScript + Supabase 技術棧構建。
 
 ### 核心業務流程
 1. **用戶認證與授權** - 基於 Supabase Auth 的安全認證
-2. **能源資料填報** - 支援 14 種能源類別的月度資料輸入
+2. **能源資料填報** - 支援 12 種範疇一能源類別的月度資料輸入
 3. **佐證檔案管理** - 檔案上傳、預覽、管理功能
 4. **資料審核流程** - 管理員審核用戶提交的資料
 5. **報表統計分析** - 碳排放數據的統計與視覺化
+
+### 範疇一能源類別 (12 種)
+**固體燃料與化學品：**
+- WD-40 (氣霧式潤滑劑)
+- 乙炔 (焊接氣體)
+- 冷媒 (空調製冷)
+- 化糞池 (有機廢棄物處理)
+- 尿素 (DEF柴油車尾氣處理)
+- 焊條 (電焊材料)
+- 滅火器 (消防設備)
+
+**液體燃料：**
+- 天然氣 (管線瓦斯)
+- 柴油 (車輛燃料)
+- 汽油 (車輛燃料) 
+- 液化石油氣 (LPG)
+- 柴油(發電機) (備用發電)
 
 ## 技術架構
 
@@ -52,7 +76,6 @@ frontend/
 │   ├── api/                    # API 層 - Supabase 整合
 │   │   ├── entries.ts          # 能源記錄 API
 │   │   ├── files.ts            # 檔案管理 API
-│   │   ├── drafts.ts           # 草稿功能 API
 │   │   ├── adminUsers.ts       # 用戶管理 API
 │   │   └── adminMetrics.ts     # 統計數據 API
 │   │
@@ -81,11 +104,19 @@ frontend/
 │   │   └── supabaseClient.ts   # Supabase 客戶端
 │   │
 │   ├── pages/                  # 頁面組件
-│   │   ├── Category1/          # 範疇一能源類別
-│   │   │   ├── WD40Page.tsx
-│   │   │   ├── AcetylenePage.tsx
-│   │   │   ├── RefrigerantPage.tsx
-│   │   │   └── ...
+│   │   ├── Category1/          # 範疇一能源類別 (12個頁面)
+│   │   │   ├── WD40Page.tsx           # WD-40 潤滑劑
+│   │   │   ├── AcetylenePage.tsx      # 乙炔氣體
+│   │   │   ├── RefrigerantPage.tsx    # 冷媒
+│   │   │   ├── SepticTankPage.tsx     # 化糞池
+│   │   │   ├── NaturalGasPage.tsx     # 天然氣
+│   │   │   ├── UreaPage.tsx           # 尿素
+│   │   │   ├── DieselGeneratorPage.tsx # 柴油(發電機)
+│   │   │   ├── DieselPage.tsx         # 柴油
+│   │   │   ├── GasolinePage.tsx       # 汽油
+│   │   │   ├── LPGPage.tsx            # 液化石油氣
+│   │   │   ├── FireExtinguisherPage.tsx # 滅火器
+│   │   │   └── WeldingRodPage.tsx     # 焊條
 │   │   ├── Category2/          # 範疇二
 │   │   │   └── ElectricityBillPage.tsx
 │   │   ├── Category3/          # 範疇三
@@ -106,7 +137,9 @@ frontend/
 │   │   └── utils/
 │   │
 │   └── utils/                  # 工具函數
-│       └── testEntries.ts
+│       ├── designTokens.ts     # 統一設計語言
+│       ├── testEntries.ts      # 測試工具
+│       └── ...
 │
 ├── public/                     # 靜態資源
 ├── tests/                      # 測試文件
@@ -119,6 +152,123 @@ frontend/
 ├── tsconfig.json              # TypeScript 配置
 └── vite.config.ts             # Vite 配置
 ```
+
+## 核心組件架構
+
+### 1. BottomActionBar 組件
+統一的底部操作欄組件，用於所有範疇一頁面：
+
+```typescript
+// src/components/BottomActionBar.tsx
+interface BottomActionBarProps {
+  pageKey: string              // 頁面標識符 (必須使用 const 變數)
+  onSave: () => Promise<void>  // 儲存草稿回調
+  onSubmit: () => Promise<void> // 提交回調
+  canSubmit: boolean           // 是否可提交
+  hasChanges: boolean          // 是否有變更
+  loading?: boolean            // 載入狀態
+}
+```
+
+**使用範例：**
+```typescript
+export default function SomePage() {
+  const pageKey = 'natural_gas' // 統一格式：使用 const 變數
+  
+  return (
+    <div>
+      {/* 頁面內容 */}
+      <BottomActionBar
+        pageKey={pageKey}
+        onSave={handleSave}
+        onSubmit={handleSubmit}
+        canSubmit={canSubmit}
+        hasChanges={hasChanges}
+      />
+    </div>
+  )
+}
+```
+
+### 2. StatusIndicator 組件
+統一的狀態指示器，顯示資料審核狀態：
+
+```typescript
+interface StatusIndicatorProps {
+  status: EntryStatus          // 狀態值
+  className?: string           // 自定義樣式
+}
+
+// 支援的狀態類型
+type EntryStatus = 'submitted' | 'approved' | 'rejected'
+```
+
+### 3. Design Tokens 系統
+統一的設計語言配置 (`src/utils/designTokens.ts`)：
+
+```typescript
+export const designTokens = {
+  colors: {
+    background: '#f8fffe',
+    cardBg: '#ffffff',
+    border: '#e0f2f1',
+    textPrimary: '#1f2937',
+    textSecondary: '#546e7a',
+    accentPrimary: '#4caf50',
+    accentSecondary: '#26a69a',
+    accentLight: '#e8f5e8',
+    accentBlue: '#5dade2',
+    primary: '#2E7D32',
+    blue: '#1976D2',
+    orange: '#FF9800',
+    error: '#ef4444',
+    warning: '#f59e0b',
+    success: '#10b981'
+  },
+  spacing: { xs: '4px', sm: '8px', md: '16px', lg: '24px', xl: '32px', xxl: '48px' },
+  shadows: {
+    sm: '0 1px 2px 0 rgb(0 0 0 / 0.05)',
+    md: '0 4px 6px -1px rgb(0 0 0 / 0.1)',
+    lg: '0 10px 15px -3px rgb(0 0 0 / 0.1)'
+  },
+  borderRadius: { sm: '6px', md: '8px', lg: '12px' }
+}
+```
+
+## pageKey 命名規範
+
+所有範疇一頁面必須遵循統一的 pageKey 定義格式：
+
+```typescript
+// ✅ 正確格式
+export default function WD40Page() {
+  const pageKey = 'wd40'
+  // 使用 pageKey 變數
+  return <BottomActionBar pageKey={pageKey} ... />
+}
+
+// ❌ 錯誤格式
+export default function WD40Page() {
+  // 直接寫死字串
+  return <BottomActionBar pageKey="wd40" ... />
+}
+```
+
+**已實現的 pageKey 對照表：**
+| 能源類別 | pageKey | 頁面檔名 |
+|---------|---------|----------|
+| WD-40 | `wd40` | WD40Page.tsx |
+| 乙炔 | `acetylene` | AcetylenePage.tsx |
+| 冷媒 | `refrigerant` | RefrigerantPage.tsx |
+| 化糞池 | `septictank` | SepticTankPage.tsx |
+| 天然氣 | `natural_gas` | NaturalGasPage.tsx |
+| 尿素 | `urea` | UreaPage.tsx |
+| 柴油(發電機) | `diesel_generator_refuel`, `diesel_generator_test` | DieselGeneratorPage.tsx |
+| 柴油 | `diesel` | DieselPage.tsx |
+| 汽油 | `gasoline` | GasolinePage.tsx |
+| 液化石油氣 | `lpg` | LPGPage.tsx |
+| 焊條 | `welding_rod` | WeldingRodPage.tsx |
+| 滅火器 | `fire_extinguisher`, `fire_extinguisher_maintenance` | FireExtinguisherPage.tsx |
 
 ## 核心業務模組
 
@@ -277,17 +427,7 @@ const WD40Page = () => {
     }))
   )
 
-  // 自動保存草稿功能
-  const debouncedSaveDraft = useCallback(
-    debounce(async (payload: DraftPayload) => {
-      try {
-        await saveDraftWithBackup('wd40', payload)
-      } catch (error) {
-        console.warn('Auto-save failed:', error)
-      }
-    }, 2000),
-    []
-  )
+  // Auto-save functionality removed - direct submission only
 
   // 提交邏輯
   const handleSubmit = async () => {
@@ -720,95 +860,6 @@ export async function listEvidence(pageKey: string, month?: number): Promise<Evi
 }
 ```
 
-#### 草稿功能 API
-```typescript
-// src/api/drafts.ts
-export interface DraftPayload {
-  year: number
-  unitCapacity?: number
-  carbonRate?: number
-  monthly?: Record<string, number>
-  [key: string]: any
-}
-
-/**
- * 載入草稿並提供回退機制
- */
-export async function loadDraftWithFallback(pageKey: string): Promise<DraftPayload | null> {
-  try {
-    const { data: { user } } = await supabase.auth.getUser()
-    if (!user) {
-      return null
-    }
-
-    const { data, error } = await supabase
-      .from('form_drafts')
-      .select('payload')
-      .eq('page_key', pageKey)
-      .maybeSingle()
-
-    if (error) {
-      console.warn('Error loading draft:', error)
-      return null
-    }
-
-    return data?.payload || null
-  } catch (error) {
-    console.warn('Error in loadDraftWithFallback:', error)
-    return null
-  }
-}
-
-/**
- * 儲存草稿並提供備份機制
- */
-export async function saveDraftWithBackup(pageKey: string, payload: DraftPayload): Promise<void> {
-  try {
-    const { data: { user } } = await supabase.auth.getUser()
-    if (!user) {
-      return
-    }
-
-    const { error } = await supabase
-      .from('form_drafts')
-      .upsert({
-        page_key: pageKey,
-        payload: payload
-      })
-
-    if (error) {
-      console.warn('Error saving draft:', error)
-      throw error
-    }
-  } catch (error) {
-    console.warn('Error in saveDraftWithBackup:', error)
-    throw error
-  }
-}
-
-/**
- * 提交成功後清理草稿資料
- */
-export async function cleanupAfterSubmission(pageKey: string): Promise<void> {
-  try {
-    const { data: { user } } = await supabase.auth.getUser()
-    if (!user) {
-      return
-    }
-
-    const { error } = await supabase
-      .from('form_drafts')
-      .delete()
-      .eq('page_key', pageKey)
-
-    if (error) {
-      console.warn('Error cleaning up draft:', error)
-    }
-  } catch (error) {
-    console.warn('Error in cleanupAfterSubmission:', error)
-  }
-}
-```
 
 ### 4. 通用組件設計
 
@@ -1246,13 +1297,6 @@ interface DatabaseSchema {
     file_size: number
   }
 
-  form_drafts: {
-    id: string
-    user_id: string // 外鍵 → profiles.id  
-    page_key: string // 頁面標識
-    payload: DraftPayload // 草稿數據
-    updated_at: string
-  }
 }
 ```
 
@@ -1298,7 +1342,6 @@ const queryKeys = {
   entry: (id: string) => ['entries', id] as const,
   userEntries: (userId: string) => ['entries', 'user', userId] as const,
   files: (pageKey: string, month?: number) => ['files', pageKey, month] as const,
-  draft: (pageKey: string) => ['draft', pageKey] as const,
 }
 
 // 使用範例
@@ -1627,3 +1670,15 @@ const testStorageAccess = async () => {
 5. **安全可靠** - 基於 RLS 的安全架構
 
 系統採用現代化的技術棧和企業級的架構設計，為未來的擴展和維護奠定了堅實的基礎。隨著業務需求的變化，這個架構可以靈活適應並持續演進。
+
+## 版本歷史
+
+| 版本 | 日期 | 變更內容 | 作者 |
+|------|------|----------|------|
+| 2.0 | 2025-09-12 | 移除草稿功能，更新為實際開發指引 | Frontend Team |
+| 1.0 | 2025-09-09 | 初始前端開發指引 | Frontend Team |
+
+---
+**最後更新**: 2025-09-12  
+**狀態**: 已完成  
+**維護團隊**: 前端開發組

@@ -1,455 +1,869 @@
-import { useState, useMemo } from 'react';
-import FileUpload from '../../components/FileUpload';
+import { useState, useEffect, useMemo, useCallback } from 'react'
+import { AlertCircle, CheckCircle, Loader2, X, Trash2, Plus } from 'lucide-react'
+import EvidenceUpload from '../../components/EvidenceUpload'
+import { EntryStatus } from '../../components/StatusSwitcher'
+import Toast, { ToastType } from '../../components/Toast'
+import BottomActionBar from '../../components/BottomActionBar'
+import { useEditPermissions } from '../../hooks/useEditPermissions'
+import { useFrontendStatus } from '../../hooks/useFrontendStatus'
+import { commitEvidence, getEntryFiles, EvidenceFile } from '../../api/files'
+import { upsertEnergyEntry, UpsertEntryInput, updateEntryStatus, getEntryByPageKeyAndYear } from '../../api/entries'
+import { designTokens } from '../../utils/designTokens'
 
-interface ElectricityBillData {
-  paymentMonth: string;           // 繳費年月 (例: 113/01)
-  startDate: string;              // 計費期間起日
-  endDate: string;                // 計費期間迄日
-  usage: number;                  // 計費度數 (kWh)
-  proofFile: File | null;         // 電費單掃描件
+// 簡化的帳單資料結構
+interface SimpleBillData {
+  id: string
+  paymentMonth: number // 繳費月份 (1-12)
+  billingStart: string // 計費開始日期 (民國年格式)
+  billingEnd: string   // 計費結束日期 (民國年格式)
+  billingDays: number  // 計費天數 (自動計算)
+  billingUnits: number // 用電度數
+  files: EvidenceFile[]
 }
 
-interface MonthlyResult {
-  month: string;                  // 月份 (例: 113/01)
-  billingPeriod: string;          // 計費期間
-  billingDays: number;            // 計費天數
-  billingUsage: number;           // 計費度數
-  percentage: number;             // 占比 (%)
-  actualUsage: number;            // 實際應計入用電量 (kWh)
-}
 
-const TARGET_YEAR = 113; // 目標收集年度
-const COLLECTION_START = '113/01/01';
-const COLLECTION_END = '113/12/31';
+const ElectricityBillPage = () => {
+  // 基本狀態
+  const [loading, setLoading] = useState(true)
+  const [submitting, setSubmitting] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [toast, setToast] = useState<{ message: string; type: ToastType } | null>(null)
 
-// 生成月份選項 (從112/12到114/01)
-const monthOptions = [
-  '112/12', '113/01', '113/02', '113/03', '113/04', '113/05', '113/06',
-  '113/07', '113/08', '113/09', '113/10', '113/11', '113/12', '114/01'
-];
+  // 表單資料
+  const [year] = useState(new Date().getFullYear())
+  const [bills, setBills] = useState<SimpleBillData[]>([])
 
-export default function ElectricityBillPage() {
-  const [billData, setBillData] = useState<ElectricityBillData[]>([
-    {
-      paymentMonth: '',
-      startDate: '',
-      endDate: '',
-      usage: 0,
-      proofFile: null
+  // 狀態管理
+  const [currentEntryId, setCurrentEntryId] = useState<string | null>(null)
+  const [initialStatus, setInitialStatus] = useState<EntryStatus>('submitted')
+  const [hasSubmittedBefore, setHasSubmittedBefore] = useState(false)
+  const [showSuccessModal, setShowSuccessModal] = useState(false)
+  const [showClearModal, setShowClearModal] = useState(false)
+
+  const pageKey = 'electricity'
+
+  // 前端狀態管理
+  const frontendStatus = useFrontendStatus({
+    initialStatus,
+    entryId: currentEntryId,
+    onStatusChange: () => {},
+    onError: (err: string) => setError(err),
+    onSuccess: (msg: string) => setToast({ message: msg, type: 'success' })
+  })
+
+  const editPermissions = useEditPermissions(frontendStatus?.currentStatus || initialStatus)
+
+  // 監聽帳單變化，確保月份格子即時更新
+  useEffect(() => {
+    console.log('帳單資料更新，月份格子將重新渲染', {
+      帳單數量: bills.length,
+      帳單內容: bills.map(b => ({
+        id: b.id,
+        開始: b.billingStart,
+        結束: b.billingEnd,
+        度數: b.billingUnits
+      }))
+    })
+    // monthlyTotals 會自動重新計算，因為它依賴 bills
+  }, [bills])
+
+  // 獲取指定月份的天數
+  const getDaysInMonth = (month: number, rocYear: number = 113): number => {
+    const year = rocYear + 1911  // 轉換為西元年
+    // JavaScript Date 的月份是 0-indexed，所以用 month 作為參數時，會得到下個月的第0天（即當月最後一天）
+    return new Date(year, month, 0).getDate()
+  }
+
+  // 解析民國日期字串
+  const parseROCDate = (dateStr: string): [number, number, number] | null => {
+    if (!dateStr || !validateRocDate(dateStr)) return null
+    const [year, month, day] = dateStr.split('/').map(Number)
+    return [year, month, day]
+  }
+
+
+  // 日期驗證函數
+  const validateRocDate = (dateStr: string): boolean => {
+    if (!dateStr.trim()) return false
+    const regex = /^(\d{2,3})\/(\d{1,2})\/(\d{1,2})$/
+    if (!regex.test(dateStr)) return false
+
+    const [yearStr, monthStr, dayStr] = dateStr.split('/')
+    const year = parseInt(yearStr)
+    const month = parseInt(monthStr)
+    const day = parseInt(dayStr)
+
+    return year >= 100 && year <= 150 &&
+           month >= 1 && month <= 12 &&
+           day >= 1 && day <= 31
+  }
+
+  // 計算計費天數
+  const calculateBillingDays = (startDate: string, endDate: string): number => {
+    if (!validateRocDate(startDate) || !validateRocDate(endDate)) return 0
+
+    try {
+      const [startYear, startMonth, startDay] = startDate.split('/').map(Number)
+      const [endYear, endMonth, endDay] = endDate.split('/').map(Number)
+
+      const start = new Date(startYear + 1911, startMonth - 1, startDay)
+      const end = new Date(endYear + 1911, endMonth - 1, endDay)
+
+      const diffTime = end.getTime() - start.getTime()
+      const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24)) + 1
+
+      return Math.max(0, Math.min(70, diffDays)) // 限制在70天內
+    } catch {
+      return 0
     }
-  ]);
+  }
 
-  // 計算日期差異（天數）
-  const calculateDaysBetween = (startDate: string, endDate: string): number => {
-    const start = new Date(startDate);
-    const end = new Date(endDate);
-    const diffTime = Math.abs(end.getTime() - start.getTime());
-    return Math.ceil(diffTime / (1000 * 60 * 60 * 24)) + 1; // +1 包含起始日
-  };
+  // 簡化的月份分配計算
+  const calculateMonthlyDistribution = (bill: SimpleBillData): Record<number, number> => {
+    if (!bill.billingStart || !bill.billingEnd || !bill.billingUnits || bill.billingDays <= 0) {
+      return {}
+    }
 
-  // 計算某月在指定期間內的天數
-  const calculateMonthDays = (year: number, month: number, startDate: string, endDate: string): number => {
-    const monthStart = new Date(year, month - 1, 1);
-    const monthEnd = new Date(year, month, 0); // 該月最後一天
-    const periodStart = new Date(startDate);
-    const periodEnd = new Date(endDate);
+    try {
+      const [startYear, startMonth, startDay] = bill.billingStart.split('/').map(Number)
+      const [endYear, endMonth, endDay] = bill.billingEnd.split('/').map(Number)
 
-    const overlapStart = new Date(Math.max(monthStart.getTime(), periodStart.getTime()));
-    const overlapEnd = new Date(Math.min(monthEnd.getTime(), periodEnd.getTime()));
+      // 同月份：全部度數歸該月
+      if (startMonth === endMonth && startYear === endYear) {
+        return { [startMonth]: bill.billingUnits }
+      }
 
-    if (overlapStart > overlapEnd) return 0;
+      // 跨月份：按天數比例分配
+      const result: Record<number, number> = {}
+      const totalDays = bill.billingDays
 
-    return Math.ceil((overlapEnd.getTime() - overlapStart.getTime()) / (1000 * 60 * 60 * 24)) + 1;
-  };
+      // 第一個月的天數和用量
+      const daysInStartMonth = getDaysInMonth(startMonth, startYear)
+      const firstMonthDays = daysInStartMonth - startDay + 1
+      result[startMonth] = (bill.billingUnits * firstMonthDays / totalDays)
 
-  // 計算月度結果
-  const monthlyResults = useMemo((): MonthlyResult[] => {
-    const results: MonthlyResult[] = [];
-    
-    // 為每個目標月份初始化結果
+      // 第二個月的天數和用量
+      const secondMonthDays = endDay
+      result[endMonth] = (bill.billingUnits * secondMonthDays / totalDays)
+
+      // 四捨五入到小數點後兩位
+      Object.keys(result).forEach(month => {
+        result[Number(month)] = Math.round(result[Number(month)] * 100) / 100
+      })
+
+      return result
+    } catch {
+      return {}
+    }
+  }
+
+  // 計算每月總使用量和狀態 - 使用 useMemo 確保即時更新
+  const monthlyData = useMemo(() => {
+    console.log('重新計算月份資料，帳單數:', bills.length)
+
+    const totals: Record<number, number> = {}
+    const statuses: Record<number, { status: 'empty' | 'partial' | 'complete', percentage: number, coveredDays: number, daysInMonth: number }> = {}
+
+    // 初始化12個月的狀態
     for (let month = 1; month <= 12; month++) {
-      const monthStr = `${TARGET_YEAR}/${month.toString().padStart(2, '0')}`;
-      results.push({
-        month: monthStr,
-        billingPeriod: '',
-        billingDays: 0,
-        billingUsage: 0,
+      const daysInMonth = getDaysInMonth(month, 113)
+      statuses[month] = {
+        status: 'empty',
         percentage: 0,
-        actualUsage: 0
-      });
+        coveredDays: 0,
+        daysInMonth
+      }
+      totals[month] = 0
     }
 
-    // 處理每筆電費單數據
-    billData.forEach(bill => {
-      if (!bill.startDate || !bill.endDate || bill.usage <= 0) return;
+    // 計算每張帳單的月份分配和覆蓋天數
+    bills.forEach(bill => {
+      // 計算用量分配
+      const distribution = calculateMonthlyDistribution(bill)
+      Object.entries(distribution).forEach(([month, usage]) => {
+        const monthNum = Number(month)
+        totals[monthNum] = (totals[monthNum] || 0) + usage
+      })
 
-      const totalDays = calculateDaysBetween(bill.startDate, bill.endDate);
-      
-      // 計算這筆電費單對每個月的分攤
-      for (let month = 1; month <= 12; month++) {
-        const monthDays = calculateMonthDays(TARGET_YEAR, month, bill.startDate, bill.endDate);
-        
-        if (monthDays > 0) {
-          const monthIndex = month - 1;
-          const monthTotalDays = new Date(TARGET_YEAR, month, 0).getDate();
-          const allocatedUsage = bill.usage * (monthDays / totalDays);
-          const percentage = (monthDays / monthTotalDays) * 100;
+      // 計算覆蓋天數
+      if (bill.billingStart && bill.billingEnd && bill.billingUnits > 0) {
+        const startParts = parseROCDate(bill.billingStart)
+        const endParts = parseROCDate(bill.billingEnd)
+        if (startParts && endParts) {
+          const [startYear, startMonth, startDay] = startParts
+          const [endYear, endMonth, endDay] = endParts
 
-          results[monthIndex].billingPeriod = `${bill.startDate} ~ ${bill.endDate}`;
-          results[monthIndex].billingDays = totalDays;
-          results[monthIndex].billingUsage += bill.usage;
-          results[monthIndex].percentage = percentage;
-          results[monthIndex].actualUsage += allocatedUsage;
+          // 計算每個月的覆蓋天數
+          if (startMonth === endMonth) {
+            // 同月份
+            statuses[startMonth].coveredDays += (endDay - startDay + 1)
+          } else {
+            // 開始月份
+            const daysInStartMonth = getDaysInMonth(startMonth, startYear)
+            statuses[startMonth].coveredDays += (daysInStartMonth - startDay + 1)
+            // 結束月份
+            statuses[endMonth].coveredDays += endDay
+          }
         }
       }
-    });
+    })
 
-    return results;
-  }, [billData]);
+    // 更新狀態
+    Object.keys(statuses).forEach(monthStr => {
+      const month = Number(monthStr)
+      const status = statuses[month]
 
-  // 計算年度總用電量
-  const yearlyTotal = useMemo(() => {
-    return monthlyResults.reduce((sum, result) => sum + result.actualUsage, 0);
-  }, [monthlyResults]);
+      // 確保不超過該月總天數
+      status.coveredDays = Math.min(status.coveredDays, status.daysInMonth)
 
-  // 檢查缺漏月份
-  const missingMonths = useMemo(() => {
-    const missing: string[] = [];
-    const filledMonths = new Set(billData.filter(bill => bill.paymentMonth).map(bill => bill.paymentMonth));
-    
+      // 計算百分比和狀態
+      if (status.coveredDays === 0) {
+        status.status = 'empty'
+        status.percentage = 0
+      } else if (status.coveredDays >= status.daysInMonth) {
+        status.status = 'complete'
+        status.percentage = 100
+      } else {
+        status.status = 'partial'
+        status.percentage = Math.round((status.coveredDays / status.daysInMonth) * 100)
+      }
+    })
+
+    console.log('月份狀態更新:', statuses)
+    return { totals, statuses }
+  }, [bills])
+
+  const monthlyTotals = monthlyData.totals
+
+
+  // 計算月份涵蓋度（該月被帳單涵蓋的天數百分比）
+  const calculateMonthCoverage = (month: number, bills: SimpleBillData[]): number => {
+    const year = new Date().getFullYear()
+    const daysInMonth = new Date(year, month, 0).getDate() // 該月總天數
+    let coveredDays = 0
+
+    bills.forEach(bill => {
+      if (!bill.billingStart || !bill.billingEnd || bill.billingUnits <= 0) return
+
+      try {
+        const [startYear, startMonth, startDay] = bill.billingStart.split('/').map(Number)
+        const [endYear, endMonth, endDay] = bill.billingEnd.split('/').map(Number)
+
+        // 計算該帳單與指定月份的重疊天數
+        const billStartDate = new Date(startYear + 1911, startMonth - 1, startDay)
+        const billEndDate = new Date(endYear + 1911, endMonth - 1, endDay)
+        const monthStartDate = new Date(year, month - 1, 1)
+        const monthEndDate = new Date(year, month - 1, daysInMonth)
+
+        // 找出重疊期間
+        const overlapStart = new Date(Math.max(billStartDate.getTime(), monthStartDate.getTime()))
+        const overlapEnd = new Date(Math.min(billEndDate.getTime(), monthEndDate.getTime()))
+
+        if (overlapStart <= overlapEnd) {
+          const overlapDays = Math.ceil((overlapEnd.getTime() - overlapStart.getTime()) / (1000 * 60 * 60 * 24)) + 1
+          coveredDays += Math.max(0, overlapDays)
+        }
+      } catch {
+        // 日期解析失敗，跳過
+      }
+    })
+
+    // 確保不超過100%
+    return Math.min(100, (coveredDays / daysInMonth) * 100)
+  }
+
+  // 處理帳單變更 - 簡化版本專注即時更新
+  const handleBillChange = (id: string, field: keyof SimpleBillData, value: any) => {
+    setBills(prev => prev.map(bill => {
+      if (bill.id !== id) return bill
+
+      const updated = { ...bill, [field]: value }
+
+      // 當日期變更時，立即重新計算天數
+      if (field === 'billingStart' || field === 'billingEnd') {
+        updated.billingDays = calculateBillingDays(updated.billingStart, updated.billingEnd)
+      }
+
+      // 當有完整資料時，立即計算月份分配並觸發格子更新
+      if (updated.billingStart && updated.billingEnd && updated.billingUnits > 0) {
+        const distribution = calculateMonthlyDistribution(updated)
+        const affectedMonths = Object.keys(distribution).map(Number)
+        console.log(`帳單 ${id} 影響月份:`, affectedMonths, '分配:', distribution)
+
+        // 影響月份將在下次 render 時自動更新
+      }
+
+      return updated
+    }))
+  }
+
+  // 新增帳單
+  const addBill = () => {
+    const newBill: SimpleBillData = {
+      id: Date.now().toString(),
+      paymentMonth: 1,
+      billingStart: '',
+      billingEnd: '',
+      billingDays: 0,
+      billingUnits: 0,
+      files: []
+    }
+    setBills(prev => [...prev, newBill])
+  }
+
+  // 移除帳單
+  const removeBill = (id: string) => {
+    setBills(prev => prev.filter(bill => bill.id !== id))
+  }
+
+  // 驗證資料
+  const validateData = (): string[] => {
+    const errors: string[] = []
+
+    if (bills.length === 0) {
+      errors.push('請至少新增一筆帳單資料')
+      return errors
+    }
+
+    bills.forEach((bill, index) => {
+      const billNum = index + 1
+
+      if (!bill.billingStart) {
+        errors.push(`第${billNum}筆帳單：請填入計費開始日期`)
+      } else if (!validateRocDate(bill.billingStart)) {
+        errors.push(`第${billNum}筆帳單：計費開始日期格式不正確`)
+      }
+
+      if (!bill.billingEnd) {
+        errors.push(`第${billNum}筆帳單：請填入計費結束日期`)
+      } else if (!validateRocDate(bill.billingEnd)) {
+        errors.push(`第${billNum}筆帳單：計費結束日期格式不正確`)
+      }
+
+      if (bill.billingDays <= 0 || bill.billingDays > 70) {
+        errors.push(`第${billNum}筆帳單：計費天數異常 (${bill.billingDays}天)`)
+      }
+
+      if (bill.billingUnits <= 0) {
+        errors.push(`第${billNum}筆帳單：請輸入用電度數`)
+      }
+
+      if (bill.files.length === 0) {
+        errors.push(`第${billNum}筆帳單：請上傳帳單檔案`)
+      }
+    })
+
+    // 檢查月份覆蓋
+    const missingMonths = []
     for (let month = 1; month <= 12; month++) {
-      const monthStr = `${TARGET_YEAR}/${month.toString().padStart(2, '0')}`;
-      if (!filledMonths.has(monthStr) && monthlyResults[month - 1].actualUsage === 0) {
-        missing.push(monthStr);
+      if (!monthlyTotals[month] || monthlyTotals[month] <= 0) {
+        missingMonths.push(month)
       }
     }
-    
-    return missing;
-  }, [billData, monthlyResults]);
-
-  // 檢查完整覆蓋
-  const coverageCheck = useMemo(() => {
-    const sortedBills = billData
-      .filter(bill => bill.startDate && bill.endDate)
-      .sort((a, b) => new Date(a.startDate).getTime() - new Date(b.startDate).getTime());
-
-    if (sortedBills.length === 0) {
-      return { isComplete: false, message: '尚未填寫任何電費單資料' };
-    }
-
-    const firstBillStart = new Date(sortedBills[0].startDate);
-    const lastBillEnd = new Date(sortedBills[sortedBills.length - 1].endDate);
-    const targetStart = new Date('2024-01-01'); // 113年對應2024年
-    const targetEnd = new Date('2024-12-31');
-
-    if (firstBillStart > targetStart || lastBillEnd < targetEnd) {
-      return { 
-        isComplete: false, 
-        message: `覆蓋期間不完整。需要完整覆蓋 ${COLLECTION_START} ~ ${COLLECTION_END}` 
-      };
-    }
-
-    // 檢查期間是否連續
-    for (let i = 1; i < sortedBills.length; i++) {
-      const prevEnd = new Date(sortedBills[i - 1].endDate);
-      const currentStart = new Date(sortedBills[i].startDate);
-      const daysDiff = Math.abs(currentStart.getTime() - prevEnd.getTime()) / (1000 * 60 * 60 * 24);
-      
-      if (daysDiff > 1) {
-        return { 
-          isComplete: false, 
-          message: `期間不連續：${sortedBills[i - 1].endDate} 與 ${sortedBills[i].startDate} 之間有空隙` 
-        };
-      }
-    }
-
-    return { isComplete: true, message: '覆蓋期間完整' };
-  }, [billData]);
-
-  const updateBillData = (index: number, field: keyof ElectricityBillData, value: any) => {
-    setBillData(prev => {
-      const newData = [...prev];
-      newData[index] = { ...newData[index], [field]: value };
-      return newData;
-    });
-  };
-
-  const addNewBill = () => {
-    setBillData(prev => [...prev, {
-      paymentMonth: '',
-      startDate: '',
-      endDate: '',
-      usage: 0,
-      proofFile: null
-    }]);
-  };
-
-  const removeBill = (index: number) => {
-    if (billData.length > 1) {
-      setBillData(prev => prev.filter((_, i) => i !== index));
-    }
-  };
-
-  const validateData = () => {
-    const errors: string[] = [];
-    
-    billData.forEach((bill, index) => {
-      if (!bill.paymentMonth) {
-        errors.push(`第${index + 1}筆資料：請選擇繳費年月`);
-      }
-      if (!bill.startDate || !bill.endDate) {
-        errors.push(`第${index + 1}筆資料：請填寫完整計費期間`);
-      }
-      if (bill.usage <= 0) {
-        errors.push(`第${index + 1}筆資料：用電度數必須大於0`);
-      }
-      if (!bill.proofFile) {
-        errors.push(`第${index + 1}筆資料：請上傳電費單掃描件`);
-      }
-    });
 
     if (missingMonths.length > 0) {
-      errors.push(`缺少月份：${missingMonths.join('、')}，請補上相關電費單`);
+      errors.push(`缺少以下月份的資料：${missingMonths.join('、')}月`)
     }
 
-    if (!coverageCheck.isComplete) {
-      errors.push(coverageCheck.message);
-    }
+    return errors
+  }
 
-    return errors;
-  };
-
-  const handleSave = () => {
-    const errors = validateData();
+  // 提交資料
+  const handleSubmit = async () => {
+    const errors = validateData()
     if (errors.length > 0) {
-      alert('請修正以下問題：\n' + errors.join('\n'));
-      return;
+      setError(errors.join('\n'))
+      return
     }
-    
-    alert('電費單數據已保存！');
-  };
 
-  const handleClear = () => {
-    if (confirm('確定要清除所有數據嗎？此操作無法復原。')) {
-      setBillData([{
-        paymentMonth: '',
-        startDate: '',
-        endDate: '',
-        usage: 0,
-        proofFile: null
-      }]);
+    setSubmitting(true)
+    setError(null)
+
+    try {
+      // 建立月份資料
+      const monthly: Record<string, number> = {}
+      Object.entries(monthlyTotals).forEach(([month, usage]) => {
+        if (usage > 0) {
+          monthly[month] = usage // 直接使用度數，不轉換
+        }
+      })
+
+      const entryInput: UpsertEntryInput = {
+        page_key: pageKey,
+        period_year: year,
+        unit: 'kWh',
+        monthly: monthly,
+        notes: `外購電力用量填報 - ${bills.length}筆帳單`
+      }
+
+      // 提交資料除錯 (可在需要時啟用)
+      // console.log('🔍 [Electricity] 準備提交的資料:', entryInput)
+
+      const { entry_id } = await upsertEnergyEntry(entryInput, true)
+      setCurrentEntryId(entry_id)
+
+      await commitEvidence({
+        entryId: entry_id,
+        pageKey: pageKey
+      })
+
+      await frontendStatus?.handleSubmitSuccess()
+      setHasSubmittedBefore(true)
+
+      const totalUsage = Object.values(monthlyTotals).reduce((sum, usage) => sum + usage, 0)
+      setToast({
+        message: `提交成功！年度總使用量：${totalUsage.toFixed(2)} 度`,
+        type: 'success'
+      })
+      setShowSuccessModal(true)
+
+    } catch (error) {
+      // 詳細的錯誤記錄
+      console.error('❌ [Electricity] 提交失敗，完整錯誤訊息:', error)
+      console.error('❌ [Electricity] 錯誤類型:', error?.constructor?.name)
+      console.error('❌ [Electricity] 錯誤詳情:', (error as any)?.details)
+      console.error('❌ [Electricity] 錯誤提示:', (error as any)?.hint)
+      console.error('❌ [Electricity] 錯誤代碼:', (error as any)?.code)
+      console.error('❌ [Electricity] 錯誤堆疊:', (error as any)?.stack)
+
+      if (error && typeof error === 'object') {
+        console.error('❌ [Electricity] 錯誤物件所有屬性:', Object.keys(error))
+        console.error('❌ [Electricity] 完整錯誤物件:', error)
+      }
+
+      setError(error instanceof Error ? error.message : '提交失敗')
+    } finally {
+      setSubmitting(false)
     }
-  };
+  }
+
+  // 清除所有資料
+  const handleClear = () => {
+    setBills([])
+    setError(null)
+    setShowClearModal(false)
+    setToast({ message: '已清除所有資料', type: 'success' })
+  }
+
+  // 載入既有資料
+  useEffect(() => {
+    const loadData = async () => {
+      try {
+        setLoading(true)
+
+        const existingEntry = await getEntryByPageKeyAndYear(pageKey, year)
+        if (existingEntry && existingEntry.status !== 'draft') {
+          setInitialStatus(existingEntry.status as EntryStatus)
+          setCurrentEntryId(existingEntry.id)
+          setHasSubmittedBefore(true)
+
+          // 載入帳單資料
+          if (existingEntry.payload?.billData && Array.isArray(existingEntry.payload.billData)) {
+            const billDataWithFiles = await Promise.all(
+              existingEntry.payload.billData.map(async (bill: any) => {
+                try {
+                  const files = await getEntryFiles(existingEntry.id)
+                  const associatedFiles = files.filter(f =>
+                    f.kind === 'usage_evidence' && f.page_key === pageKey
+                  )
+
+                  return {
+                    id: bill.id || Date.now().toString(),
+                    paymentMonth: bill.paymentMonth || 1,
+                    billingStart: bill.billingStartDate || '',
+                    billingEnd: bill.billingEndDate || '',
+                    billingDays: bill.billingDays || 0,
+                    billingUnits: bill.billingUnits || 0,
+                    files: associatedFiles
+                  }
+                } catch {
+                  return bill
+                }
+              })
+            )
+
+            setBills(billDataWithFiles)
+          }
+        }
+
+      } catch (error) {
+        setError('載入資料失敗')
+      } finally {
+        setLoading(false)
+      }
+    }
+
+    loadData()
+  }, [year, pageKey])
+
+  // 初始化時新增一筆空白帳單
+  useEffect(() => {
+    if (!loading && bills.length === 0) {
+      addBill()
+    }
+  }, [loading, bills.length])
+
+  // 載入中狀態
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-green-50 flex items-center justify-center">
+        <div className="text-center">
+          <Loader2 className="w-12 h-12 animate-spin mx-auto mb-4" style={{ color: designTokens.colors.accentPrimary }} />
+          <p style={{ color: designTokens.colors.textPrimary }}>載入中...</p>
+        </div>
+      </div>
+    )
+  }
 
   return (
-    <div className="space-y-8">
-      {/* 頁面標題與說明 */}
-      <div className="bg-green-50 border border-green-200 rounded-xl p-6">
-        <h2 className="text-xl font-semibold text-green-800 mb-3">電費單收集與計算器</h2>
-        <div className="text-gray-600 space-y-2">
-          <p><strong>目標收集年度：</strong>{TARGET_YEAR} 年 (2024 年)</p>
-          <p><strong>收集期間：</strong>{COLLECTION_START} ~ {COLLECTION_END}</p>
-          <p className="text-sm">
-            📌 由於電費單週期通常跨月，請上傳從 112/12 月開始到 114/01 月結束的所有電費單，
-            系統會自動計算跨月分攤比例。
+    <div className="min-h-screen bg-green-50">
+      {/* 主要內容區域 - 簡化結構，移除多層嵌套 */}
+      <div className="max-w-6xl mx-auto px-6 py-8 space-y-6">
+
+        {/* 頁面標題 - 無背景框 */}
+        <div className="text-center mb-8">
+          <h1 className="text-3xl font-semibold mb-3" style={{ color: designTokens.colors.textPrimary }}>
+            外購電力使用量填報
+          </h1>
+          <p className="text-base" style={{ color: designTokens.colors.textSecondary }}>
+            請填入外購電力帳單資料，系統將自動計算各月份使用量
           </p>
         </div>
-      </div>
 
-      {/* 覆蓋檢查狀態 */}
-      <div className={`border rounded-xl p-4 ${
-        coverageCheck.isComplete ? 'bg-green-50 border-green-200' : 'bg-yellow-50 border-yellow-200'
-      }`}>
-        <div className="flex items-center space-x-2">
-          <div className={`w-3 h-3 rounded-full ${
-            coverageCheck.isComplete ? 'bg-green-500' : 'bg-yellow-500'
-          }`}></div>
-          <span className={`font-medium ${
-            coverageCheck.isComplete ? 'text-green-800' : 'text-yellow-800'
-          }`}>
-            {coverageCheck.message}
-          </span>
-        </div>
-        {missingMonths.length > 0 && (
-          <div className="mt-2 text-sm text-yellow-700">
-            缺少月份：{missingMonths.join('、')}
+        {/* 重新提交提示 */}
+        {hasSubmittedBefore && (
+          <div className="rounded-lg p-4 border-l-4" style={{
+            backgroundColor: '#f0f9ff',
+            borderColor: designTokens.colors.accentBlue
+          }}>
+            <div className="flex items-start">
+              <CheckCircle className="h-5 w-5 mt-0.5 mr-3" style={{ color: designTokens.colors.accentBlue }} />
+              <div>
+                <h3 className="text-sm font-medium mb-1" style={{ color: designTokens.colors.accentBlue }}>
+                  資料已提交
+                </h3>
+                <p className="text-sm" style={{ color: designTokens.colors.textSecondary }}>
+                  您可以繼續編輯資料，修改後請再次點擊「提交填報」以更新記錄。
+                </p>
+              </div>
+            </div>
           </div>
         )}
-      </div>
 
-      {/* 電費單輸入區域 */}
-      <div className="bg-white border border-gray-200 rounded-xl p-6">
-        <div className="flex justify-between items-center mb-6">
-          <h3 className="text-lg font-semibold text-gray-800">電費單資料輸入</h3>
-          <div className="flex space-x-3">
-            <button
-              onClick={addNewBill}
-              className="bg-green-500 hover:bg-green-600 text-white px-4 py-2 rounded-lg font-medium transition-colors duration-200 flex items-center space-x-2"
-            >
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
-              </svg>
-              <span>新增電費單</span>
-            </button>
-            <button
-              onClick={handleClear}
-              className="bg-red-500 hover:bg-red-600 text-white px-4 py-2 rounded-lg font-medium transition-colors duration-200 flex items-center space-x-2"
-            >
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-              </svg>
-              <span>清除全部</span>
-            </button>
+        {/* 帳單區域 */}
+        <div
+          className="rounded-lg border p-6"
+          style={{
+            backgroundColor: designTokens.colors.cardBg,
+            borderColor: designTokens.colors.border,
+            boxShadow: designTokens.shadows.sm
+          }}
+        >
+          <h3 className="text-lg font-medium mb-3" style={{ color: designTokens.colors.textPrimary }}>
+            帳單資料
+          </h3>
+
+          {/* 月份進度格子 */}
+          <div
+            className="border border-gray-200 rounded-lg p-4 mb-4"
+            style={{ backgroundColor: designTokens.colors.cardBg }}
+          >
+            {/* 標題 */}
+            <div className="mb-4">
+              <h3 className="text-lg font-medium mb-3 text-gray-700">
+                {year}年度填寫進度
+              </h3>
+              <div className="flex gap-6 text-base text-gray-600">
+                <div className="flex items-center gap-2">
+                  <span className="w-4 h-4 bg-green-100 border border-green-300 rounded"></span>
+                  <span>完全填寫 (100%)</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="w-4 h-4 bg-red-100 border border-red-300 rounded"></span>
+                  <span>部分填寫 (1-99%)</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="w-4 h-4 bg-gray-100 border border-gray-300 rounded"></span>
+                  <span>未填寫 (0%)</span>
+                </div>
+              </div>
+            </div>
+
+
+            {/* 12格月份網格 - 顯示度數版本 */}
+            <div className="monthly-progress-grid grid grid-cols-6 gap-2">
+              {Array.from({ length: 12 }, (_, i) => {
+                const month = i + 1
+                const monthStatus = monthlyData.statuses[month]
+                const monthTotal = monthlyData.totals[month] || 0
+
+                // 根據狀態決定顏色
+                let bgColor, borderColor, textColor
+                if (monthStatus.status === 'complete') {
+                  bgColor = 'bg-green-100 hover:bg-green-200'
+                  borderColor = 'border-green-300'
+                  textColor = 'text-green-700'
+                } else if (monthStatus.status === 'partial') {
+                  bgColor = 'bg-red-100 hover:bg-red-200'
+                  borderColor = 'border-red-300'
+                  textColor = 'text-red-700'
+                } else {
+                  bgColor = 'bg-gray-100 hover:bg-gray-200'
+                  borderColor = 'border-gray-300'
+                  textColor = 'text-gray-400'
+                }
+
+                // 建立詳細的 tooltip
+                let tooltipContent = `${month}月 (${monthStatus.daysInMonth}天)`
+                if (monthStatus.status === 'complete') {
+                  tooltipContent += `\n完整覆蓋\n用量: ${monthTotal.toFixed(2)} 度`
+                } else if (monthStatus.status === 'partial') {
+                  tooltipContent += `\n部分覆蓋 (${monthStatus.percentage}%)\n已填: ${monthStatus.coveredDays}天\n用量: ${monthTotal.toFixed(2)} 度`
+                } else {
+                  tooltipContent += '\n無資料'
+                }
+
+                return (
+                  <div
+                    key={month}
+                    className={`
+                      rounded-lg p-4 text-center border-2 transition-all duration-200 cursor-help
+                      ${bgColor} ${borderColor}
+                    `}
+                    title={tooltipContent}
+                  >
+                    {/* 月份標籤 */}
+                    <div className="text-sm font-medium text-gray-700 mb-2">
+                      {month}月
+                    </div>
+
+                    {/* 用量顯示 */}
+                    <div className={`mt-2 ${textColor}`}>
+                      {monthStatus.status === 'empty' ? (
+                        <span className="text-2xl">○</span>
+                      ) : (
+                        <div className="text-lg font-bold">
+                          {monthTotal.toFixed(1)} 度
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+
+            {/* 響應式布局說明（手機版改為3x4） */}
+            <style>{`
+              @media (max-width: 640px) {
+                .monthly-progress-grid {
+                  grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
+                }
+              }
+            `}</style>
           </div>
-        </div>
 
-        <div className="overflow-x-auto shadow-lg rounded-xl border border-gray-200">
-          <table className="w-full border-collapse bg-white">
-            <thead>
-              <tr className="bg-gradient-to-r from-green-500 to-green-600">
-                <th className="px-4 py-4 text-center text-sm font-semibold text-white border-r border-green-400/30 whitespace-nowrap">繳費年月</th>
-                <th className="px-4 py-4 text-center text-sm font-semibold text-white border-r border-green-400/30 whitespace-nowrap">計費期間(起)</th>
-                <th className="px-4 py-4 text-center text-sm font-semibold text-white border-r border-green-400/30 whitespace-nowrap">計費期間(迄)</th>
-                <th className="px-4 py-4 text-center text-sm font-semibold text-white border-r border-green-400/30 whitespace-nowrap">用電度數(kWh)</th>
-                <th className="px-4 py-4 text-center text-sm font-semibold text-white border-r border-green-400/30 whitespace-nowrap">電費單掃描件</th>
-                <th className="px-4 py-4 text-center text-sm font-semibold text-white whitespace-nowrap">操作</th>
-              </tr>
-            </thead>
-            <tbody>
-              {billData.map((bill, index) => (
-                <tr key={index} className="border-b border-gray-100 hover:bg-green-50/50 transition-colors">
-                  <td className="px-4 py-4">
-                    <select
-                      value={bill.paymentMonth}
-                      onChange={(e) => updateBillData(index, 'paymentMonth', e.target.value)}
-                      className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-green-500 hover:border-green-300 transition-colors duration-200"
-                    >
-                      <option value="">選擇年月</option>
-                      {monthOptions.map(month => (
-                        <option key={month} value={month}>{month}</option>
-                      ))}
-                    </select>
-                  </td>
-                  <td className="px-4 py-4">
+          <div className="space-y-3">
+            {bills.map((bill, index) => (
+              <div key={bill.id}>
+                <div className="flex items-center gap-4 p-4 bg-white border border-gray-200 rounded-lg">
+                  {/* 編號 */}
+                  <div className="flex-shrink-0 w-8 h-8 bg-green-100 rounded-full flex items-center justify-center">
+                    <span className="text-sm font-medium text-green-700">{index + 1}</span>
+                  </div>
+
+                  {/* 計費期間 */}
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm text-gray-600">計費期間</span>
                     <input
-                      type="date"
-                      value={bill.startDate}
-                      onChange={(e) => updateBillData(index, 'startDate', e.target.value)}
-                      className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-green-500 hover:border-green-300 transition-colors duration-200"
+                      type="text"
+                      placeholder="112/1/1"
+                      value={bill.billingStart}
+                      onChange={(e) => handleBillChange(bill.id, 'billingStart', e.target.value)}
+                      className="w-32 px-3 py-1.5 border rounded focus:ring-2 focus:ring-green-500 focus:border-green-500"
+                      disabled={submitting || !editPermissions.canEdit}
                     />
-                  </td>
-                  <td className="px-4 py-4">
+                    <span className="text-gray-500">~</span>
                     <input
-                      type="date"
-                      value={bill.endDate}
-                      onChange={(e) => updateBillData(index, 'endDate', e.target.value)}
-                      className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-green-500 hover:border-green-300 transition-colors duration-200"
+                      type="text"
+                      placeholder="112/2/6"
+                      value={bill.billingEnd}
+                      onChange={(e) => handleBillChange(bill.id, 'billingEnd', e.target.value)}
+                      className="w-32 px-3 py-1.5 border rounded focus:ring-2 focus:ring-green-500 focus:border-green-500"
+                      disabled={submitting || !editPermissions.canEdit}
                     />
-                  </td>
-                  <td className="px-4 py-4">
+                    {bill.billingDays > 0 && (
+                      <span className="text-sm text-gray-600">({bill.billingDays}天)</span>
+                    )}
+                  </div>
+
+                  {/* 用電度數 */}
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm text-gray-600">用電度數</span>
                     <input
                       type="number"
-                      min={0}
-                      step={0.1}
-                      value={bill.usage || ""}
-                      onChange={(e) => updateBillData(index, 'usage', parseFloat(e.target.value) || 0)}
-                      className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-green-500 hover:border-green-300 transition-colors duration-200 text-center"
-                      placeholder="度數"
+                      placeholder="0"
+                      min="0"
+                      step="0.1"
+                      value={bill.billingUnits || ''}
+                      onChange={(e) => handleBillChange(bill.id, 'billingUnits', Number(e.target.value) || 0)}
+                      className="w-24 px-3 py-1.5 border rounded focus:ring-2 focus:ring-green-500 focus:border-green-500"
+                      disabled={submitting || !editPermissions.canEdit}
                     />
-                  </td>
-                  <td className="px-4 py-4">
-                    <div className="flex items-center justify-center min-h-[60px]">
-                      <FileUpload
-                        onFileSelect={(file) => updateBillData(index, 'proofFile', file)}
-                        accept=".jpg,.jpeg,.png,.pdf"
-                        maxSize={5 * 1024 * 1024}
-                        currentFile={bill.proofFile}
-                        placeholder="上傳電費單"
-                      />
-                    </div>
-                  </td>
-                  <td className="px-4 py-4">
-                    <div className="flex justify-center">
-                      <button
-                        onClick={() => removeBill(index)}
-                        disabled={billData.length === 1}
-                        className="text-red-500 hover:text-red-700 disabled:text-gray-400 disabled:cursor-not-allowed p-1 rounded-full hover:bg-red-50 transition-colors"
-                        title="刪除此筆記錄"
-                      >
-                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                        </svg>
-                      </button>
-                    </div>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </div>
-
-      {/* 月度分攤結果 */}
-      <div className="bg-white border border-gray-200 rounded-xl p-6">
-        <h3 className="text-lg font-semibold text-gray-800 mb-6">月度分攤結果</h3>
-        
-        <div className="overflow-x-auto shadow-lg rounded-xl border border-gray-200">
-          <table className="w-full border-collapse bg-white">
-            <thead>
-              <tr className="bg-gradient-to-r from-blue-500 to-blue-600">
-                <th className="px-4 py-4 text-center text-sm font-semibold text-white border-r border-blue-400/30 whitespace-nowrap">繳費年月</th>
-                <th className="px-4 py-4 text-center text-sm font-semibold text-white border-r border-blue-400/30 whitespace-nowrap">計費期間</th>
-                <th className="px-4 py-4 text-center text-sm font-semibold text-white border-r border-blue-400/30 whitespace-nowrap">計費天數</th>
-                <th className="px-4 py-4 text-center text-sm font-semibold text-white border-r border-blue-400/30 whitespace-nowrap">計費度數</th>
-                <th className="px-4 py-4 text-center text-sm font-semibold text-white border-r border-blue-400/30 whitespace-nowrap">占比(%)</th>
-                <th className="px-4 py-4 text-center text-sm font-semibold text-white whitespace-nowrap">實際用電量(kWh)</th>
-              </tr>
-            </thead>
-            <tbody>
-              {monthlyResults.map((result) => (
-                <tr key={result.month} className="border-b border-gray-100 hover:bg-blue-50/50 transition-colors">
-                  <td className="px-4 py-4 text-sm font-medium text-gray-800 text-center">{result.month}</td>
-                  <td className="px-4 py-4 text-sm text-gray-600 text-center">{result.billingPeriod || '-'}</td>
-                  <td className="px-4 py-4 text-sm text-gray-600 text-center">{result.billingDays || '-'}</td>
-                  <td className="px-4 py-4 text-sm text-gray-600 text-center">{result.billingUsage > 0 ? result.billingUsage.toFixed(1) : '-'}</td>
-                  <td className="px-4 py-4 text-sm text-gray-600 text-center">{result.percentage > 0 ? result.percentage.toFixed(2) + '%' : '-'}</td>
-                  <td className="px-4 py-4 text-sm font-medium text-center">
-                    <span className={result.actualUsage > 0 ? 'text-blue-600 font-semibold' : 'text-gray-400'}>
-                      {result.actualUsage > 0 ? result.actualUsage.toFixed(2) : '0.00'}
-                    </span>
-                  </td>
-                </tr>
-              ))}
-              {/* 年度合計列 */}
-              <tr className="bg-gradient-to-r from-blue-100 to-blue-50 border-t-2 border-blue-300">
-                <td className="px-4 py-5 text-sm font-bold text-blue-800 text-center">年度合計</td>
-                <td className="px-4 py-5 text-sm text-gray-400 italic text-center">-</td>
-                <td className="px-4 py-5 text-sm text-gray-400 italic text-center">-</td>
-                <td className="px-4 py-5 text-sm text-gray-400 italic text-center">-</td>
-                <td className="px-4 py-5 text-sm text-gray-400 italic text-center">-</td>
-                <td className="px-4 py-5">
-                  <div className="px-4 py-3 bg-gradient-to-r from-blue-600 to-blue-700 text-white font-bold text-lg rounded-lg text-center shadow-lg">
-                    {yearlyTotal.toFixed(2)} kWh
+                    <span className="text-sm text-gray-500">度</span>
                   </div>
-                </td>
-              </tr>
-            </tbody>
-          </table>
+
+                  {/* 帳單檔案 */}
+                  <div className="flex-1">
+                    <EvidenceUpload
+                      pageKey={pageKey}
+                      month={index + 1}
+                      files={bill.files}
+                      onFilesChange={(files) => handleBillChange(bill.id, 'files', files)}
+                      maxFiles={3}
+                      disabled={submitting || !editPermissions.canUploadFiles}
+                      kind="usage_evidence"
+                    />
+                  </div>
+
+                  {/* 刪除 */}
+                  {editPermissions.canEdit && bills.length > 1 && (
+                    <button
+                      onClick={() => removeBill(bill.id)}
+                      className="text-gray-400 hover:text-red-500 text-xl leading-none"
+                      disabled={submitting}
+                      title="刪除帳單"
+                    >
+                      ×
+                    </button>
+                  )}
+                </div>
+
+                {/* 日期格式提示 - 只在第一個帳單下方顯示 */}
+                {index === 0 && (
+                  <div className="text-xs text-gray-500 mt-1 ml-12">
+                    格式：民國年/月/日 (例：112/1/5 或 112/01/05)
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+
+          {/* 新增帳單按鈕 */}
+          {editPermissions.canEdit && (
+            <button
+              onClick={addBill}
+              disabled={submitting}
+              className="w-full py-3 border-2 border-dashed border-gray-300 rounded-lg text-gray-600 hover:border-green-500 hover:text-green-600 transition-colors"
+            >
+              + 新增電費單
+            </button>
+          )}
         </div>
+
+        {/* 底部空間 */}
+        <div className="h-20"></div>
       </div>
 
-      {/* 操作按鈕 */}
-      <div className="flex justify-center">
-        <button 
-          onClick={handleSave}
-          className="bg-green-500 hover:bg-green-600 text-white px-8 py-3 rounded-xl font-medium transition-colors duration-200 shadow-sm flex items-center space-x-2"
-        >
-          <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-3m-1 4l-3 3m0 0l-3-3m3 3V4" />
-          </svg>
-          <span>保存數據</span>
-        </button>
-      </div>
+      {/* 錯誤模態框 */}
+      {error && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50 p-4">
+          <div className="bg-white rounded-lg shadow-lg max-w-md w-full p-6">
+            <div className="flex items-start space-x-3 mb-4">
+              <AlertCircle className="w-6 h-6 text-red-500 flex-shrink-0 mt-0.5" />
+              <div className="flex-1">
+                <h3 className="text-lg font-semibold text-gray-900 mb-2">發生錯誤</h3>
+                <div className="text-sm text-gray-600 space-y-1">
+                  {error.split('\n').map((line, index) => (
+                    <div key={index}>{line}</div>
+                  ))}
+                </div>
+              </div>
+            </div>
+            <div className="flex justify-end">
+              <button
+                onClick={() => setError(null)}
+                className="px-4 py-2 bg-red-500 text-white rounded-lg hover:bg-red-600"
+              >
+                確定
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 成功模態框 */}
+      {showSuccessModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50 p-4">
+          <div className="bg-white rounded-lg shadow-lg max-w-md w-full p-6">
+            <div className="text-center">
+              <CheckCircle className="w-12 h-12 text-green-500 mx-auto mb-4" />
+              <h3 className="text-lg font-semibold text-gray-900 mb-2">提交成功！</h3>
+              <p className="text-gray-600 mb-6">外購電力使用量資料已成功儲存</p>
+              <button
+                onClick={() => setShowSuccessModal(false)}
+                className="px-6 py-2 bg-green-500 text-white rounded-lg hover:bg-green-600"
+              >
+                確認
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 清除確認模態框 */}
+      {showClearModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50 p-4">
+          <div className="bg-white rounded-lg shadow-lg max-w-md w-full p-6">
+            <div className="flex items-start space-x-3 mb-4">
+              <AlertCircle className="w-6 h-6 text-orange-500 flex-shrink-0 mt-0.5" />
+              <div>
+                <h3 className="text-lg font-semibold text-gray-900 mb-2">確認清除</h3>
+                <p className="text-gray-600">清除後，所有帳單資料都會被移除，確定要繼續嗎？</p>
+              </div>
+            </div>
+            <div className="flex justify-end space-x-3">
+              <button
+                onClick={() => setShowClearModal(false)}
+                className="px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50"
+              >
+                取消
+              </button>
+              <button
+                onClick={handleClear}
+                className="px-4 py-2 bg-red-500 text-white rounded-lg hover:bg-red-600"
+              >
+                確定清除
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 底部操作欄 */}
+      <BottomActionBar
+        currentStatus={frontendStatus?.currentStatus || initialStatus}
+        currentEntryId={currentEntryId}
+        isUpdating={submitting}
+        hasSubmittedBefore={hasSubmittedBefore}
+        hasAnyData={bills.length > 0 && bills.some(bill => bill.billingUnits > 0)}
+        editPermissions={editPermissions}
+        submitting={submitting}
+        onSubmit={handleSubmit}
+        onClear={() => setShowClearModal(true)}
+        designTokens={designTokens}
+      />
+
+      {/* Toast 通知 */}
+      {toast && (
+        <Toast
+          message={toast.message}
+          type={toast.type}
+          onClose={() => setToast(null)}
+        />
+      )}
+
     </div>
-  );
+  )
 }
+
+export default ElectricityBillPage

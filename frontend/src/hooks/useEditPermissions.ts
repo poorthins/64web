@@ -17,16 +17,6 @@ export interface EditPermissions {
 export function useEditPermissions(status: EntryStatus): EditPermissions {
   return useMemo(() => {
     switch (status) {
-      case 'draft':
-        return {
-          canEdit: true,
-          canUploadFiles: true,
-          canDeleteFiles: true,
-          isReadonly: false,
-          submitButtonText: '提交填報',
-          statusDescription: '可完全編輯，包含所有操作'
-        }
-      
       case 'rejected':
         return {
           canEdit: true,
@@ -96,8 +86,6 @@ export function isReadonlyStatus(status: EntryStatus): boolean {
  */
 export function getSubmitButtonText(status: EntryStatus): string {
   switch (status) {
-    case 'draft':
-      return '提交填報'
     case 'rejected':
       return '重新提交'
     case 'submitted':
@@ -105,6 +93,6 @@ export function getSubmitButtonText(status: EntryStatus): string {
     case 'approved':
       return '已核准'
     default:
-      return '提交'
+      return '提交填報'
   }
 }

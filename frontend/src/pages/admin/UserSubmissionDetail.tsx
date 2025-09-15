@@ -75,7 +75,7 @@ const UserSubmissionDetail: React.FC<UserSubmissionDetailProps> = ({
   }
 
   const getLatestReviewStatus = (submission: Submission) => {
-    if (!submission.entry_reviews || submission.entry_reviews.length === 0) {
+    if (!submission.review_history || submission.review_history.length === 0) {
       return {
         status: 'pending',
         note: '',
@@ -86,7 +86,7 @@ const UserSubmissionDetail: React.FC<UserSubmissionDetailProps> = ({
       }
     }
 
-    const latest = submission.entry_reviews.sort((a, b) => 
+    const latest = submission.review_history.sort((a, b) => 
       new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
     )[0]
 
@@ -695,9 +695,9 @@ const UserSubmissionDetail: React.FC<UserSubmissionDetailProps> = ({
               <div className="space-y-4">
                 <h4 className="font-medium text-gray-900">審核歷史</h4>
                 
-                {viewingSubmission.entry_reviews && viewingSubmission.entry_reviews.length > 0 ? (
+                {viewingSubmission.review_history && viewingSubmission.review_history.length > 0 ? (
                   <div className="space-y-3">
-                    {viewingSubmission.entry_reviews.map((review) => (
+                    {viewingSubmission.review_history.map((review) => (
                       <div key={review.id} className="border rounded-lg p-3 bg-gray-50">
                         <div className="flex items-center justify-between mb-2">
                           <div className="flex items-center gap-2">

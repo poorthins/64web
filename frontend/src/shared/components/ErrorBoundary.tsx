@@ -53,7 +53,6 @@ export class ErrorBoundary extends Component<Props, State> {
 
     // 在生產環境中，可以將錯誤發送到錯誤追蹤服務
     if (import.meta.env.PROD) {
-      // TODO: 發送錯誤到 Sentry 或其他錯誤追蹤服務
       // sendErrorToService(error, errorInfo);
     }
   }
@@ -142,7 +141,6 @@ export function useErrorHandler() {
     
     // 在生產環境中發送錯誤到追蹤服務
     if (import.meta.env.PROD) {
-      // TODO: 發送錯誤到 Sentry 或其他錯誤追蹤服務
       // sendErrorToService(error, errorInfo);
     }
     

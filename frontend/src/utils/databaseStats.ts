@@ -60,7 +60,7 @@ export async function getDatabaseStats(): Promise<DatabaseStats> {
   const tables = [
     'profiles',           // 用戶資料表
     'energy_entries',     // 能源填報記錄
-    'entry_reviews',      // 審核記錄
+    'review_history',     // 審核記錄
     'evidence_files',     // 證明檔案
     'draft_data'          // 草稿資料
   ]
@@ -202,7 +202,7 @@ export async function getSubmissionStats(): Promise<{
 
     // 查詢總審核記錄數
     const { count: totalReviews, error: reviewsError } = await supabase
-      .from('entry_reviews')
+      .from('review_history')
       .select('*', { count: 'exact', head: true })
 
     if (reviewsError) throw reviewsError
