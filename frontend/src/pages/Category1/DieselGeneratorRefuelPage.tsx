@@ -1,33 +1,31 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Upload, AlertCircle, CheckCircle, Loader2, X, Trash2, Plus } from 'lucide-react'
-import EvidenceUpload from '../../components/EvidenceUpload'
-import StatusSwitcher, { EntryStatus, canEdit, canUploadFiles, getButtonText } from '../../components/StatusSwitcher'
+import { AlertCircle, CheckCircle, Loader2, X, Trash2, Plus } from 'lucide-react'
+import EvidenceUpload, { MemoryFile } from '../../components/EvidenceUpload'
+import { EntryStatus } from '../../components/StatusSwitcher'
 import StatusIndicator from '../../components/StatusIndicator'
 import Toast, { ToastType } from '../../components/Toast'
 import BottomActionBar from '../../components/BottomActionBar'
 import { useEditPermissions } from '../../hooks/useEditPermissions'
 import { useFrontendStatus } from '../../hooks/useFrontendStatus'
-import { listMSDSFiles, listUsageEvidenceFiles, commitEvidence, deleteEvidence, EvidenceFile, uploadEvidenceWithEntry } from '../../api/files'
-import { upsertEnergyEntry, sumMonthly, UpsertEntryInput, updateEntryStatus, getEntryByPageKeyAndYear } from '../../api/entries'
-import { getEntryFiles } from '../../api/files'
+import { commitEvidence, getEntryFiles, EvidenceFile, uploadEvidenceWithEntry } from '../../api/files'
+import { upsertEnergyEntry, UpsertEntryInput, getEntryByPageKeyAndYear } from '../../api/entries'
 import { designTokens } from '../../utils/designTokens'
 import { getCategoryInfo } from '../../utils/categoryConstants'
-import { MemoryFile } from '../../components/EvidenceUpload'
-import { supabase } from '../../lib/supabaseClient'
 import { DocumentHandler } from '../../services/documentHandler'
 
-
-// 尿素日期使用量資料結構
-interface UsageRecord {
+// 柴油發電機測試記錄資料結構
+interface TestRecord {
   id: string
-  date: string           // 使用日期 YYYY-MM-DD
-  quantity: number       // 使用量 (L)
-  files: EvidenceFile[]  // 使用證明檔案
-  memoryFiles?: MemoryFile[]  // 記憶體暫存檔案
+  annualTestFrequency: number // 年度測試頻率(次)
+  testDuration: number       // 測試時間(分)
+  generatorLocation: string  // 發電機位置
+  powerRating: number        // 發電功率(kW)
+  files: EvidenceFile[]      // 佐證檔案
+  memoryFiles?: MemoryFile[] // 記憶體暫存檔案
 }
 
-const UreaPage = () => {
+const DieselGeneratorPage = () => {
   const navigate = useNavigate()
   const [loading, setLoading] = useState(true)
   const [submitting, setSubmitting] = useState(false)
@@ -39,7 +37,7 @@ const UreaPage = () => {
   const [currentEntryId, setCurrentEntryId] = useState<string | null>(null)
   const [initialStatus, setInitialStatus] = useState<EntryStatus>('submitted')
   const [toast, setToast] = useState<{ message: string; type: ToastType } | null>(null)
-  
+
   // 狀態管理 Hook
   const frontendStatus = useFrontendStatus({
     initialStatus,
@@ -49,34 +47,39 @@ const UreaPage = () => {
   const { currentStatus: frontendCurrentStatus, handleSubmitSuccess, handleDataChanged, isInitialLoad } = frontendStatus
   const currentStatus = frontendCurrentStatus || initialStatus
   const isUpdating = false
-  
+
   // 表單資料
   const [year] = useState(new Date().getFullYear())
-  const [msdsFiles, setMsdsFiles] = useState<EvidenceFile[]>([])
-  // 記憶體暫存檔案狀態
-  const [msdsMemoryFiles, setMsdsMemoryFiles] = useState<MemoryFile[]>([])
-  const [usageRecords, setUsageRecords] = useState<UsageRecord[]>([
+  const [testRecords, setTestRecords] = useState<TestRecord[]>([
     {
       id: crypto.randomUUID(),
-      date: '',
-      quantity: 0,
+      annualTestFrequency: 0,
+      testDuration: 0,
+      generatorLocation: '',
+      powerRating: 0,
       files: [],
       memoryFiles: []
     }
   ])
 
-  const pageKey = 'urea'
-  
+  const pageKey = 'diesel_generator'
+
   // 編輯權限控制
   const editPermissions = useEditPermissions(currentStatus)
-  
+
   // 判斷是否有資料
   const hasAnyData = useMemo(() => {
-    const hasUsageRecords = usageRecords.some(r => r.date !== '' || r.quantity > 0 || r.files.length > 0 || (r.memoryFiles && r.memoryFiles.length > 0))
-    const hasFiles = msdsFiles.length > 0 || msdsMemoryFiles.length > 0
-    return hasUsageRecords || hasFiles
-  }, [usageRecords, msdsFiles, msdsMemoryFiles])
-  
+    const hasTestRecords = testRecords.some(r =>
+      r.annualTestFrequency > 0 ||
+      r.testDuration > 0 ||
+      r.generatorLocation !== '' ||
+      r.powerRating > 0 ||
+      r.files.length > 0 ||
+      (r.memoryFiles && r.memoryFiles.length > 0)
+    )
+    return hasTestRecords
+  }, [testRecords])
+
   // 唯讀模式判斷
   const isReadOnly = false
 
@@ -87,58 +90,25 @@ const UreaPage = () => {
         setLoading(true)
         setError(null)
 
-        // 草稿功能已移除
-
-        // 載入 MSDS 檔案
-        const msdsFilesList = await listMSDSFiles(pageKey)
-        setMsdsFiles(msdsFilesList)
-
         // 檢查是否已有非草稿記錄
         const existingEntry = await getEntryByPageKeyAndYear(pageKey, year)
         if (existingEntry && existingEntry.status !== 'draft') {
           setInitialStatus(existingEntry.status as EntryStatus)
           setCurrentEntryId(existingEntry.id)
           setHasSubmittedBefore(true)
-          
+
           // 載入已提交的記錄數據供編輯
           // 優先從 extraPayload 讀取
-          if (existingEntry.extraPayload?.usageRecords) {
+          if (existingEntry.extraPayload?.testRecords && existingEntry.extraPayload?.mode === 'refuel') {
             // 載入相關檔案
-            let updatedRecords = existingEntry.extraPayload.usageRecords
-            
-            if (existingEntry.id) {
-              try {
-                const files = await getEntryFiles(existingEntry.id)
-                
-                // 更新使用記錄中的檔案
-                updatedRecords = existingEntry.extraPayload.usageRecords.map((record: any) => {
-                  const associatedFiles = files.filter(f => 
-                    f.file_type === 'usage_evidence' && 
-                    f.page_key === pageKey
-                  )
-                  
-                  return {
-                    ...record,
-                    files: associatedFiles
-                  }
-                })
-              } catch (fileError) {
-                console.error('Failed to load files:', fileError)
-              }
-            }
-
-            setUsageRecords(updatedRecords)
-            handleDataChanged()
-          } else if (existingEntry.payload?.usageRecords) {
-            // 向後相容：從舊的 payload 結構讀取
-            let updatedRecords = existingEntry.payload.usageRecords
+            let updatedRecords = existingEntry.extraPayload.testRecords
 
             if (existingEntry.id) {
               try {
                 const files = await getEntryFiles(existingEntry.id)
 
-                // 更新使用記錄中的檔案
-                updatedRecords = existingEntry.payload.usageRecords.map((record: any) => {
+                // 更新測試記錄中的檔案
+                updatedRecords = existingEntry.extraPayload.testRecords.map((record: any) => {
                   const associatedFiles = files.filter(f =>
                     f.file_type === 'usage_evidence' &&
                     f.page_key === pageKey
@@ -154,11 +124,35 @@ const UreaPage = () => {
               }
             }
 
-            setUsageRecords(updatedRecords)
+            setTestRecords(updatedRecords)
             handleDataChanged()
-          } else if (existingEntry.payload?.monthly) {
-            // 向後相容：從 monthly 推算使用記錄
-            console.log('Loading from legacy monthly format - data migration may be needed')
+          } else if (existingEntry.extraPayload?.mode === 'test') {
+            // 如果是測試模式的資料，不載入到refuel頁面
+            console.warn('Found test mode data, skipping load in refuel mode page')
+          } else if (!existingEntry.extraPayload?.mode) {
+            // 處理無模式標記的舊資料，預設為加油模式
+            console.log('Loading legacy data without mode, assuming refuel mode')
+            if (existingEntry.extraPayload?.testRecords) {
+              let updatedRecords = existingEntry.extraPayload.testRecords
+
+              if (existingEntry.id) {
+                try {
+                  const files = await getEntryFiles(existingEntry.id)
+                  updatedRecords = existingEntry.extraPayload.testRecords.map((record: any) => {
+                    const associatedFiles = files.filter(f =>
+                      f.file_type === 'usage_evidence' &&
+                      f.page_key === pageKey
+                    )
+                    return { ...record, files: associatedFiles }
+                  })
+                } catch (fileError) {
+                  console.error('Failed to load files:', fileError)
+                }
+              }
+
+              setTestRecords(updatedRecords)
+              handleDataChanged()
+            }
           }
         }
         // 如果是草稿記錄或無記錄，保持表單空白狀態
@@ -175,81 +169,66 @@ const UreaPage = () => {
     loadData()
   }, [])
 
-  // 移除自動狀態變更邏輯
-
-  const addUsageRecord = () => {
-    setUsageRecords(prev => [...prev, {
+  const addTestRecord = () => {
+    setTestRecords(prev => [...prev, {
       id: crypto.randomUUID(),
-      date: '',
-      quantity: 0,
+      annualTestFrequency: 0,
+      testDuration: 0,
+      generatorLocation: '',
+      powerRating: 0,
       files: [],
       memoryFiles: []
     }])
   }
 
-  const removeUsageRecord = (id: string) => {
-    if (usageRecords.length > 1) {
-      setUsageRecords(prev => prev.filter(record => record.id !== id))
+  const removeTestRecord = (id: string) => {
+    if (testRecords.length > 1) {
+      setTestRecords(prev => prev.filter(record => record.id !== id))
     }
   }
 
-  const updateUsageRecord = (id: string, field: keyof UsageRecord, value: any) => {
-    setUsageRecords(prev => prev.map(record => 
+  const updateTestRecord = (id: string, field: keyof TestRecord, value: any) => {
+    setTestRecords(prev => prev.map(record =>
       record.id === id ? { ...record, [field]: value } : record
     ))
   }
 
-  const handleUsageFilesChange = (recordId: string, files: EvidenceFile[]) => {
-    updateUsageRecord(recordId, 'files', files)
-  }
-
-  const handleMsdsFilesChange = (files: EvidenceFile[]) => {
-    setMsdsFiles(files)
-  }
-
-  const handleMsdsMemoryFilesChange = (files: MemoryFile[]) => {
-    console.log('📁 [UreaPage] MSDS memory files changed:', files.length)
-    setMsdsMemoryFiles(files)
+  const handleTestFilesChange = (recordId: string, files: EvidenceFile[]) => {
+    updateTestRecord(recordId, 'files', files)
   }
 
   const handleMemoryFilesChange = (recordId: string, files: MemoryFile[]) => {
-    console.log('📁 [UreaPage] Usage memory files changed for record:', recordId, files.length)
-    updateUsageRecord(recordId, 'memoryFiles', files)
+    console.log('📁 [DieselGeneratorPage] Memory files changed for record:', recordId, files.length)
+    updateTestRecord(recordId, 'memoryFiles', files)
   }
 
-  const getTotalUsage = () => {
-    return usageRecords.reduce((sum, record) => sum + (record.quantity || 0), 0)
+  const getTotalTestTime = () => {
+    return testRecords.reduce((sum, record) => sum + (record.testDuration || 0), 0)
   }
 
   const validateData = () => {
     const errors: string[] = []
 
-    // 移除 MSDS 必填驗證
-    // if (msdsFiles.length === 0) {
-    //   errors.push('請上傳 MSDS 安全資料表')
-    // }
-
-    usageRecords.forEach((record, index) => {
-      if (!record.date) {
-        errors.push(`第${index + 1}筆記錄未填入使用日期`)
+    testRecords.forEach((record, index) => {
+      if (record.annualTestFrequency <= 0) {
+        errors.push(`第${index + 1}筆記錄年度測試頻率必須大於0次`)
       }
-      if (record.quantity <= 0) {
-        errors.push(`第${index + 1}筆記錄使用量必須大於0`)
+      if (record.testDuration <= 0) {
+        errors.push(`第${index + 1}筆記錄測試時間必須大於0分鐘`)
+      }
+      if (!record.generatorLocation.trim()) {
+        errors.push(`第${index + 1}筆記錄未填入發電機位置`)
+      }
+      if (record.powerRating <= 0) {
+        errors.push(`第${index + 1}筆記錄發電功率必須大於0kW`)
       }
 
       // 檢查已上傳檔案 OR 記憶體檔案
       const totalFiles = record.files.length + (record.memoryFiles?.length || 0)
       if (totalFiles === 0) {
-        errors.push(`第${index + 1}筆記錄未上傳使用證明`)
+        errors.push(`第${index + 1}筆記錄未上傳測試佐證資料`)
       }
     })
-
-    // 檢查日期重複
-    const dates = usageRecords.map(record => record.date).filter(date => date)
-    const duplicates = dates.filter((date, index) => dates.indexOf(date) !== index)
-    if (duplicates.length > 0) {
-      errors.push(`有重複的使用日期：${duplicates.join(', ')}`)
-    }
 
     return errors
   }
@@ -266,41 +245,44 @@ const UreaPage = () => {
     setSuccess(null)
 
     try {
-      console.log('🔍 ========== 尿素提交診斷開始 ==========')
+      console.log('🔍 ========== 柴油發電機提交診斷開始 ==========')
       console.log('🔍 [1] pageKey:', pageKey)
 
       // 獲取正確的 category 資訊
       const categoryInfo = getCategoryInfo(pageKey)
       console.log('🔍 [2] categoryInfo:', categoryInfo)
 
-      // 將日期記錄轉換為月份資料格式
+      // 將測試記錄轉換為月份資料格式 (直接使用年度總測試時間)
       const monthly: Record<string, number> = {}
+      const totalTestTime = getTotalTestTime()
 
-      usageRecords.forEach(record => {
-        if (record.date && record.quantity > 0) {
-          const month = new Date(record.date).getMonth() + 1
-          monthly[month.toString()] = (monthly[month.toString()] || 0) + record.quantity
-        }
-      })
+      if (totalTestTime > 0) {
+        // 將總測試時間放到12月
+        monthly['12'] = totalTestTime
+      }
+
+      console.log('🔍 [3] monthly:', monthly)
 
       const entryInput: UpsertEntryInput = {
         page_key: pageKey,
         period_year: year,
-        unit: categoryInfo.unit,
+        unit: '分鐘',
         monthly: monthly,
         extraPayload: {
-          usageRecords: usageRecords.map(record => ({
+          mode: 'refuel',
+          testRecords: testRecords.map(record => ({
             id: record.id,
-            date: record.date,
-            quantity: record.quantity
+            annualTestFrequency: record.annualTestFrequency,
+            testDuration: record.testDuration,
+            generatorLocation: record.generatorLocation,
+            powerRating: record.powerRating
           })),
-          totalUsage: getTotalUsage(),
-          notes: `尿素使用量，共${usageRecords.length}筆記錄`
+          totalTestTime: getTotalTestTime(),
+          notes: `柴油發電機測試記錄，共${testRecords.length}筆記錄`
         }
       }
 
-      console.log('🔍 [3] entryInput:', entryInput)
-      console.log('🔍 [4] entryInput.page_key 確認:', entryInput.page_key)
+      console.log('🔍 [4] entryInput:', entryInput)
 
       const { entry_id } = await upsertEnergyEntry(entryInput, true)
 
@@ -308,24 +290,10 @@ const UreaPage = () => {
         setCurrentEntryId(entry_id)
       }
 
-      // 上傳 MSDS 記憶體檔案
-      if (msdsMemoryFiles.length > 0) {
-        console.log(`📁 [UreaPage] Uploading ${msdsMemoryFiles.length} MSDS memory files...`)
-        for (const memoryFile of msdsMemoryFiles) {
-          await uploadEvidenceWithEntry(memoryFile.file, {
-            entryId: entry_id,
-            pageKey: pageKey,
-            year: year,
-            category: 'msds'
-          })
-        }
-        setMsdsMemoryFiles([]) // 清空記憶體檔案
-      }
-
-      // 上傳使用證明記憶體檔案
-      for (const record of usageRecords) {
+      // 上傳測試記錄記憶體檔案
+      for (const record of testRecords) {
         if (record.memoryFiles && record.memoryFiles.length > 0) {
-          console.log(`📁 [UreaPage] Uploading ${record.memoryFiles.length} usage files for record ${record.id}...`)
+          console.log(`📁 [DieselGeneratorPage] Uploading ${record.memoryFiles.length} files for record ${record.id}...`)
           for (const memoryFile of record.memoryFiles) {
             await uploadEvidenceWithEntry(memoryFile.file, {
               entryId: entry_id,
@@ -342,11 +310,15 @@ const UreaPage = () => {
         pageKey: pageKey
       })
 
-      // 草稿清理功能已移除
       await handleSubmitSuccess()
 
-      const totalUsage = getTotalUsage()
-      setSuccess(`年度總使用量：${totalUsage.toFixed(2)} 公斤`)
+      // 清空記憶體檔案
+      setTestRecords(prev => prev.map(record => ({
+        ...record,
+        memoryFiles: []
+      })))
+
+      setSuccess(`年度總測試時間：${totalTestTime} 分鐘`)
       setHasSubmittedBefore(true)
       setShowSuccessModal(true)
 
@@ -364,35 +336,34 @@ const UreaPage = () => {
   }
 
   const handleClearAll = async () => {
-    console.log('🗑️ [UreaPage] ===== CLEAR BUTTON CLICKED =====')
+    console.log('🗑️ [DieselGeneratorPage] ===== CLEAR BUTTON CLICKED =====')
 
     const clearSuccess = DocumentHandler.handleClear({
       currentStatus: currentStatus,
-      title: '尿素資料清除',
-      message: '確定要清除所有尿素使用資料嗎？此操作無法復原。',
+      title: '柴油發電機測試資料清除',
+      message: '確定要清除所有柴油發電機測試資料嗎？此操作無法復原。',
       onClear: () => {
         setSubmitting(true)
         try {
-          console.log('🗑️ [UreaPage] Starting complete clear operation...')
+          console.log('🗑️ [DieselGeneratorPage] Starting complete clear operation...')
 
           // 清理記憶體檔案
-          DocumentHandler.clearAllMemoryFiles(msdsMemoryFiles)
-          usageRecords.forEach(record => {
+          testRecords.forEach(record => {
             if (record.memoryFiles) {
               DocumentHandler.clearAllMemoryFiles(record.memoryFiles)
             }
           })
 
-          // 原有的清除邏輯保持不變
-          setUsageRecords([{
+          // 清除測試資料
+          setTestRecords([{
             id: crypto.randomUUID(),
-            date: '',
-            quantity: 0,
+            annualTestFrequency: 0,
+            testDuration: 0,
+            generatorLocation: '',
+            powerRating: 0,
             files: [],
             memoryFiles: []
           }])
-          setMsdsFiles([])
-          setMsdsMemoryFiles([])
           setHasSubmittedBefore(false)
           setError(null)
           setSuccess(null)
@@ -404,10 +375,10 @@ const UreaPage = () => {
           })
 
         } catch (error) {
-          console.error('❌ [UreaPage] Clear operation failed:', error)
+          console.error('❌ [DieselGeneratorPage] Clear operation failed:', error)
           setError('清除操作失敗，請重試')
         } finally {
-          console.log('🗑️ [UreaPage] Clear operation finished, resetting loading state')
+          console.log('🗑️ [DieselGeneratorPage] Clear operation finished, resetting loading state')
           setSubmitting(false)
         }
       }
@@ -424,14 +395,14 @@ const UreaPage = () => {
   // Loading 狀態
   if (loading) {
     return (
-      <div 
-        className="min-h-screen flex items-center justify-center" 
+      <div
+        className="min-h-screen flex items-center justify-center"
         style={{ backgroundColor: designTokens.colors.background }}
       >
         <div className="text-center">
-          <Loader2 
-            className="w-12 h-12 animate-spin mx-auto mb-4" 
-            style={{ color: designTokens.colors.accentPrimary }} 
+          <Loader2
+            className="w-12 h-12 animate-spin mx-auto mb-4"
+            style={{ color: designTokens.colors.accentPrimary }}
           />
           <p style={{ color: designTokens.colors.textPrimary }}>載入中...</p>
         </div>
@@ -442,46 +413,46 @@ const UreaPage = () => {
   return (
     <div className="min-h-screen bg-green-50">
       <div className="max-w-4xl mx-auto px-6 py-8 space-y-6">
-        
+
         {/* 頁面標題 */}
         <div className="text-center mb-8">
-          <h1 
-            className="text-3xl font-semibold mb-3" 
+          <h1
+            className="text-3xl font-semibold mb-3"
             style={{ color: designTokens.colors.textPrimary }}
           >
-            尿素使用量填報
+            柴油發電機測試記錄
           </h1>
-          <p 
-            className="text-base" 
+          <p
+            className="text-base"
             style={{ color: designTokens.colors.textSecondary }}
           >
-            請上傳 MSDS 文件並記錄各日期的尿素使用量
+            請記錄發電機測試資料並上傳相關佐證文件
           </p>
         </div>
 
         {/* 重新提交提示 */}
         {hasSubmittedBefore && !showSuccessModal && (
-          <div 
+          <div
             className="rounded-lg p-4 border-l-4"
-            style={{ 
+            style={{
               backgroundColor: '#f0f9ff',
               borderColor: designTokens.colors.accentBlue
             }}
           >
             <div className="flex items-start">
-              <CheckCircle 
-                className="h-5 w-5 mt-0.5 mr-3" 
-                style={{ color: designTokens.colors.accentBlue }} 
+              <CheckCircle
+                className="h-5 w-5 mt-0.5 mr-3"
+                style={{ color: designTokens.colors.accentBlue }}
               />
               <div>
-                <h3 
-                  className="text-sm font-medium mb-1" 
+                <h3
+                  className="text-sm font-medium mb-1"
                   style={{ color: designTokens.colors.accentBlue }}
                 >
                   資料已提交
                 </h3>
-                <p 
-                  className="text-sm" 
+                <p
+                  className="text-sm"
                   style={{ color: designTokens.colors.textSecondary }}
                 >
                   您可以繼續編輯資料，修改後請再次點擊「提交填報」以更新記錄。
@@ -491,40 +462,11 @@ const UreaPage = () => {
           </div>
         )}
 
-        {/* MSDS 安全資料表 */}
-        <div 
-          className="rounded-lg border p-6"
-          style={{ 
-            backgroundColor: designTokens.colors.cardBg,
-            borderColor: designTokens.colors.border,
-            boxShadow: designTokens.shadows.sm
-          }}
-        >
-          <h2 
-            className="text-xl font-medium mb-6 text-center" 
-            style={{ color: designTokens.colors.textPrimary }}
-          >
-            請上傳尿素的MSDS；若尿素由中油加注，則可免
-          </h2>
-          <div>
-            <EvidenceUpload
-              pageKey={pageKey}
-              files={msdsFiles}
-              onFilesChange={handleMsdsFilesChange}
-              memoryFiles={msdsMemoryFiles}
-              onMemoryFilesChange={handleMsdsMemoryFilesChange}
-              maxFiles={3}
-              disabled={submitting || !editPermissions.canUploadFiles}
-              kind="msds"
-              mode="edit"
-            />
-          </div>
-        </div>
 
-        {/* 使用量記錄 */}
-        <div 
+        {/* 測試記錄區塊 */}
+        <div
           className="rounded-lg border p-6"
-          style={{ 
+          style={{
             backgroundColor: designTokens.colors.cardBg,
             borderColor: designTokens.colors.border,
             boxShadow: designTokens.shadows.sm
@@ -535,43 +477,43 @@ const UreaPage = () => {
               className="text-xl font-medium"
               style={{ color: designTokens.colors.textPrimary }}
             >
-              尿素使用量記錄
+              測試記錄
             </h2>
           </div>
 
-          {/* 使用量統計 */}
-          <div 
+          {/* 總測試時間統計 */}
+          <div
             className="mb-6 p-4 rounded-lg"
             style={{ backgroundColor: designTokens.colors.accentLight }}
           >
             <div className="flex justify-between items-center">
-              <span 
+              <span
                 className="text-sm font-medium"
                 style={{ color: designTokens.colors.textPrimary }}
               >
-                總使用量：
+                總測試時間：
               </span>
-              <span 
+              <span
                 className="text-lg font-bold"
                 style={{ color: designTokens.colors.accentSecondary }}
               >
-                {getTotalUsage().toFixed(2)} 公斤
+                {getTotalTestTime()} 分鐘
               </span>
             </div>
           </div>
-          
+
           <div className="space-y-4">
-            {usageRecords.map((record, index) => (
-              <div 
+            {testRecords.map((record, index) => (
+              <div
                 key={record.id}
                 className="border rounded-lg p-4"
                 style={{ borderColor: designTokens.colors.border }}
               >
                 <div className="flex justify-between items-center mb-4">
                   <h3 className="text-lg font-medium">記錄 #{index + 1}</h3>
-                  {editPermissions.canEdit && usageRecords.length > 1 && (
+                  {editPermissions.canEdit && testRecords.length > 1 && (
                     <button
-                      onClick={() => removeUsageRecord(record.id)}
+                      onClick={() => removeTestRecord(record.id)}
                       className="text-red-500 hover:text-red-700 p-1"
                       disabled={submitting}
                     >
@@ -581,56 +523,97 @@ const UreaPage = () => {
                 </div>
 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
-                  {/* 使用日期 */}
+                  {/* 年度測試頻率 */}
                   <div>
                     <label className="block text-sm font-medium mb-2">
-                      使用日期
+                      年度測試頻率 (次)
                     </label>
                     <input
-                      type="date"
-                      value={record.date}
-                      onChange={(e) => updateUsageRecord(record.id, 'date', e.target.value)}
+                      type="number"
+                      min="0"
+                      value={record.annualTestFrequency || ''}
+                      onChange={(e) => updateTestRecord(record.id, 'annualTestFrequency', parseInt(e.target.value) || 0)}
                       className="w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:border-transparent transition-all"
-                      style={{ 
+                      style={{
                         color: designTokens.colors.textPrimary,
                         borderColor: designTokens.colors.border
                       }}
                       disabled={submitting || !editPermissions.canEdit}
+                      placeholder="12"
                     />
                   </div>
 
-                  {/* 使用量 */}
+                  {/* 測試時間 */}
                   <div>
                     <label className="block text-sm font-medium mb-2">
-                      使用量 (公斤)
+                      測試時間 (分鐘)
+                    </label>
+                    <input
+                      type="number"
+                      min="0"
+                      value={record.testDuration || ''}
+                      onChange={(e) => updateTestRecord(record.id, 'testDuration', parseInt(e.target.value) || 0)}
+                      className="w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:border-transparent transition-all"
+                      style={{
+                        color: designTokens.colors.textPrimary,
+                        borderColor: designTokens.colors.border
+                      }}
+                      disabled={submitting || !editPermissions.canEdit}
+                      placeholder="30"
+                    />
+                  </div>
+
+                  {/* 發電機位置 */}
+                  <div>
+                    <label className="block text-sm font-medium mb-2">
+                      發電機位置
+                    </label>
+                    <input
+                      type="text"
+                      value={record.generatorLocation}
+                      onChange={(e) => updateTestRecord(record.id, 'generatorLocation', e.target.value)}
+                      className="w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:border-transparent transition-all"
+                      style={{
+                        color: designTokens.colors.textPrimary,
+                        borderColor: designTokens.colors.border
+                      }}
+                      disabled={submitting || !editPermissions.canEdit}
+                      placeholder="例：1樓機房"
+                    />
+                  </div>
+
+                  {/* 發電功率 */}
+                  <div>
+                    <label className="block text-sm font-medium mb-2">
+                      發電功率 (kW)
                     </label>
                     <input
                       type="number"
                       min="0"
                       step="0.1"
-                      value={record.quantity || ''}
-                      onChange={(e) => updateUsageRecord(record.id, 'quantity', parseFloat(e.target.value) || 0)}
+                      value={record.powerRating || ''}
+                      onChange={(e) => updateTestRecord(record.id, 'powerRating', parseFloat(e.target.value) || 0)}
                       className="w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:border-transparent transition-all"
-                      style={{ 
+                      style={{
                         color: designTokens.colors.textPrimary,
                         borderColor: designTokens.colors.border
                       }}
                       disabled={submitting || !editPermissions.canEdit}
-                      placeholder="0.0"
+                      placeholder="100.0"
                     />
                   </div>
                 </div>
 
-                {/* 使用證明檔案 */}
+                {/* 測試佐證檔案 */}
                 <div>
                   <label className="block text-sm font-medium mb-2">
-                    使用證明
+                    測試佐證資料
                   </label>
                   <EvidenceUpload
                     pageKey={pageKey}
                     month={index + 1}
                     files={record.files}
-                    onFilesChange={(files) => handleUsageFilesChange(record.id, files)}
+                    onFilesChange={(files) => handleTestFilesChange(record.id, files)}
                     memoryFiles={record.memoryFiles || []}
                     onMemoryFilesChange={(files) => handleMemoryFilesChange(record.id, files)}
                     maxFiles={3}
@@ -646,11 +629,11 @@ const UreaPage = () => {
           {/* 新增記錄按鈕 */}
           {editPermissions.canEdit && (
             <button
-              onClick={addUsageRecord}
+              onClick={addTestRecord}
               disabled={submitting}
               className="w-full py-3 bg-green-500 hover:bg-green-600 text-white rounded-lg font-medium transition-colors"
             >
-              + 新增記錄
+              + 新增測試記錄
             </button>
           )}
         </div>
@@ -659,64 +642,46 @@ const UreaPage = () => {
         <div className="h-20"></div>
       </div>
 
-      {/* 錯誤訊息模態框 */}
+      {/* 錯誤模態框 */}
       {error && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50 p-4">
-          <div 
+          <div
             className="bg-white rounded-lg shadow-lg max-w-md w-full"
             style={{ borderRadius: designTokens.borderRadius.lg }}
           >
             <div className="p-6">
               <div className="flex items-start space-x-3 mb-4">
-                <div 
+                <div
                   className="w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0"
                   style={{ backgroundColor: `${designTokens.colors.error}15` }}
                 >
-                  <AlertCircle 
-                    className="h-5 w-5" 
-                    style={{ color: designTokens.colors.error }} 
+                  <AlertCircle
+                    className="h-5 w-5"
+                    style={{ color: designTokens.colors.error }}
                   />
                 </div>
                 <div className="flex-1">
-                  <h3 
+                  <h3
                     className="text-lg font-semibold mb-2"
                     style={{ color: designTokens.colors.textPrimary }}
                   >
-                    發生錯誤
+                    操作失敗
                   </h3>
-                  <div className="text-sm space-y-1">
-                    {error.split('\n').map((line, index) => (
-                      <div key={index}>
-                        {line.startsWith('請修正以下問題：') ? (
-                          <div 
-                            className="font-medium mb-2"
-                            style={{ color: designTokens.colors.error }}
-                          >
-                            {line}
-                          </div>
-                        ) : line ? (
-                          <div className="flex items-start space-x-2 py-1">
-                            <div 
-                              className="w-1.5 h-1.5 rounded-full mt-2 flex-shrink-0"
-                              style={{ backgroundColor: designTokens.colors.error }}
-                            ></div>
-                            <span style={{ color: designTokens.colors.textSecondary }}>
-                              {line}
-                            </span>
-                          </div>
-                        ) : null}
-                      </div>
-                    ))}
-                  </div>
+                  <p
+                    className="text-sm"
+                    style={{ color: designTokens.colors.textSecondary }}
+                  >
+                    {error}
+                  </p>
                 </div>
               </div>
               <div className="flex justify-end">
                 <button
                   onClick={() => setError(null)}
-                  className="px-4 py-2 rounded-lg transition-colors font-medium text-white"
+                  className="px-4 py-2 text-white rounded-lg transition-colors font-medium"
                   style={{ backgroundColor: designTokens.colors.error }}
                 >
-                  確定
+                  確認
                 </button>
               </div>
             </div>
@@ -724,39 +689,31 @@ const UreaPage = () => {
         </div>
       )}
 
-      {/* 成功提示模態框 */}
-      {showSuccessModal && (
+      {/* 成功模態框 */}
+      {showSuccessModal && success && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50 p-4">
-          <div 
+          <div
             className="bg-white rounded-lg shadow-lg max-w-md w-full"
             style={{ borderRadius: designTokens.borderRadius.lg }}
           >
             <div className="p-6">
-              <div className="flex justify-end mb-2">
-                <button
-                  onClick={() => setShowSuccessModal(false)}
-                  className="text-gray-400 hover:text-gray-600 transition-colors"
-                >
-                  <X className="w-5 h-5" />
-                </button>
-              </div>
               <div className="text-center">
-                <div 
+                <div
                   className="w-12 h-12 mx-auto rounded-full mb-4 flex items-center justify-center"
                   style={{ backgroundColor: designTokens.colors.accentLight }}
                 >
-                  <CheckCircle 
-                    className="h-6 w-6" 
-                    style={{ color: designTokens.colors.accentPrimary }} 
+                  <CheckCircle
+                    className="h-6 w-6"
+                    style={{ color: designTokens.colors.accentPrimary }}
                   />
                 </div>
-                <h3 
+                <h3
                   className="text-lg font-medium mb-2"
                   style={{ color: designTokens.colors.textPrimary }}
                 >
                   提交成功！
                 </h3>
-                <p 
+                <p
                   className="mb-4"
                   style={{ color: designTokens.colors.textSecondary }}
                 >
@@ -778,29 +735,29 @@ const UreaPage = () => {
       {/* 清除確認模態框 */}
       {showClearConfirmModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50 p-4">
-          <div 
+          <div
             className="bg-white rounded-lg shadow-lg max-w-md w-full"
             style={{ borderRadius: designTokens.borderRadius.lg }}
           >
             <div className="p-6">
               <div className="flex items-start space-x-3 mb-4">
-                <div 
+                <div
                   className="w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0"
                   style={{ backgroundColor: `${designTokens.colors.warning}15` }}
                 >
-                  <AlertCircle 
-                    className="h-5 w-5" 
-                    style={{ color: designTokens.colors.warning }} 
+                  <AlertCircle
+                    className="h-5 w-5"
+                    style={{ color: designTokens.colors.warning }}
                   />
                 </div>
                 <div className="flex-1">
-                  <h3 
+                  <h3
                     className="text-lg font-semibold mb-2"
                     style={{ color: designTokens.colors.textPrimary }}
                   >
                     確認清除
                   </h3>
-                  <p 
+                  <p
                     className="text-sm"
                     style={{ color: designTokens.colors.textSecondary }}
                   >
@@ -812,7 +769,7 @@ const UreaPage = () => {
                 <button
                   onClick={() => setShowClearConfirmModal(false)}
                   className="px-4 py-2 border rounded-lg transition-colors font-medium"
-                  style={{ 
+                  style={{
                     borderColor: designTokens.colors.border,
                     color: designTokens.colors.textSecondary
                   }}
@@ -858,4 +815,4 @@ const UreaPage = () => {
   )
 }
 
-export default UreaPage
+export default DieselGeneratorPage

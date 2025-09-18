@@ -9,6 +9,7 @@ import { useFrontendStatus } from '../../hooks/useFrontendStatus';
 import { updateEntryStatus, getEntryByPageKeyAndYear, upsertEnergyEntry } from '../../api/entries';
 import { getEntryFiles, EvidenceFile, uploadEvidenceWithEntry, updateFileEntryAssociation } from '../../api/files';
 import { designTokens } from '../../utils/designTokens';
+import { DocumentHandler } from '../../services/documentHandler';
 
 
 interface RefrigerantData {
@@ -303,20 +304,55 @@ export default function RefrigerantPage() {
     setShowClearConfirmModal(true);
   };
 
-  const handleClearConfirm = () => {
-    setRefrigerantData(withExampleFirst([{
-      id: 1,
-      brandName: '',
-      modelNumber: '',
-      equipmentLocation: '',
-      refrigerantType: '',
-      fillAmount: 0,
-      unit: 'kg',
-      proofFile: null,
-      memoryFiles: []
-    }]));
-    setHasSubmittedBefore(false);
-    setShowClearConfirmModal(false);
+  const handleClearConfirm = async () => {
+    console.log('🗑️ [RefrigerantPage] ===== CLEAR BUTTON CLICKED =====')
+
+    const clearSuccess = DocumentHandler.handleClear({
+      currentStatus: currentStatus,
+      title: '冷媒資料清除',
+      message: '確定要清除所有冷媒使用資料嗎？此操作無法復原。',
+      onClear: () => {
+        setSubmitting(true)
+        try {
+          console.log('🗑️ [RefrigerantPage] Starting complete clear operation...')
+
+          // 清理記憶體檔案
+          refrigerantData.forEach(item => {
+            if (item.memoryFiles) {
+              DocumentHandler.clearAllMemoryFiles(item.memoryFiles)
+            }
+          })
+
+          // 原有的清除邏輯保持不變
+          setRefrigerantData(withExampleFirst([{
+            id: 1,
+            brandName: '',
+            modelNumber: '',
+            equipmentLocation: '',
+            refrigerantType: '',
+            fillAmount: 0,
+            unit: 'kg',
+            proofFile: null,
+            memoryFiles: []
+          }]))
+          setHasSubmittedBefore(false)
+          setShowClearConfirmModal(false)
+
+          // 成功訊息需要設定到適當的狀態管理中
+
+        } catch (error) {
+          console.error('❌ [RefrigerantPage] Clear operation failed:', error)
+          // 錯誤訊息需要設定到適當的狀態管理中
+        } finally {
+          console.log('🗑️ [RefrigerantPage] Clear operation finished, resetting loading state')
+          setSubmitting(false)
+        }
+      }
+    })
+
+    if (!clearSuccess && currentStatus === 'approved') {
+      // 錯誤訊息需要設定到適當的狀態管理中
+    }
   };
 
   const handleStatusChange = async (newStatus: EntryStatus) => {

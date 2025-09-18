@@ -6,10 +6,11 @@ import Toast, { ToastType } from '../../components/Toast'
 import BottomActionBar from '../../components/BottomActionBar'
 import { useEditPermissions } from '../../hooks/useEditPermissions'
 import { useFrontendStatus } from '../../hooks/useFrontendStatus'
-import { commitEvidence, getEntryFiles, EvidenceFile } from '../../api/files'
+import { commitEvidence, getEntryFiles, EvidenceFile, uploadEvidenceWithEntry } from '../../api/files'
 import { upsertEnergyEntry, UpsertEntryInput, updateEntryStatus, getEntryByPageKeyAndYear } from '../../api/entries'
 import { designTokens } from '../../utils/designTokens'
 import MonthlyProgressGrid, { MonthStatus } from '../../components/MonthlyProgressGrid'
+import { DocumentHandler } from '../../services/documentHandler'
 
 // 簡化的帳單資料結構
 interface SimpleBillData {
@@ -42,6 +43,10 @@ const NaturalGasPage = () => {
   const [hasSubmittedBefore, setHasSubmittedBefore] = useState(false)
   const [showSuccessModal, setShowSuccessModal] = useState(false)
   const [showClearModal, setShowClearModal] = useState(false)
+
+  // 記憶體檔案狀態
+  const [heatValueMemoryFiles, setHeatValueMemoryFiles] = useState<MemoryFile[]>([])
+  const [billMemoryFiles, setBillMemoryFiles] = useState<Record<string, MemoryFile[]>>({})
 
   const pageKey = 'natural_gas'
 
@@ -467,6 +472,34 @@ const NaturalGasPage = () => {
       const { entry_id } = await upsertEnergyEntry(entryInput, true)
       setCurrentEntryId(entry_id)
 
+      // 上傳熱值記憶體檔案
+      for (const memFile of heatValueMemoryFiles) {
+        await uploadEvidenceWithEntry(memFile.file, {
+          entryId: entry_id,
+          pageKey: pageKey,
+          year: new Date().getFullYear(),
+          category: 'annual_evidence'
+        })
+      }
+
+      // 上傳帳單記憶體檔案
+      for (const bill of bills) {
+        const memFiles = billMemoryFiles[bill.id] || []
+        for (const memFile of memFiles) {
+          await uploadEvidenceWithEntry(memFile.file, {
+            entryId: entry_id,
+            pageKey: pageKey,
+            year: new Date().getFullYear(),
+            category: 'usage_evidence',
+            month: bills.indexOf(bill) + 1
+          })
+        }
+      }
+
+      // 清空記憶體檔案
+      setHeatValueMemoryFiles([])
+      setBillMemoryFiles({})
+
       await commitEvidence({
         entryId: entry_id,
         pageKey: pageKey
@@ -503,13 +536,50 @@ const NaturalGasPage = () => {
   }
 
   // 清除所有資料
-  const handleClear = () => {
-    setBills([])
-    setHeatValue(9000) // 重設為預設值
-    setHeatValueFiles([]) // 清除熱值佐證文件
-    setError(null)
-    setShowClearModal(false)
-    setToast({ message: '已清除所有資料', type: 'success' })
+  const handleClear = async () => {
+    console.log('🗑️ [NaturalGasPage] ===== CLEAR BUTTON CLICKED =====')
+
+    const clearSuccess = DocumentHandler.handleClear({
+      currentStatus: frontendStatus?.currentStatus || initialStatus,
+      title: '天然氣資料清除',
+      message: '確定要清除所有天然氣使用資料嗎？此操作無法復原。',
+      onClear: () => {
+        setSubmitting(true)
+        try {
+          console.log('🗑️ [NaturalGasPage] Starting complete clear operation...')
+
+          // 清理記憶體檔案
+          setHeatValueMemoryFiles([])
+          setBillMemoryFiles({})
+
+          // 原有的清除邏輯保持不變
+          setBills([])
+          setHeatValue(9000) // 重設為預設值
+          setHeatValueFiles([]) // 清除熱值佐證文件
+          setError(null)
+          setShowClearModal(false)
+
+          setToast({
+            message: '資料已清除',
+            type: 'success'
+          })
+
+        } catch (error) {
+          console.error('❌ [NaturalGasPage] Clear operation failed:', error)
+          setError('清除操作失敗，請重試')
+        } finally {
+          console.log('🗑️ [NaturalGasPage] Clear operation finished, resetting loading state')
+          setSubmitting(false)
+        }
+      }
+    })
+
+    if (!clearSuccess && (frontendStatus?.currentStatus || initialStatus) === 'approved') {
+      setToast({
+        message: '已通過的資料無法清除',
+        type: 'error'
+      })
+    }
   }
 
   // 載入既有資料
@@ -677,8 +747,11 @@ const NaturalGasPage = () => {
                 pageKey={pageKey}
                 files={heatValueFiles}
                 onFilesChange={setHeatValueFiles}
+                memoryFiles={heatValueMemoryFiles}
+                onMemoryFilesChange={setHeatValueMemoryFiles}
                 maxFiles={3}
                 kind="annual_evidence"
+                mode="edit"
                 disabled={submitting || !editPermissions.canUploadFiles}
               />
             </div>
@@ -854,9 +927,12 @@ const NaturalGasPage = () => {
                       month={index + 1}
                       files={bill.files}
                       onFilesChange={(files) => handleBillChange(bill.id, 'files', files)}
+                      memoryFiles={billMemoryFiles[bill.id] || []}
+                      onMemoryFilesChange={(files) => setBillMemoryFiles(prev => ({...prev, [bill.id]: files}))}
                       maxFiles={3}
-                      disabled={submitting || !editPermissions.canUploadFiles}
                       kind="usage_evidence"
+                      mode="edit"
+                      disabled={submitting || !editPermissions.canUploadFiles}
                     />
                   </div>
 

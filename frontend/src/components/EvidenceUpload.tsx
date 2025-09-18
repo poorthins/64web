@@ -2,6 +2,9 @@ import { useState, useRef, useEffect } from 'react'
 import { Upload, X, File, AlertCircle, CheckCircle, FileText, Trash2, Eye, FileSpreadsheet } from 'lucide-react'
 import { uploadEvidence, uploadEvidenceSimple, deleteEvidence, deleteEvidenceFile, getFileUrl, EvidenceFile, listMSDSFiles, listUsageEvidenceFiles, getCategoryFromPageKey } from '../api/files'
 import FilePreview from './FilePreview'
+import { MemoryFile } from '../services/documentHandler'
+
+export type { MemoryFile }
 
 // 檔案去重工具函數
 function deduplicateFilesByID(files: EvidenceFile[], context: string = ''): EvidenceFile[] {
@@ -29,16 +32,6 @@ function deduplicateFilesByID(files: EvidenceFile[], context: string = ''): Evid
 
 export type EntryStatus = 'submitted' | 'approved' | 'rejected'
 
-// 檔案暫存類型 - 用於記憶體暫存的檔案
-export interface MemoryFile {
-  id: string
-  file: File
-  preview: string
-  file_name: string
-  file_size: number
-  mime_type: string
-}
-
 interface EvidenceUploadProps {
   pageKey: string
   month?: number
@@ -47,7 +40,7 @@ interface EvidenceUploadProps {
   disabled?: boolean
   maxFiles?: number
   className?: string
-  kind?: 'usage_evidence' | 'msds' | 'unit_weight' | 'other' | 'heat_value_evidence' | 'annual_evidence'
+  kind?: 'usage_evidence' | 'msds' | 'unit_weight' | 'other' | 'heat_value_evidence' | 'annual_evidence' | 'nameplate_evidence'
   currentStatus?: EntryStatus
   // 新增記憶體暫存模式
   mode?: 'edit' | 'view'

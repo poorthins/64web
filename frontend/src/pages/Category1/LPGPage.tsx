@@ -12,6 +12,7 @@ import { listMSDSFiles, listUsageEvidenceFiles, commitEvidence, deleteEvidence, 
 import { upsertEnergyEntry, sumMonthly, UpsertEntryInput, updateEntryStatus, getEntryByPageKeyAndYear } from '../../api/entries'
 import { getEntryFiles } from '../../api/files'
 import { designTokens } from '../../utils/designTokens'
+import { DocumentHandler } from '../../services/documentHandler'
 
 
 interface MonthData {
@@ -342,22 +343,62 @@ const LPGPage = () => {
     console.log('Status change requested:', newStatus)
   }
 
-  const handleClearAll = () => {
-    setUnitWeight(0)
-    setWeightProofFiles([])
-    setWeightProofMemoryFiles([])
-    setMonthlyData(Array.from({ length: 12 }, (_, i) => ({
-      month: i + 1,
-      quantity: 0,
-      totalUsage: 0,
-      files: [],
-      memoryFiles: []
-    })))
+  const handleClearAll = async () => {
+    console.log('🗑️ [LPGPage] ===== CLEAR BUTTON CLICKED =====')
 
-    setHasSubmittedBefore(false)
-    setError(null)
-    setSuccess(null)
-    setShowClearConfirmModal(false)
+    const clearSuccess = DocumentHandler.handleClear({
+      currentStatus: currentStatus,
+      title: '液化石油氣資料清除',
+      message: '確定要清除所有液化石油氣使用資料嗎？此操作無法復原。',
+      onClear: () => {
+        setSubmitting(true)
+        try {
+          console.log('🗑️ [LPGPage] Starting complete clear operation...')
+
+          // 清理記憶體檔案
+          DocumentHandler.clearAllMemoryFiles(weightProofMemoryFiles)
+          monthlyData.forEach(monthData => {
+            DocumentHandler.clearAllMemoryFiles(monthData.memoryFiles)
+          })
+
+          // 原有的清除邏輯保持不變
+          setUnitWeight(0)
+          setWeightProofFiles([])
+          setWeightProofMemoryFiles([])
+          setMonthlyData(Array.from({ length: 12 }, (_, i) => ({
+            month: i + 1,
+            quantity: 0,
+            totalUsage: 0,
+            files: [],
+            memoryFiles: []
+          })))
+
+          setHasSubmittedBefore(false)
+          setError(null)
+          setSuccess(null)
+          setShowClearConfirmModal(false)
+
+          setToast({
+            message: '資料已清除',
+            type: 'success'
+          })
+
+        } catch (error) {
+          console.error('❌ [LPGPage] Clear operation failed:', error)
+          setError('清除操作失敗，請重試')
+        } finally {
+          console.log('🗑️ [LPGPage] Clear operation finished, resetting loading state')
+          setSubmitting(false)
+        }
+      }
+    })
+
+    if (!clearSuccess && currentStatus === 'approved') {
+      setToast({
+        message: '已通過的資料無法清除',
+        type: 'error'
+      })
+    }
   }
 
   // Loading 狀態

@@ -12,6 +12,7 @@ import { listUsageEvidenceFiles, commitEvidence, getEntryFiles, updateFileEntryA
 import { designTokens } from '../../utils/designTokens';
 import { debugRLSOperation, diagnoseAuthState } from '../../utils/authDiagnostics';
 import { logDetailedAuthStatus } from '../../utils/authHelpers';
+import { DocumentHandler } from '../../services/documentHandler';
 
 
 interface MonthData {
@@ -425,18 +426,49 @@ export default function SepticTankPage() {
     }
   };
 
-  const handleClear = () => {
-    if (confirm('確定要清除所有數據嗎？此操作無法復原。')) {
-      setMonthlyData(prev =>
-        prev.map(data => ({
-          ...data,
-          hours: 0
-        }))
-      );
-      setAnnualEvidence({ files: [], memoryFiles: [] });
-      setHasChanges(false)
-      setError(null)
-      setSuccess(null)
+  const handleClear = async () => {
+    console.log('🗑️ [SepticTankPage] ===== CLEAR BUTTON CLICKED =====')
+
+    const clearSuccess = DocumentHandler.handleClear({
+      currentStatus: currentStatus,
+      title: '化糞池資料清除',
+      message: '確定要清除所有化糞池使用資料嗎？此操作無法復原。',
+      onClear: () => {
+        setSubmitting(true)
+        try {
+          console.log('🗑️ [SepticTankPage] Starting complete clear operation...')
+
+          // 清理記憶體檔案
+          if (annualEvidence.memoryFiles) {
+            DocumentHandler.clearAllMemoryFiles(annualEvidence.memoryFiles)
+          }
+
+          // 原有的清除邏輯保持不變
+          setMonthlyData(prev =>
+            prev.map(data => ({
+              ...data,
+              hours: 0
+            }))
+          )
+          setAnnualEvidence({ files: [], memoryFiles: [] })
+          setHasChanges(false)
+          setError(null)
+          setSuccess(null)
+
+          setSuccess('資料已清除')
+
+        } catch (error) {
+          console.error('❌ [SepticTankPage] Clear operation failed:', error)
+          setError('清除操作失敗，請重試')
+        } finally {
+          console.log('🗑️ [SepticTankPage] Clear operation finished, resetting loading state')
+          setSubmitting(false)
+        }
+      }
+    })
+
+    if (!clearSuccess && currentStatus === 'approved') {
+      setError('已通過的資料無法清除')
     }
   };
 

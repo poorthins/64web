@@ -7,7 +7,7 @@ import { getCategoryInfo } from '../utils/categoryConstants'
 export interface FileMetadata {
   pageKey: string
   year: number
-  category: 'msds' | 'usage_evidence' | 'heat_value_evidence' | 'annual_evidence' | 'other'
+  category: 'msds' | 'usage_evidence' | 'heat_value_evidence' | 'annual_evidence' | 'nameplate_evidence' | 'other'
   month?: number  // 僅用於 usage_evidence，表示月份 (1-12)
 }
 
@@ -26,7 +26,7 @@ export interface EvidenceFile {
   created_at: string
   month?: number | null  // 月份欄位，NULL 表示 MSDS
   page_key?: string      // 頁面標識符
-  file_type: 'msds' | 'usage_evidence' | 'other' | 'heat_value_evidence' | 'annual_evidence'  // 檔案類型欄位 (必填)
+  file_type: 'msds' | 'usage_evidence' | 'other' | 'heat_value_evidence' | 'annual_evidence' | 'nameplate_evidence'  // 檔案類型欄位 (必填)
   // Join fields from energy_entries
   status?: 'draft' | 'submitted' | 'approved' | 'rejected'  // From energy_entries
   period_year?: number  // From energy_entries

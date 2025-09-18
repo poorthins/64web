@@ -426,6 +426,58 @@ export const StatusIndicator = React.memo(({ status }) => {
 })
 ```
 
+## 實時更新機制
+
+### 狀態同步策略
+1. **輪詢更新**：每30秒檢查狀態變更
+2. **手動刷新**：用戶操作後立即查詢
+3. **WebSocket (未來)**：即時推送狀態變更
+
+```typescript
+// 狀態輪詢實現
+const { data: statusData, isLoading } = useQuery({
+  queryKey: ['entry-status', 'wd40', year],
+  queryFn: () => getEntryStatus('wd40', year),
+  refetchInterval: 30000, // 30秒輪詢更新
+  enabled: !!pageKey && !!year
+});
+```
+
+### 快取與同步
+
+```typescript
+// 統一的快取策略
+const useEntryStatus = (pageKey: string, year: number) => {
+  return useQuery({
+    queryKey: ['entry-status', pageKey, year],
+    queryFn: () => api.getEntryStatus(pageKey, year),
+    refetchInterval: 30000, // 30秒輪詢更新
+    staleTime: 30000, // 30秒內認為資料新鮮
+    cacheTime: 300000, // 5分鐘快取時間
+    enabled: !!pageKey && !!year
+  });
+};
+```
+
+### 錯誤處理與恢復
+
+#### 網路錯誤
+- 顯示最後已知狀態
+- 提供重試機制
+- 友善的錯誤訊息
+
+#### 權限錯誤
+- 403：顯示「無權限查看」
+- 401：導向登入頁面
+
+#### 資料不存在
+- 404：顯示「記錄不存在」
+
+### 效能考量
+- 避免過度頻繁的狀態查詢
+- 使用適當的快取策略
+- 考慮批量查詢多個記錄狀態
+
 ## 測試架構
 
 ### 1. 單元測試 (Vitest)

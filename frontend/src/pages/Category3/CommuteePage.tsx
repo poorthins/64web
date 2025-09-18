@@ -9,6 +9,7 @@ import { updateEntryStatus, getEntryByPageKeyAndYear, upsertEnergyEntry } from '
 import { uploadEvidenceWithEntry, EvidenceFile } from '../../api/files';
 import { designTokens } from '../../utils/designTokens';
 import EvidenceUpload, { MemoryFile } from '../../components/EvidenceUpload';
+import { DocumentHandler } from '../../services/documentHandler';
 
 export default function CommutePage() {
   const pageKey = 'employee_commute'
@@ -201,18 +202,44 @@ export default function CommutePage() {
     document.body.removeChild(link)
   }
 
-  const handleClear = () => {
-    if (currentStatus === 'approved') {
-      alert('已通過的資料無法清除')
-      return
-    }
+  const handleClear = async () => {
+    console.log('🗑️ [CommutePage] ===== CLEAR BUTTON CLICKED =====')
 
-    if (confirm('確定要清除所有數據嗎？此操作無法復原。')) {
-      setEmployeeCount(0)
-      setAverageDistance(0)
-      setExcelMemoryFile(null)
-      setMapMemoryFiles([])
-      setHasSubmittedBefore(false)
+    const clearSuccess = DocumentHandler.handleClear({
+      currentStatus: currentStatus,
+      message: '確定要清除所有數據嗎？此操作無法復原。',
+      onClear: () => {
+        setSubmitting(true)
+        try {
+          console.log('🗑️ [CommutePage] Starting complete clear operation...')
+
+          // 清理記憶體檔案
+          if (excelMemoryFile) {
+            DocumentHandler.clearAllMemoryFiles([excelMemoryFile])
+          }
+          DocumentHandler.clearAllMemoryFiles(mapMemoryFiles)
+
+          // 原有的清除邏輯保持不變
+          setEmployeeCount(0)
+          setAverageDistance(0)
+          setExcelMemoryFile(null)
+          setMapMemoryFiles([])
+          setHasSubmittedBefore(false)
+
+          alert('資料已清除')
+
+        } catch (error) {
+          console.error('❌ [CommutePage] Clear operation failed:', error)
+          alert('清除操作失敗，請重試')
+        } finally {
+          console.log('🗑️ [CommutePage] Clear operation finished, resetting loading state')
+          setSubmitting(false)
+        }
+      }
+    })
+
+    if (!clearSuccess && currentStatus === 'approved') {
+      alert('已通過的資料無法清除')
     }
   }
 

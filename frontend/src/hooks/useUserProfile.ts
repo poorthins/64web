@@ -2,6 +2,10 @@ import { useEffect, useState } from 'react'
 import { useAuth } from '../contexts/AuthContext'
 import { supabase } from '../lib/supabaseClient'
 
+export interface FillingConfig {
+  diesel_generator_mode: 'refuel' | 'test'
+}
+
 export interface UserProfile {
   id: string
   email: string
@@ -11,6 +15,7 @@ export interface UserProfile {
   phone: string | null
   role: string
   is_active: boolean
+  filling_config?: FillingConfig
 }
 
 export interface UseUserProfileReturn {

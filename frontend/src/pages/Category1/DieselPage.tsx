@@ -12,6 +12,7 @@ import { getEntryFiles } from '../../api/files'
 import { designTokens } from '../../utils/designTokens'
 import { debugRLSOperation, diagnoseAuthState } from '../../utils/authDiagnostics'
 import { logDetailedAuthStatus } from '../../utils/authHelpers'
+import { DocumentHandler } from '../../services/documentHandler'
 
 interface DieselRecord {
   id: string
@@ -265,85 +266,53 @@ export default function DieselPage() {
   const handleClearAll = async () => {
     console.log('🗑️ [DieselPage] ===== CLEAR BUTTON CLICKED =====')
 
-    // 立即設置載入狀態
-    setClearLoading(true)
+    const clearSuccess = DocumentHandler.handleClear({
+      currentStatus: currentStatus,
+      title: '柴油資料清除',
+      message: '確定要清除所有柴油使用資料嗎？此操作無法復原。',
+      onClear: () => {
+        setClearLoading(true)
+        try {
+          console.log('🗑️ [DieselPage] Starting complete clear operation...')
 
-    try {
-      console.log('🗑️ [DieselPage] Starting complete clear operation...')
-      // 1. 刪除後端檔案
-      const deletionErrors: string[] = []
+          // 清理記憶體檔案
+          data.records.forEach(record => {
+            DocumentHandler.clearAllMemoryFiles(record.memoryFiles)
+          })
+          DocumentHandler.clearAllMemoryFiles(newRecord.memoryFiles)
 
-      // 刪除所有記錄中的檔案
-      for (const record of data.records) {
-        if (record.files.length > 0) {
-          console.log(`🗑️ [DieselPage] Deleting ${record.files.length} files for record ${record.id}...`)
-          for (const file of record.files) {
-            try {
-              await deleteEvidenceFile(file.id)
-              console.log(`✅ [DieselPage] Deleted file: ${file.file_name}`)
-            } catch (error) {
-              const errorMsg = `刪除檔案 "${file.file_name}" 失敗`
-              console.error(`❌ [DieselPage] ${errorMsg}:`, error)
-              deletionErrors.push(errorMsg)
-            }
-          }
+          // 原有的清除邏輯保持不變
+          setData({
+            year: currentYear,
+            records: [],
+            totalQuantity: 0
+          })
+          setNewRecord({
+            date: '',
+            quantity: 0,
+            files: [],
+            memoryFiles: []
+          })
+          setHasChanges(false)
+          setError(null)
+          setSuccess(null)
+          setShowClearConfirmModal(false)
+
+          setSuccess('資料已清除')
+
+        } catch (error) {
+          console.error('❌ [DieselPage] Clear operation failed:', error)
+          setError('清除操作失敗，請重試')
+          setShowClearConfirmModal(false)
+        } finally {
+          console.log('🗑️ [DieselPage] Clear operation finished, resetting loading state')
+          setClearLoading(false)
         }
       }
+    })
 
-      // 刪除新記錄中的檔案
-      if (newRecord.files.length > 0) {
-        console.log(`🗑️ [DieselPage] Deleting ${newRecord.files.length} files from new record...`)
-        for (const file of newRecord.files) {
-          try {
-            await deleteEvidenceFile(file.id)
-            console.log(`✅ [DieselPage] Deleted new record file: ${file.file_name}`)
-          } catch (error) {
-            const errorMsg = `刪除新記錄檔案 "${file.file_name}" 失敗`
-            console.error(`❌ [DieselPage] ${errorMsg}:`, error)
-            deletionErrors.push(errorMsg)
-          }
-        }
-      }
-
-      // 2. 清除前端狀態
-      console.log('🧹 [DieselPage] Clearing frontend states...')
-      setData({
-        year: currentYear,
-        records: [],
-        totalQuantity: 0
-      })
-      setNewRecord({
-        date: '',
-        quantity: 0,
-        files: [],
-        memoryFiles: []
-      })
-      setHasChanges(false)
-      setError(null)
-      setSuccess(null)
-      setShowClearConfirmModal(false)
-
-      // 3. 顯示結果訊息
-      if (deletionErrors.length > 0) {
-        const errorMessage = `清除完成，但有 ${deletionErrors.length} 個檔案刪除失敗：\n${deletionErrors.join('\n')}`
-        console.warn('⚠️ [DieselPage] Clear completed with errors:', errorMessage)
-        setError(errorMessage)
-      } else {
-        const totalDeleted = data.records.reduce((sum, record) => sum + record.files.length, 0) + newRecord.files.length
-        const successMessage = totalDeleted > 0 ?
-          `已成功清除所有資料並刪除 ${totalDeleted} 個檔案` :
-          '已成功清除所有資料'
-        console.log('✅ [DieselPage] Clear completed successfully:', successMessage)
-        setSuccess(successMessage)
-      }
-
-    } catch (error) {
-      console.error('❌ [DieselPage] Clear operation failed:', error)
-      setError('清除操作失敗，請重試')
-      setShowClearConfirmModal(false)
-    } finally {
-      console.log('🗑️ [DieselPage] Clear operation finished, resetting loading state')
-      setClearLoading(false)
+    if (!clearSuccess && currentStatus === 'approved') {
+      setError('已通過的資料無法清除')
     }
   }
 

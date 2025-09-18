@@ -12,6 +12,7 @@ import { upsertEnergyEntry, sumMonthly, UpsertEntryInput, getEntryByPageKeyAndYe
 import { listMSDSFiles, listUsageEvidenceFiles, commitEvidence, deleteEvidence, deleteEvidenceFile, getEntryFiles, updateFileEntryAssociation, debugDatabaseContent, EvidenceFile, uploadEvidenceWithEntry } from '../../api/files'
 import { MemoryFile } from '../../components/EvidenceUpload'
 import { designTokens } from '../../utils/designTokens'
+import { DocumentHandler } from '../../services/documentHandler'
 
 
 interface MonthData {
@@ -521,85 +522,53 @@ const AcetylenePage = () => {
   const handleClearAll = async () => {
     console.log('🗑️ [AcetylenePage] ===== CLEAR BUTTON CLICKED =====')
 
-    // 立即設置載入狀態
-    setClearLoading(true)
+    const clearSuccess = DocumentHandler.handleClear({
+      currentStatus: currentStatus,
+      title: '乙炔資料清除',
+      message: '確定要清除所有乙炔使用資料嗎？此操作無法復原。',
+      onClear: () => {
+        setClearLoading(true)
+        try {
+          console.log('🗑️ [AcetylenePage] Starting complete clear operation...')
 
-    try {
-      console.log('🗑️ [AcetylenePage] Starting complete clear operation...')
-      // 1. 刪除後端檔案
-      const deletionErrors: string[] = []
+          // 清理記憶體檔案
+          DocumentHandler.clearAllMemoryFiles(unitWeightMemoryFiles)
+          monthlyMemoryFiles.forEach(memFiles => {
+            DocumentHandler.clearAllMemoryFiles(memFiles)
+          })
 
-      // 刪除單位重量佐證檔案
-      if (unitWeightFiles.length > 0) {
-        console.log(`🗑️ [AcetylenePage] Deleting ${unitWeightFiles.length} unit weight files from backend...`)
-        for (const file of unitWeightFiles) {
-          try {
-            await deleteEvidenceFile(file.id)
-            console.log(`✅ [AcetylenePage] Deleted unit weight file: ${file.file_name}`)
-          } catch (error) {
-            const errorMsg = `刪除單位重量檔案 "${file.file_name}" 失敗`
-            console.error(`❌ [AcetylenePage] ${errorMsg}:`, error)
-            deletionErrors.push(errorMsg)
-          }
+          // 原有的清除邏輯保持不變
+          setUnitWeight(0)
+          setUnitWeightFiles([])
+          setUnitWeightMemoryFiles([])
+          setMonthlyMemoryFiles(Array.from({ length: 12 }, () => []))
+          setMonthlyData(Array.from({ length: 12 }, (_, i) => ({
+            month: i + 1,
+            quantity: 0,
+            totalUsage: 0,
+            files: []
+          })))
+
+          setHasSubmittedBefore(false)
+          setError(null)
+          setSuccess(null)
+          setShowClearConfirmModal(false)
+
+          setSuccess('資料已清除')
+
+        } catch (error) {
+          console.error('❌ [AcetylenePage] Clear operation failed:', error)
+          setError('清除操作失敗，請重試')
+          setShowClearConfirmModal(false)
+        } finally {
+          console.log('🗑️ [AcetylenePage] Clear operation finished, resetting loading state')
+          setClearLoading(false)
         }
       }
+    })
 
-      // 刪除月份用量佐證檔案
-      for (const monthData of monthlyData) {
-        if (monthData.files.length > 0) {
-          console.log(`🗑️ [AcetylenePage] Deleting ${monthData.files.length} files for month ${monthData.month}...`)
-          for (const file of monthData.files) {
-            try {
-              await deleteEvidenceFile(file.id)
-              console.log(`✅ [AcetylenePage] Deleted monthly file: ${file.file_name} (month ${monthData.month})`)
-            } catch (error) {
-              const errorMsg = `刪除 ${monthData.month}月檔案 "${file.file_name}" 失敗`
-              console.error(`❌ [AcetylenePage] ${errorMsg}:`, error)
-              deletionErrors.push(errorMsg)
-            }
-          }
-        }
-      }
-
-      // 2. 清除前端狀態
-      console.log('🧹 [AcetylenePage] Clearing frontend states...')
-      setUnitWeight(0)
-      setUnitWeightFiles([])
-      setUnitWeightMemoryFiles([])
-      setMonthlyMemoryFiles(Array.from({ length: 12 }, () => []))
-      setMonthlyData(Array.from({ length: 12 }, (_, i) => ({
-        month: i + 1,
-        quantity: 0,
-        totalUsage: 0,
-        files: []
-      })))
-
-      setHasSubmittedBefore(false)
-      setError(null)
-      setSuccess(null)
-      setShowClearConfirmModal(false)
-
-      // 3. 顯示結果訊息
-      if (deletionErrors.length > 0) {
-        const errorMessage = `清除完成，但有 ${deletionErrors.length} 個檔案刪除失敗：\n${deletionErrors.join('\n')}`
-        console.warn('⚠️ [AcetylenePage] Clear completed with errors:', errorMessage)
-        setError(errorMessage)
-      } else {
-        const totalDeleted = unitWeightFiles.length + monthlyData.reduce((sum, month) => sum + month.files.length, 0)
-        const successMessage = totalDeleted > 0 ?
-          `已成功清除所有資料並刪除 ${totalDeleted} 個檔案` :
-          '已成功清除所有資料'
-        console.log('✅ [AcetylenePage] Clear completed successfully:', successMessage)
-        setSuccess(successMessage)
-      }
-
-    } catch (error) {
-      console.error('❌ [AcetylenePage] Clear operation failed:', error)
-      setError('清除操作失敗，請重試')
-      setShowClearConfirmModal(false)
-    } finally {
-      console.log('🗑️ [AcetylenePage] Clear operation finished, resetting loading state')
-      setClearLoading(false)
+    if (!clearSuccess && currentStatus === 'approved') {
+      setError('已通過的資料無法清除')
     }
   }
 

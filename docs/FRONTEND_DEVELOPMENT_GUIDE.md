@@ -203,6 +203,37 @@ interface StatusIndicatorProps {
 type EntryStatus = 'submitted' | 'approved' | 'rejected'
 ```
 
+#### 視覺設計配置
+```typescript
+const statusConfig = {
+  submitted: { color: '#3b82f6', text: '已提交' },
+  approved: { color: '#10b981', text: '已通過' },
+  rejected: { color: '#ef4444', text: '已退回' }
+}
+```
+
+#### 響應式策略
+- **桌面版**：圓點 + 文字顯示
+- **手機版**：僅圓點 + tooltip 提示
+
+#### 實時更新機制
+- **輪詢更新**：每30秒檢查狀態變更
+- **手動刷新**：用戶操作後立即查詢
+- **WebSocket (未來)**：即時推送狀態變更
+
+#### 快取策略
+```typescript
+// React Query 快取配置
+const queryClient = new QueryClient({
+  defaultOptions: {
+    queries: {
+      staleTime: 30000, // 30秒內認為資料新鮮
+      cacheTime: 300000, // 5分鐘快取時間
+    },
+  },
+});
+```
+
 ### 3. Design Tokens 系統
 統一的設計語言配置 (`src/utils/designTokens.ts`)：
 
@@ -1418,6 +1449,26 @@ describe('EvidenceUpload', () => {
     await waitFor(() => {
       expect(mockOnFilesChange).toHaveBeenCalled()
     })
+  })
+})
+
+// src/components/__tests__/StatusIndicator.test.tsx
+describe('StatusIndicator', () => {
+  test('should render different status correctly', () => {
+    const { rerender } = render(<StatusIndicator status="submitted" />)
+    expect(screen.getByText('已提交')).toBeInTheDocument()
+
+    rerender(<StatusIndicator status="approved" />)
+    expect(screen.getByText('已通過')).toBeInTheDocument()
+
+    rerender(<StatusIndicator status="rejected" />)
+    expect(screen.getByText('已退回')).toBeInTheDocument()
+  })
+
+  test('should apply correct color styling', () => {
+    render(<StatusIndicator status="approved" />)
+    const indicator = screen.getByTestId('status-indicator')
+    expect(indicator).toHaveStyle({ color: '#10b981' })
   })
 })
 ```

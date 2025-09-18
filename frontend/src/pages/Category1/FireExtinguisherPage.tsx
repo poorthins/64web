@@ -12,6 +12,7 @@ import { getEntryFiles } from '../../api/files'
 import { designTokens } from '../../utils/designTokens'
 import { debugRLSOperation, diagnoseAuthState } from '../../utils/authDiagnostics'
 import { logDetailedAuthStatus } from '../../utils/authHelpers'
+import { DocumentHandler } from '../../services/documentHandler'
 
 interface FireExtinguisherRecord {
   id: string
@@ -315,30 +316,63 @@ export default function FireExtinguisherPage() {
     }
   }, [data, evidenceFiles, currentYear, currentEntryId, handleSubmitSuccess, pageKey])
 
-  const handleClear = useCallback(() => {
-    if (window.confirm('確定要清除所有數據嗎？此操作無法復原。')) {
-      setData({
-        year: currentYear,
-        records: [],
-        totalEquipment: 0
-      })
-      setNewRecord({
-        equipmentType: '乾粉式',
-        quantity: 0,
-        isRefilled: false,
-        refilledAmount: undefined,
-        unit: 'kg',
-        location: '',
-        files: [],
-        memoryFiles: []
-      })
-      setEvidenceFiles([])
-      setEvidenceMemoryFiles([])
-      setHasChanges(false)
-      setError(null)
-      setSuccess(null)
+  const handleClear = useCallback(async () => {
+    console.log('🗑️ [FireExtinguisherPage] ===== CLEAR BUTTON CLICKED =====')
+
+    const clearSuccess = DocumentHandler.handleClear({
+      currentStatus: currentStatus,
+      title: '滅火器資料清除',
+      message: '確定要清除所有滅火器使用資料嗎？此操作無法復原。',
+      onClear: () => {
+        setSubmitting(true)
+        try {
+          console.log('🗑️ [FireExtinguisherPage] Starting complete clear operation...')
+
+          // 清理記憶體檔案
+          data.records.forEach(record => {
+            DocumentHandler.clearAllMemoryFiles(record.memoryFiles)
+          })
+          DocumentHandler.clearAllMemoryFiles(newRecord.memoryFiles)
+          DocumentHandler.clearAllMemoryFiles(evidenceMemoryFiles)
+
+          // 原有的清除邏輯保持不變
+          setData({
+            year: currentYear,
+            records: [],
+            totalEquipment: 0
+          })
+          setNewRecord({
+            equipmentType: '乾粉式',
+            quantity: 0,
+            isRefilled: false,
+            refilledAmount: undefined,
+            unit: 'kg',
+            location: '',
+            files: [],
+            memoryFiles: []
+          })
+          setEvidenceFiles([])
+          setEvidenceMemoryFiles([])
+          setHasChanges(false)
+          setError(null)
+          setSuccess(null)
+
+          setSuccess('資料已清除')
+
+        } catch (error) {
+          console.error('❌ [FireExtinguisherPage] Clear operation failed:', error)
+          setError('清除操作失敗，請重試')
+        } finally {
+          console.log('🗑️ [FireExtinguisherPage] Clear operation finished, resetting loading state')
+          setSubmitting(false)
+        }
+      }
+    })
+
+    if (!clearSuccess && currentStatus === 'approved') {
+      setError('已通過的資料無法清除')
     }
-  }, [currentYear])
+  }, [currentYear, currentStatus, data.records, newRecord.memoryFiles, evidenceMemoryFiles])
 
   const handleStatusChange = async (newStatus: EntryStatus) => {
     try {

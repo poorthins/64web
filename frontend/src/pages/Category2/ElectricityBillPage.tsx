@@ -9,6 +9,7 @@ import { useFrontendStatus } from '../../hooks/useFrontendStatus'
 import { commitEvidence, getEntryFiles, EvidenceFile, uploadEvidenceWithEntry } from '../../api/files'
 import { upsertEnergyEntry, UpsertEntryInput, updateEntryStatus, getEntryByPageKeyAndYear } from '../../api/entries'
 import { designTokens } from '../../utils/designTokens'
+import { DocumentHandler } from '../../services/documentHandler'
 
 // 簡化的帳單資料結構
 interface SimpleBillData {
@@ -413,11 +414,48 @@ const ElectricityBillPage = () => {
   }
 
   // 清除所有資料
-  const handleClear = () => {
-    setBills([])
-    setError(null)
-    setShowClearModal(false)
-    setToast({ message: '已清除所有資料', type: 'success' })
+  const handleClear = async () => {
+    console.log('🗑️ [ElectricityBillPage] ===== CLEAR BUTTON CLICKED =====')
+
+    const clearSuccess = DocumentHandler.handleClear({
+      currentStatus: frontendStatus?.currentStatus || initialStatus,
+      message: '確定要清除所有數據嗎？此操作無法復原。',
+      onClear: () => {
+        setSubmitting(true)
+        try {
+          console.log('🗑️ [ElectricityBillPage] Starting complete clear operation...')
+
+          // 清理記憶體檔案
+          bills.forEach(bill => {
+            DocumentHandler.clearAllMemoryFiles(bill.memoryFiles)
+          })
+
+          // 原有的清除邏輯保持不變
+          setBills([])
+          setError(null)
+          setShowClearModal(false)
+
+          setToast({
+            message: '資料已清除',
+            type: 'success'
+          })
+
+        } catch (error) {
+          console.error('❌ [ElectricityBillPage] Clear operation failed:', error)
+          setError('清除操作失敗，請重試')
+        } finally {
+          console.log('🗑️ [ElectricityBillPage] Clear operation finished, resetting loading state')
+          setSubmitting(false)
+        }
+      }
+    })
+
+    if (!clearSuccess && (frontendStatus?.currentStatus || initialStatus) === 'approved') {
+      setToast({
+        message: '已通過的資料無法清除',
+        type: 'error'
+      })
+    }
   }
 
   // 載入既有資料

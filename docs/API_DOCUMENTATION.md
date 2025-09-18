@@ -319,8 +319,14 @@ interface FillingConfig {
 
 **功能說明**：
 - `diesel_generator_mode`: 決定用戶在柴油發電機頁面的記錄類型
-  - `refuel`: 加油記錄模式（記錄實際加油量）
-  - `test`: 測試記錄模式（記錄測試耗油量）
+  - `refuel`: 加油記錄模式（記錄實際加油量，單位：公升）
+  - `test`: 測試記錄模式（記錄測試運轉時間，單位：分鐘）
+
+**雙模式架構**：
+- 兩種模式使用統一的 `page_key: 'diesel_generator'`
+- 透過 `extraPayload.mode` 區分資料類型
+- 智能路由根據用戶配置自動顯示對應頁面
+- 歷史資料相容：無模式標記的舊資料預設為加油模式
 
 **預設值**：`{ "diesel_generator_mode": "refuel" }`
 
@@ -529,6 +535,98 @@ function getRejectionReason(entryId: string): Promise<RejectionDetail>
 - 審核意見查看
 - 修正指引顯示
 
+## 文檔處理工具
+
+### DocumentHandler (services/documentHandler.ts)
+
+統一的文檔處理工具，提供檔案管理和資料清除功能。
+
+#### MemoryFile 介面
+記憶體中的檔案對象，用於暫存檔案預覽。
+
+```typescript
+interface MemoryFile {
+  id: string
+  file: File
+  preview: string      // 預覽 URL
+  file_name: string
+  file_size: number
+  mime_type: string
+}
+```
+
+#### ClearOptions 介面
+資料清除選項配置。
+
+```typescript
+interface ClearOptions {
+  currentStatus?: string  // 當前狀態，用於檢查是否可清除
+  title?: string         // 確認對話框標題
+  message?: string       // 確認對話框訊息
+  onClear: () => void   // 清除執行函數
+}
+```
+
+#### handleClear()
+統一的資料清除處理函數，具備狀態檢查和用戶確認機制。
+
+```typescript
+static handleClear(options: ClearOptions): boolean
+```
+
+**功能**：
+- 檢查當前狀態是否允許清除（已通過的資料禁止清除）
+- 顯示確認對話框
+- 執行清除操作
+- 回傳清除是否成功
+
+**使用範例**：
+```typescript
+const handleClear = () => {
+  const clearSuccess = DocumentHandler.handleClear({
+    currentStatus: frontendStatus?.currentStatus,
+    title: '天然氣資料清除',
+    message: '確定要清除所有天然氣使用資料嗎？此操作無法復原。',
+    onClear: () => {
+      // 執行實際清除邏輯
+      setBills([])
+      setHeatValue(9000)
+      // ...其他清除操作
+    }
+  })
+
+  if (!clearSuccess && currentStatus === 'approved') {
+    setToast({
+      message: '已通過的資料無法清除',
+      type: 'error'
+    })
+  }
+}
+```
+
+#### clearAllMemoryFiles()
+清理記憶體檔案的預覽 URL，避免記憶體洩漏。
+
+```typescript
+static clearAllMemoryFiles(memoryFiles: MemoryFile[]): void
+```
+
+**功能**：
+- 遍歷 MemoryFile 陣列
+- 撤銷每個檔案的預覽 URL
+- 釋放瀏覽器記憶體
+
+**使用範例**：
+```typescript
+// 清除記憶體檔案
+DocumentHandler.clearAllMemoryFiles(msdsMemoryFiles)
+usageRecords.forEach(record => {
+  if (record.memoryFiles) {
+    DocumentHandler.clearAllMemoryFiles(record.memoryFiles)
+  }
+})
+```
+
 ## 類別常數系統
 
 ### categoryConstants.ts
@@ -545,7 +643,7 @@ const ENERGY_CATEGORIES = {
     'septictank': { category: '化糞池', unit: 'person', scope: 1 },
     'natural_gas': { category: '天然氣', unit: 'm³', scope: 1 },
     'urea': { category: '尿素', unit: 'kg', scope: 1 },
-    'diesel_generator': { category: '柴油(發電機)', unit: 'L', scope: 1 },
+    'diesel_generator': { category: '柴油(發電機)', unit: 'L/分鐘', scope: 1 }, // 雙模式：加油(L)/測試(分鐘)
     'diesel': { category: '柴油', unit: 'L', scope: 1 },
     'gasoline': { category: '汽油', unit: 'L', scope: 1 },
     'lpg': { category: '液化石油氣', unit: 'kg', scope: 1 },

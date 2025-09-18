@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Upload, AlertCircle, CheckCircle, Loader2, X, Trash2 } from 'lucide-react'
 import EvidenceUpload, { MemoryFile } from '../../components/EvidenceUpload'
+import { DocumentHandler } from '../../services/documentHandler'
 import StatusSwitcher, { EntryStatus, canEdit, canUploadFiles, getButtonText } from '../../components/StatusSwitcher'
 import StatusIndicator from '../../components/StatusIndicator'
 import Toast, { ToastType } from '../../components/Toast'
@@ -368,47 +369,56 @@ const WeldingRodPage = () => {
   const handleClear = async () => {
     console.log('🗑️ [WeldingRodPage] ===== CLEAR BUTTON CLICKED =====')
 
-    // 檢查是否為已通過狀態
-    if (frontendCurrentStatus === 'approved') {
+    const clearSuccess = DocumentHandler.handleClear({
+      currentStatus: frontendCurrentStatus,
+      title: '焊條資料清除',
+      message: '確定要清除所有焊條使用資料嗎？此操作無法復原。',
+      onClear: () => {
+        setClearLoading(true)
+        try {
+          console.log('🗑️ [WeldingRodPage] Starting complete clear operation...')
+
+          // 清理記憶體檔案
+          DocumentHandler.clearAllMemoryFiles(msdsMemoryFiles)
+          monthlyData.forEach(monthData => {
+            DocumentHandler.clearAllMemoryFiles(monthData.memoryFiles)
+          })
+
+          // 清除前端狀態
+          console.log('🧹 [WeldingRodPage] Clearing frontend states...')
+          setUnitWeight(0)
+          setCarbonContent(0)
+          setMsdsFiles([])
+          setMsdsMemoryFiles([])
+          setMonthlyData(createInitialMonthlyData())
+
+          setHasChanges(false)
+          setError(null)
+          setSuccess(null)
+          setShowClearConfirmModal(false)
+
+          console.log('✅ [WeldingRodPage] Clear operation completed successfully')
+          setToast({
+            message: '資料已清除',
+            type: 'success'
+          })
+
+        } catch (error) {
+          console.error('❌ [WeldingRodPage] Clear operation failed:', error)
+          setError('清除操作失敗，請重試')
+          setShowClearConfirmModal(false)
+        } finally {
+          console.log('🗑️ [WeldingRodPage] Clear operation finished, resetting loading state')
+          setClearLoading(false)
+        }
+      }
+    })
+
+    if (!clearSuccess && frontendCurrentStatus === 'approved') {
       setToast({
         message: '已通過的資料無法清除',
         type: 'error'
       })
-      return
-    }
-
-    // 立即設置載入狀態
-    setClearLoading(true)
-
-    try {
-      console.log('🗑️ [WeldingRodPage] Starting complete clear operation...')
-
-      // 清除前端狀態
-      console.log('🧹 [WeldingRodPage] Clearing frontend states...')
-      setUnitWeight(0)
-      setCarbonContent(0)
-      setMsdsFiles([])
-      setMsdsMemoryFiles([])
-      setMonthlyData(createInitialMonthlyData())
-
-      setHasChanges(false)
-      setError(null)
-      setSuccess(null)
-      setShowClearConfirmModal(false)
-
-      console.log('✅ [WeldingRodPage] Clear operation completed successfully')
-      setToast({
-        message: '資料已清除',
-        type: 'success'
-      })
-
-    } catch (error) {
-      console.error('❌ [WeldingRodPage] Clear operation failed:', error)
-      setError('清除操作失敗，請重試')
-      setShowClearConfirmModal(false)
-    } finally {
-      console.log('🗑️ [WeldingRodPage] Clear operation finished, resetting loading state')
-      setClearLoading(false)
     }
   }
 
