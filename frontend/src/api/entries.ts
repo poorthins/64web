@@ -8,6 +8,7 @@ export interface UpsertEntryInput {
   unit: string
   monthly: Record<string, number>
   notes?: string
+  extraPayload?: any  // 額外的 payload 數據
 }
 
 export interface EnergyEntry {
@@ -21,6 +22,7 @@ export interface EnergyEntry {
   amount: number
   notes?: string
   payload: any
+  extraPayload?: any  // 額外的 payload 數據
   created_at: string
   updated_at: string
   page_key: string
@@ -48,16 +50,31 @@ export function sumMonthly(monthly: Record<string, number>): number {
 /**
  * 根據 page_key 推斷 category 名稱
  */
-function getCategoryFromPageKey(pageKey: string): string {
+export function getCategoryFromPageKey(pageKey: string): string {
+  console.log('🔍 [5] getCategoryFromPageKey 收到:', pageKey)
+
   const categoryMap: Record<string, string> = {
     'wd40': 'WD-40',
     'acetylene': '乙炔',
     'refrigerant': '冷媒',
-    'lpg': 'LPG',
+    'septictank': '化糞池',
+    'natural_gas': '天然氣',
+    'urea': '尿素',
+    'diesel_generator': '柴油(發電機)',
     'diesel': '柴油',
-    'gasoline': '汽油'
+    'gasoline': '汽油',
+    'lpg': '液化石油氣',
+    'fire_extinguisher': '滅火器',
+    'welding_rod': '焊條',
+    'electricity_bill': '外購電力',
+    'employee_commute': '員工通勤'
   }
-  return categoryMap[pageKey] || pageKey.toUpperCase()
+
+  const result = categoryMap[pageKey] || pageKey.toUpperCase()
+  console.log('🔍 [6] 對應結果:', pageKey, '->', result)
+  console.log('🔍 [7] categoryMap 是否包含 urea:', 'urea' in categoryMap)
+
+  return result
 }
 
 /**
@@ -92,7 +109,8 @@ export async function upsertEnergyEntry(input: UpsertEntryInput, preserveStatus:
 
     // 推斷類別名稱
     const category = getCategoryFromPageKey(input.page_key)
-    
+    console.log('🔍 [8] 最終 category 值:', category)
+
     console.log('📊 [upsertEnergyEntry] Calculated values:', {
       category,
       total_amount: total
@@ -129,13 +147,17 @@ export async function upsertEnergyEntry(input: UpsertEntryInput, preserveStatus:
       amount: total,           // 確保大於 0
       payload: {
         monthly: input.monthly,
-        notes: input.notes ?? null
+        notes: input.notes ?? null,
+        ...(input.extraPayload || {})  // 合併額外的 payload 數據
       },
       status: status,
       // 設定期間範圍（年度範圍）
       period_start: `${input.period_year}-01-01`,
       period_end: `${input.period_year}-12-31`
     }
+
+    console.log('🔍 [9] 準備寫入資料庫的 entryData.category:', entryData.category)
+    console.log('🔍 ========== 診斷結束 ==========')
 
     let data, error
 

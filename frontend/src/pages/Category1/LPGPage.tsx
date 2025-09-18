@@ -1,14 +1,14 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Upload, AlertCircle, CheckCircle, Loader2, X, Trash2 } from 'lucide-react'
-import EvidenceUpload from '../../components/EvidenceUpload'
+import EvidenceUpload, { MemoryFile } from '../../components/EvidenceUpload'
 import StatusSwitcher, { EntryStatus, canEdit, canUploadFiles, getButtonText } from '../../components/StatusSwitcher'
 import StatusIndicator from '../../components/StatusIndicator'
 import Toast, { ToastType } from '../../components/Toast'
 import BottomActionBar from '../../components/BottomActionBar'
 import { useEditPermissions } from '../../hooks/useEditPermissions'
 import { useFrontendStatus } from '../../hooks/useFrontendStatus'
-import { listMSDSFiles, listUsageEvidenceFiles, commitEvidence, deleteEvidence, EvidenceFile } from '../../api/files'
+import { listMSDSFiles, listUsageEvidenceFiles, commitEvidence, deleteEvidence, EvidenceFile, uploadEvidenceWithEntry } from '../../api/files'
 import { upsertEnergyEntry, sumMonthly, UpsertEntryInput, updateEntryStatus, getEntryByPageKeyAndYear } from '../../api/entries'
 import { getEntryFiles } from '../../api/files'
 import { designTokens } from '../../utils/designTokens'
@@ -19,6 +19,7 @@ interface MonthData {
   quantity: number      // 使用數量 (桶)
   totalUsage: number    // 總重量 (KG)
   files: EvidenceFile[]
+  memoryFiles: MemoryFile[]  // 暫存檔案
 }
 
 const LPGPage = () => {
@@ -47,13 +48,15 @@ const LPGPage = () => {
   // 表單資料
   const [year] = useState(new Date().getFullYear())
   const [unitWeight, setUnitWeight] = useState<number>(0) // 單位重量 (KG/桶)
-  const [msdsFiles, setMsdsFiles] = useState<EvidenceFile[]>([])
+  const [weightProofFiles, setWeightProofFiles] = useState<EvidenceFile[]>([])
+  const [weightProofMemoryFiles, setWeightProofMemoryFiles] = useState<MemoryFile[]>([])
   const [monthlyData, setMonthlyData] = useState<MonthData[]>(
     Array.from({ length: 12 }, (_, i) => ({
       month: i + 1,
       quantity: 0,
       totalUsage: 0,
-      files: [] as EvidenceFile[]
+      files: [] as EvidenceFile[],
+      memoryFiles: [] as MemoryFile[]
     }))
   )
 
@@ -67,9 +70,11 @@ const LPGPage = () => {
   const hasAnyData = useMemo(() => {
     const hasMonthlyData = monthlyData.some(m => m.quantity > 0)
     const hasBasicData = unitWeight > 0
-    const hasFiles = msdsFiles.length > 0
-    return hasMonthlyData || hasBasicData || hasFiles
-  }, [monthlyData, unitWeight, msdsFiles])
+    const hasFiles = weightProofFiles.length > 0
+    const hasMemoryFiles = weightProofMemoryFiles.length > 0 ||
+                          monthlyData.some(m => m.memoryFiles.length > 0)
+    return hasMonthlyData || hasBasicData || hasFiles || hasMemoryFiles
+  }, [monthlyData, unitWeight, weightProofFiles, weightProofMemoryFiles])
   
   // 唯讀模式判斷
   const isReadOnly = false
@@ -84,12 +89,13 @@ const LPGPage = () => {
     return () => {
       // 重置所有表單狀態
       setUnitWeight(0)
-      setMsdsFiles([])
+      setWeightProofFiles([])
       setMonthlyData(Array.from({ length: 12 }, (_, i) => ({
         month: i + 1,
         quantity: 0,
         totalUsage: 0,
-        files: []
+        files: [],
+        memoryFiles: []
       })))
       setError(null)
       setSuccess(null)
@@ -105,9 +111,9 @@ const LPGPage = () => {
 
         // 草稿功能已移除
 
-        // 載入 MSDS 檔案
-        const msdsFilesList = await listMSDSFiles(pageKey)
-        setMsdsFiles(msdsFilesList)
+        // 載入重量佐證檔案
+        const weightProofFilesList = await listMSDSFiles(pageKey)
+        setWeightProofFiles(weightProofFilesList)
 
         // 檢查是否已有非草稿記錄
         const existingEntry = await getEntryByPageKeyAndYear(pageKey, year)
@@ -138,14 +144,15 @@ const LPGPage = () => {
               quantity = totalUsage / parseFloat(entryUnitWeight)
             }
           }
-          
+
           const totalUsage = quantity * unitWeight
-          
+
           return {
             month,
             quantity,
             totalUsage,
-            files: [] as EvidenceFile[]
+            files: [] as EvidenceFile[],
+            memoryFiles: [] as MemoryFile[]
           }
         })
         
@@ -155,7 +162,7 @@ const LPGPage = () => {
             const files = await getEntryFiles(existingEntry.id)
             
             // 分類檔案到對應的月份
-            const monthlyFiles = files.filter(f => f.month && f.kind === 'usage_evidence')
+            const monthlyFiles = files.filter(f => f.month && f.file_type === 'usage_evidence')
             
             // 更新月份檔案
             updatedMonthlyData = updatedMonthlyData.map(data => ({
@@ -211,13 +218,15 @@ const LPGPage = () => {
   }
 
   const handleMonthFilesChange = (month: number, files: EvidenceFile[]) => {
-    setMonthlyData(prev => prev.map(data => 
+    setMonthlyData(prev => prev.map(data =>
       data.month === month ? { ...data, files } : data
     ))
   }
 
-  const handleMsdsFilesChange = (files: EvidenceFile[]) => {
-    setMsdsFiles(files)
+  const handleMonthMemoryFilesChange = (month: number, memFiles: MemoryFile[]) => {
+    setMonthlyData(prev => prev.map(data =>
+      data.month === month ? { ...data, memoryFiles: memFiles } : data
+    ))
   }
 
   const getTotalUsage = () => {
@@ -226,9 +235,9 @@ const LPGPage = () => {
 
   const validateData = () => {
     const errors: string[] = []
-    
-    if (msdsFiles.length === 0) {
-      errors.push('請上傳佐證資料')
+
+    if (weightProofFiles.length === 0 && weightProofMemoryFiles.length === 0) {
+      errors.push('請上傳重量證明資料')
     }
 
     if (unitWeight <= 0) {
@@ -236,7 +245,7 @@ const LPGPage = () => {
     }
 
     monthlyData.forEach((data, index) => {
-      if (data.quantity > 0 && data.files.length === 0) {
+      if (data.quantity > 0 && data.files.length === 0 && data.memoryFiles.length === 0) {
         errors.push(`${monthNames[index]}有使用量但未上傳使用證明`)
       }
     })
@@ -278,6 +287,35 @@ const LPGPage = () => {
         setCurrentEntryId(entry_id)
       }
 
+      // 上傳重量佐證檔案
+      for (const memFile of weightProofMemoryFiles) {
+        await uploadEvidenceWithEntry(memFile.file, {
+          entryId: entry_id,
+          pageKey: pageKey,
+          year: new Date().getFullYear(),
+          category: 'other'
+        })
+      }
+
+      // 上傳各月份檔案
+      for (const monthData of monthlyData) {
+        if (monthData.memoryFiles.length > 0) {
+          for (const memFile of monthData.memoryFiles) {
+            await uploadEvidenceWithEntry(memFile.file, {
+              entryId: entry_id,
+              pageKey: pageKey,
+              year: new Date().getFullYear(),
+              category: 'usage_evidence',
+              month: monthData.month
+            })
+          }
+        }
+      }
+
+      // 清空 memory files
+      setWeightProofMemoryFiles([])
+      setMonthlyData(prev => prev.map(data => ({ ...data, memoryFiles: [] })))
+
       await commitEvidence({
         entryId: entry_id,
         pageKey: pageKey
@@ -306,14 +344,16 @@ const LPGPage = () => {
 
   const handleClearAll = () => {
     setUnitWeight(0)
-    handleMsdsFilesChange([])
+    setWeightProofFiles([])
+    setWeightProofMemoryFiles([])
     setMonthlyData(Array.from({ length: 12 }, (_, i) => ({
       month: i + 1,
       quantity: 0,
       totalUsage: 0,
-      files: []
+      files: [],
+      memoryFiles: []
     })))
-    
+
     setHasSubmittedBefore(false)
     setError(null)
     setSuccess(null)
@@ -456,25 +496,28 @@ const LPGPage = () => {
             
             {/* 右邊：佐證資料上傳 */}
             <div>
-              <label 
-                className="block text-sm font-medium mb-2" 
+              <label
+                className="block text-sm font-medium mb-2"
                 style={{ color: designTokens.colors.textPrimary }}
               >
-                佐證資料
+                重量證明資料
               </label>
               <EvidenceUpload
                 pageKey={pageKey}
-                files={msdsFiles}
-                onFilesChange={handleMsdsFilesChange}
+                files={weightProofFiles}
+                onFilesChange={setWeightProofFiles}
+                memoryFiles={weightProofMemoryFiles}
+                onMemoryFilesChange={setWeightProofMemoryFiles}
                 maxFiles={3}
                 disabled={submitting || !editPermissions.canUploadFiles}
-                kind="msds"
+                kind="other"
+                mode="edit"
               />
-              <p 
-                className="text-xs mt-1" 
+              <p
+                className="text-xs mt-1"
                 style={{ color: designTokens.colors.textSecondary }}
               >
-                請上傳液化石油氣規格說明或購買證明
+                請上傳液化石油氣重量證明或購買單據
               </p>
             </div>
           </div>
@@ -600,9 +643,12 @@ const LPGPage = () => {
                       month={data.month}
                       files={data.files}
                       onFilesChange={(files) => handleMonthFilesChange(data.month, files)}
+                      memoryFiles={data.memoryFiles}
+                      onMemoryFilesChange={(memFiles) => handleMonthMemoryFilesChange(data.month, memFiles)}
                       maxFiles={3}
                       disabled={submitting || !editPermissions.canUploadFiles}
                       kind="usage_evidence"
+                      mode="edit"
                     />
                   </div>
                 </div>

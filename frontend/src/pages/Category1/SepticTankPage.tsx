@@ -1,13 +1,14 @@
 import { useState, useMemo, useEffect, useRef } from 'react';
 import { Upload, Trash2, Loader2, AlertCircle, CheckCircle } from 'lucide-react';
 import EvidenceUpload from '../../components/EvidenceUpload';
+import { MemoryFile } from '../../components/EvidenceUpload';
 import StatusIndicator from '../../components/StatusIndicator';
 import BottomActionBar from '../../components/BottomActionBar';
 import { EntryStatus } from '../../components/StatusSwitcher';
 import { useEditPermissions } from '../../hooks/useEditPermissions';
 import { useFrontendStatus } from '../../hooks/useFrontendStatus';
 import { updateEntryStatus, getEntryByPageKeyAndYear, upsertEnergyEntry, UpsertEntryInput } from '../../api/entries';
-import { listUsageEvidenceFiles, commitEvidence, getEntryFiles, updateFileEntryAssociation, EvidenceFile } from '../../api/files';
+import { listUsageEvidenceFiles, commitEvidence, getEntryFiles, updateFileEntryAssociation, EvidenceFile, uploadEvidenceWithEntry } from '../../api/files';
 import { designTokens } from '../../utils/designTokens';
 import { debugRLSOperation, diagnoseAuthState } from '../../utils/authDiagnostics';
 import { logDetailedAuthStatus } from '../../utils/authHelpers';
@@ -16,7 +17,11 @@ import { logDetailedAuthStatus } from '../../utils/authHelpers';
 interface MonthData {
   month: number;
   hours: number;          // 當月總工時
-  files: EvidenceFile[];  // 佐證資料
+}
+
+interface AnnualEvidence {
+  files: EvidenceFile[];  // 年度佐證資料
+  memoryFiles?: MemoryFile[];  // 記憶體暫存檔案
 }
 
 const monthLabels = ["1月","2月","3月","4月","5月","6月","7月","8月","9月","10月","11月","12月"];
@@ -33,12 +38,12 @@ export default function SepticTankPage() {
   const [error, setError] = useState<string | null>(null)
   const [success, setSuccess] = useState<string | null>(null)
   const [monthlyData, setMonthlyData] = useState<MonthData[]>(
-    Array.from({ length: 12 }, (_, i) => ({ 
-      month: i + 1, 
-      hours: 0,
-      files: []
+    Array.from({ length: 12 }, (_, i) => ({
+      month: i + 1,
+      hours: 0
     }))
   );
+  const [annualEvidence, setAnnualEvidence] = useState<AnnualEvidence>({ files: [], memoryFiles: [] });
 
   // 前端狀態管理 Hook
   const frontendStatus = useFrontendStatus({
@@ -59,9 +64,10 @@ export default function SepticTankPage() {
   // 判斷是否有資料
   const hasAnyData = useMemo(() => {
     const hasMonthlyData = monthlyData.some(m => m.hours > 0)
-    const hasFiles = monthlyData.some(m => m.files.length > 0)
-    return hasMonthlyData || hasFiles
-  }, [monthlyData])
+    const hasFiles = annualEvidence.files.length > 0
+    const hasMemoryFiles = (annualEvidence.memoryFiles || []).length > 0
+    return hasMonthlyData || hasFiles || hasMemoryFiles
+  }, [monthlyData, annualEvidence])
   
   // 允許所有狀態編輯
   const isReadOnly = false
@@ -100,14 +106,15 @@ export default function SepticTankPage() {
 
           // 載入表單資料
           if (existingEntry.payload?.septicTankData) {
+            // 優先從新結構讀取
             const restoredData = existingEntry.payload.septicTankData
-            
-            console.log('📝 [SepticTank] Entry details:', {
+
+            console.log('📝 [SepticTank] Loading from extraPayload septicTankData:', {
               entryId: existingEntry.id,
               payloadKeys: Object.keys(existingEntry.payload || {}),
               septicTankDataLength: restoredData?.length || 0
             })
-            
+
             // 載入已關聯的檔案
             try {
               const entryFiles = await getEntryFiles(existingEntry.id)
@@ -120,68 +127,84 @@ export default function SepticTankPage() {
                   entry_id: f.entry_id
                 }))
               })
-              
-              // 從檔案路徑分類檔案
-              const monthlyEntryFiles = entryFiles.filter(f => f.file_path.includes('/usage_evidence/'))
-              
-              console.log('📋 [SepticTank] File classification:', {
-                monthlyCount: monthlyEntryFiles.length,
-                monthlyPaths: monthlyEntryFiles.map(f => f.file_path)
-              })
-              
-              // 分配月份檔案到對應月份
-              const updatedMonthlyData = restoredData.map((data: any, index: number) => {
-                const month = index + 1
-                const monthFiles = monthlyEntryFiles.filter(file => {
-                  // 從檔案路徑提取月份：/usage_evidence/{month}/
-                  const monthMatch = file.file_path.match(/\/usage_evidence\/(\d+)\//)
-                  const extractedMonth = monthMatch ? parseInt(monthMatch[1]) : null
-                  console.log(`📅 [SepticTank] File ${file.file_name} path analysis:`, {
-                    path: file.file_path,
-                    monthMatch: monthMatch?.[0],
-                    extractedMonth,
-                    targetMonth: month,
-                    matches: extractedMonth === month
-                  })
-                  return extractedMonth === month
-                })
-                
-                if (monthFiles.length > 0) {
-                  console.log(`📅 [SepticTank] Month ${month} assigned ${monthFiles.length} files:`, 
-                    monthFiles.map(f => f.file_name))
-                }
-                
-                return {
-                  ...data,
-                  files: monthFiles
-                }
-              })
-              
-              console.log('📅 [SepticTank] Monthly file distribution:', 
-                updatedMonthlyData.map((data: any, i: number) => `月${i+1}: ${data.files?.length || 0}個檔案`).join(', ')
+
+              // 所有檔案都歸類為年度佐證資料（化糞池使用 usage_evidence 類別）
+              const annualFiles = entryFiles.filter(f =>
+                f.file_type === 'usage_evidence' && f.page_key === pageKey
               )
-              
+
+              console.log('📋 [SepticTank] Annual evidence files:', {
+                annualCount: annualFiles.length,
+                annualPaths: annualFiles.map(f => f.file_path)
+              })
+
+              // 設置月份數據（僅工時，無檔案）
+              const updatedMonthlyData = restoredData.map((data: any) => ({
+                month: data.month,
+                hours: data.hours || 0
+              }))
+
               setMonthlyData(updatedMonthlyData)
+              setAnnualEvidence({ files: annualFiles, memoryFiles: [] })
             } catch (fileError) {
               console.error('❌ [SepticTank] Failed to load entry files:', fileError)
               // 即使檔案載入失敗，也要繼續處理表單資料
-              setMonthlyData(restoredData)
+              const updatedMonthlyData = restoredData.map((data: any) => ({
+                month: data.month,
+                hours: data.hours || 0
+              }))
+              setMonthlyData(updatedMonthlyData)
+              setAnnualEvidence({ files: [], memoryFiles: [] })
+            }
+          } else if (existingEntry.payload?.monthly) {
+            // 向後相容：從 monthly 推算
+            console.log('📝 [SepticTank] Falling back to monthly data for backward compatibility')
+            const restoredData = Object.keys(existingEntry.payload.monthly).map(month => ({
+              month: parseInt(month),
+              hours: existingEntry.payload.monthly[month]
+            }))
+
+            // 載入已關聯的檔案
+            try {
+              const entryFiles = await getEntryFiles(existingEntry.id)
+              const annualFiles = entryFiles.filter(f =>
+                f.file_type === 'usage_evidence' && f.page_key === pageKey
+              )
+
+              // 補全12個月的數據
+              const fullYearData = Array.from({ length: 12 }, (_, i) => {
+                const monthData = restoredData.find(d => d.month === i + 1)
+                return {
+                  month: i + 1,
+                  hours: monthData ? monthData.hours : 0
+                }
+              })
+
+              setMonthlyData(fullYearData)
+              setAnnualEvidence({ files: annualFiles, memoryFiles: [] })
+            } catch (fileError) {
+              console.error('❌ [SepticTank] Failed to load entry files:', fileError)
+              const fullYearData = Array.from({ length: 12 }, (_, i) => {
+                const monthData = restoredData.find(d => d.month === i + 1)
+                return {
+                  month: i + 1,
+                  hours: monthData ? monthData.hours : 0
+                }
+              })
+              setMonthlyData(fullYearData)
+              setAnnualEvidence({ files: [], memoryFiles: [] })
             }
           }
         } else {
           // 新記錄處理
-          // 載入暫存檔案
-          const monthlyFilesArray = await Promise.all(
-            Array.from({ length: 12 }, (_, i) => 
-              listUsageEvidenceFiles(pageKey, i + 1)
-            )
-          )
-
-          const updatedMonthlyData = monthlyData.map((data, index) => ({
-            ...data,
-            files: monthlyFilesArray[index] || []
-          }))
-          setMonthlyData(updatedMonthlyData)
+          // 載入年度佐證暫存檔案
+          try {
+            const annualFiles = await listUsageEvidenceFiles(pageKey, 0)
+            setAnnualEvidence({ files: annualFiles, memoryFiles: [] })
+          } catch (error) {
+            console.error('Failed to load annual evidence files:', error)
+            setAnnualEvidence({ files: [], memoryFiles: [] })
+          }
         }
 
         isInitialLoad.current = false
@@ -201,7 +224,7 @@ export default function SepticTankPage() {
     if (!isInitialLoad.current && hasSubmittedBefore) {
       setHasChanges(true)
     }
-  }, [monthlyData, hasSubmittedBefore])
+  }, [monthlyData, annualEvidence, hasSubmittedBefore])
 
   const updateMonthData = (index: number, field: keyof MonthData, value: any) => {
     setMonthlyData(prev => {
@@ -209,18 +232,22 @@ export default function SepticTankPage() {
       newData[index] = { ...newData[index], [field]: value };
       return newData;
     });
-    
-    // 移除自動狀態變更
+  };
+
+  const updateAnnualEvidence = (files: EvidenceFile[]) => {
+    setAnnualEvidence({ files });
   };
 
   const validateData = () => {
     const errors: string[] = [];
-    
-    monthlyData.forEach((data, index) => {
-      if (data.hours > 0 && data.files.length === 0) {
-        errors.push(`${monthLabels[index]}有工時但未上傳佐證資料`);
-      }
-    });
+
+    const hasHours = monthlyData.some(data => data.hours > 0);
+    const hasFiles = annualEvidence.files.length > 0;
+    const hasMemoryFiles = (annualEvidence.memoryFiles || []).length > 0;
+
+    if (hasHours && !hasFiles && !hasMemoryFiles) {
+      errors.push('已填入工時數據但未上傳年度佐證資料');
+    }
 
     return errors;
   };
@@ -263,7 +290,11 @@ export default function SepticTankPage() {
         period_year: currentYear,
         unit: '小時',
         monthly: monthly,
-        notes: `化糞池工時記錄，年總工時：${yearlyTotal.toFixed(1)} 小時`,
+        extraPayload: {
+          septicTankData: monthlyData,
+          yearlyTotal: yearlyTotal,
+          notes: `化糞池工時記錄，年總工時：${yearlyTotal.toFixed(1)} 小時`
+        }
       }
 
       // 步驟4：使用診斷包裝執行關鍵操作
@@ -277,8 +308,53 @@ export default function SepticTankPage() {
         setCurrentEntryId(entry_id)
       }
 
+      // 步驟5.5：批次上傳記憶體檔案
+      console.log('📁 [SepticTank] Starting memory files upload...')
+      const memoryFiles = annualEvidence.memoryFiles || []
+      console.log('📁 [SepticTank] Memory files to upload:', {
+        memoryFilesCount: memoryFiles.length
+      })
+
+      const uploadedFiles: EvidenceFile[] = []
+
+      try {
+        // 上傳年度佐證記憶體檔案
+        if (memoryFiles.length > 0) {
+          console.log(`📁 [SepticTank] Uploading ${memoryFiles.length} annual evidence memory files...`)
+          for (const memoryFile of memoryFiles) {
+            const uploadedFile = await uploadEvidenceWithEntry(memoryFile.file, {
+              entryId: entry_id,
+              pageKey,
+              year: currentYear,
+              category: 'usage_evidence'
+            })
+            uploadedFiles.push(uploadedFile)
+            console.log(`✅ [SepticTank] Annual evidence file uploaded: ${uploadedFile.file_name}`)
+          }
+        }
+
+        console.log(`✅ [SepticTank] All memory files uploaded successfully: ${uploadedFiles.length} files`)
+
+        // 清空記憶體檔案
+        setAnnualEvidence(prev => ({
+          ...prev,
+          memoryFiles: []
+        }))
+
+        // 更新檔案狀態
+        const newAnnualFiles = [...annualEvidence.files, ...uploadedFiles]
+        setAnnualEvidence(prev => ({
+          ...prev,
+          files: newAnnualFiles
+        }))
+
+      } catch (uploadError) {
+        console.error('❌ [SepticTank] Memory files upload failed:', uploadError)
+        throw new Error(`檔案上傳失敗: ${uploadError instanceof Error ? uploadError.message : '未知錯誤'}`)
+      }
+
       // 步驟6：使用改進的錯誤恢復機制關聯檔案
-      const allFiles = monthlyData.flatMap(m => m.files)
+      const allFiles = annualEvidence.files
       const unassociatedFiles = allFiles.filter(f => !f.entry_id)
       
       if (unassociatedFiles.length > 0) {
@@ -321,13 +397,13 @@ export default function SepticTankPage() {
         })
         
         // 更新本地狀態
-        setMonthlyData(prev => prev.map(monthData => ({
-          ...monthData,
-          files: monthData.files.map(f => {
+        setAnnualEvidence(prev => ({
+          ...prev,
+          files: prev.files.map(f => {
             const updated = unassociatedFiles.find(uf => uf.id === f.id)
             return updated ? { ...f, entry_id: updated.entry_id } : f
           })
-        })))
+        }))
       }
 
       // 步驟7：處理狀態轉換
@@ -351,13 +427,13 @@ export default function SepticTankPage() {
 
   const handleClear = () => {
     if (confirm('確定要清除所有數據嗎？此操作無法復原。')) {
-      setMonthlyData(prev => 
+      setMonthlyData(prev =>
         prev.map(data => ({
           ...data,
-          hours: 0,
-          files: []
+          hours: 0
         }))
       );
+      setAnnualEvidence({ files: [], memoryFiles: [] });
       setHasChanges(false)
       setError(null)
       setSuccess(null)
@@ -442,6 +518,39 @@ export default function SepticTankPage() {
             </div>
           </div>
         )}
+        
+                <div
+          className="rounded-lg border p-6"
+          style={{
+            backgroundColor: designTokens.colors.cardBg,
+            borderColor: designTokens.colors.border,
+            boxShadow: designTokens.shadows.sm
+          }}
+        >
+          <h2
+            className="text-2xl font-medium mb-6"
+            style={{ color: designTokens.colors.textPrimary }}
+          >
+            年度佐證資料
+          </h2>
+          <div className="bg-gray-50 rounded-lg p-4">
+            <EvidenceUpload
+              pageKey={pageKey}
+              files={annualEvidence.files}
+              onFilesChange={updateAnnualEvidence}
+              memoryFiles={annualEvidence.memoryFiles || []}
+              onMemoryFilesChange={(files) => setAnnualEvidence(prev => ({ ...prev, memoryFiles: files }))}
+              maxFiles={10}
+              disabled={submitting || !editPermissions.canUploadFiles}
+              kind="other"
+              mode="edit"
+            />
+          </div>
+          <p className="text-sm text-gray-600 mt-3">
+            請上傳年度相關的佐證文件（如 MSDS 文件、使用紀錄、Excel統計表等），支援多檔案上傳。<br/>
+            支援格式：圖片 (JPG, PNG)、PDF、Excel (XLSX, XLS)
+          </p>
+        </div>
 
         {/* 月份工時數據 */}
         <div
@@ -459,82 +568,72 @@ export default function SepticTankPage() {
             月份工時數據
           </h2>
 
-          <div className="overflow-x-auto">
-            <table className="w-full border-collapse bg-white border border-gray-200 rounded-lg">
-              <thead>
-                <tr className="bg-gradient-to-r from-brand-500 to-brand-600">
-                  <th className="px-6 py-4 text-center text-base font-semibold text-white border-r border-brand-400/30 whitespace-nowrap">月份</th>
-                  <th className="px-6 py-4 text-center text-base font-semibold text-white border-r border-brand-400/30 whitespace-nowrap">總工時（小時）</th>
-                  <th className="px-6 py-4 text-center text-base font-semibold text-white whitespace-nowrap">佐證資料</th>
-                </tr>
-              </thead>
-              <tbody>
-                {monthlyData.map((data, index) => (
-                  <tr key={data.month} className="border-b border-gray-100 hover:bg-brand-50/50 transition-colors">
-                    <td className="px-6 py-4 text-base font-medium text-gray-800 bg-gray-50/60">
-                      <div className="flex items-center justify-center space-x-2">
-                        <div className="w-2 h-2 rounded-full bg-brand-400"></div>
-                        <span>{monthLabels[index]}</span>
-                      </div>
-                    </td>
-                    <td className="px-6 py-4">
-                      <input
-                        type="number"
-                        min={0}
-                        step={0.1}
-                        value={data.hours === 0 ? "" : data.hours}
-                        onFocus={(e) => {
-                          if (e.target.value === "0") {
-                            e.target.value = "";
-                          }
-                        }}
-                        onBlur={(e) => {
-                          if (e.target.value === "") {
-                            updateMonthData(index, 'hours', 0);
-                          }
-                        }}
-                        onChange={(e) => {
-                          const val = e.target.value;
-                          updateMonthData(index, 'hours', val === "" ? 0 : parseFloat(val));
-                        }}
-                        className="w-full px-3 py-2 text-base border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500 hover:border-brand-300 transition-colors duration-200 text-center"
-                        placeholder="0"
-                        aria-label={`${monthLabels[index]} 總工時`}
-                      />
-                    </td>
-                    <td className="px-6 py-4">
-                      <div className="flex items-center justify-center min-h-[80px]">
-                        <EvidenceUpload
-                          pageKey={pageKey}
-                          files={data.files}
-                          onFilesChange={(files) => updateMonthData(index, 'files', files)}
-                          maxFiles={3}
-                          disabled={submitting || !editPermissions.canUploadFiles}
-                          kind="usage_evidence"
-                        />
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-                {/* 年度合計列 */}
-                <tr className="bg-gradient-to-r from-brand-100 to-brand-50 border-t-2 border-brand-300">
-                  <td className="px-6 py-5 text-base font-bold text-brand-800">
-                    <div className="flex items-center justify-center space-x-2">
-                      <div className="w-3 h-3 rounded-full bg-brand-600"></div>
-                      <span>年度合計</span>
-                    </div>
-                  </td>
-                  <td className="px-6 py-5">
-                    <div className="px-4 py-3 bg-gradient-to-r from-brand-600 to-brand-700 text-white font-bold text-xl rounded-lg text-center shadow-lg">
-                      {yearlyTotal.toFixed(1)} 小時
-                    </div>
-                  </td>
-                  <td className="px-6 py-5 text-base text-gray-400 italic text-center">佐證檔案</td>
-                </tr>
-              </tbody>
-            </table>
+          {/* 月份網格布局 */}
+          <div className="grid grid-cols-3 gap-4 mb-6">
+            {monthlyData.map((data, index) => (
+              <div
+                key={data.month}
+                className="border border-gray-200 rounded-lg p-4 bg-white hover:shadow-md transition-shadow flex flex-col items-center"
+              >
+                {/* 月份標題 */}
+                <span className="text-2xl font-bold text-gray-900 mb-3">
+                  {monthLabels[index]}
+                </span>
+
+                {/* 輸入框（已隱藏上下箭頭，刪掉「小時」） */}
+                <input
+                  type="number"
+                  min={0}
+                  step={0.1}
+                  value={data.hours === 0 ? "" : data.hours}
+                  onFocus={(e) => {
+                    if (e.target.value === "0") e.target.value = "";
+                  }}
+                  onBlur={(e) => {
+                    if (e.target.value === "") {
+                      updateMonthData(index, "hours", 0);
+                    }
+                  }}
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    updateMonthData(
+                      index,
+                      "hours",
+                      val === "" ? 0 : parseFloat(val)
+                    );
+                  }}
+                  className="
+                    w-24 px-3 py-2 text-lg text-center
+                    border border-gray-300 rounded-lg
+                    focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500
+                    hover:border-brand-300 transition-colors duration-200
+
+                    [appearance:textfield]
+                    [&::-webkit-outer-spin-button]:appearance-none
+                    [&::-webkit-inner-spin-button]:appearance-none
+                  "
+                  placeholder="工時"
+                  aria-label={`${monthLabels[index]} 總工時`}
+                />
+              </div>
+            ))}
+          </div>
+
+          {/* 年度合計 */}
+          <div className="bg-gradient-to-r from-brand-100 to-brand-50 rounded-lg p-4 border-2 border-brand-300">
+            <div className="flex items-center justify-center space-x-4">
+              <div className="flex items-center space-x-2">
+                <span className="text-lg font-bold text-brand-800">年度合計</span>
+              </div>
+              <div className="px-6 py-3 bg-gradient-to-r from-brand-600 to-brand-700 text-white font-bold text-xl rounded-lg shadow-lg">
+                {yearlyTotal.toFixed(1)} 小時
+              </div>
+            </div>
           </div>
         </div>
+
+        {/* 年度佐證資料 */}
+
 
         {/* 底部空間，避免內容被固定底部欄遮擋 */}
         <div className="h-20"></div>

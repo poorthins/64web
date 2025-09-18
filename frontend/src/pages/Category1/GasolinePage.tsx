@@ -3,10 +3,10 @@ import { Plus, Trash2, Calendar, Fuel, AlertCircle, CheckCircle, Upload, Loader2
 import { useFrontendStatus } from '../../hooks/useFrontendStatus'
 import { useEditPermissions } from '../../hooks/useEditPermissions'
 import StatusIndicator from '../../components/StatusIndicator'
-import EvidenceUpload from '../../components/EvidenceUpload'
+import EvidenceUpload, { MemoryFile } from '../../components/EvidenceUpload'
 import BottomActionBar from '../../components/BottomActionBar'
 import { EntryStatus } from '../../components/StatusSwitcher'
-import { listMSDSFiles, listUsageEvidenceFiles, commitEvidence, deleteEvidence, EvidenceFile } from '../../api/files'
+import { listMSDSFiles, listUsageEvidenceFiles, commitEvidence, deleteEvidence, deleteEvidenceFile, EvidenceFile, uploadEvidenceWithEntry } from '../../api/files'
 import { upsertEnergyEntry, sumMonthly, UpsertEntryInput, updateEntryStatus, getEntryByPageKeyAndYear } from '../../api/entries'
 import { getEntryFiles } from '../../api/files'
 import { designTokens } from '../../utils/designTokens'
@@ -18,6 +18,8 @@ interface GasolineRecord {
   date: string           // 使用日期 YYYY-MM-DD
   quantity: number       // 使用量 (L)
   files: EvidenceFile[]  // 佐證檔案
+  memoryFiles: MemoryFile[]  // 新增記憶檔案
+  recordKey?: string     // 用於檔案關聯的唯一識別碼
 }
 
 interface GasolineData {
@@ -48,13 +50,17 @@ export default function GasolinePage() {
   const [newRecord, setNewRecord] = useState<Omit<GasolineRecord, 'id'>>({
     date: '',
     quantity: 0,
-    files: []
+    files: [],
+    memoryFiles: [],
+    recordKey: ''
   })
 
   const [showSuccess, setShowSuccess] = useState(false)
   const [showError, setShowError] = useState(false)
   const [errorMessage, setErrorMessage] = useState('')
   const [submitting, setSubmitting] = useState(false)
+  const [showClearConfirmModal, setShowClearConfirmModal] = useState(false)
+  const [clearLoading, setClearLoading] = useState(false)
 
   const pageKey = 'gasoline'
   
@@ -87,7 +93,9 @@ export default function GasolinePage() {
 
     const record: GasolineRecord = {
       id: `gasoline_${Date.now()}`,
-      ...newRecord
+      recordKey: `gasoline_record_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+      ...newRecord,
+      memoryFiles: newRecord.memoryFiles || []
     }
 
     setData(prevData => {
@@ -104,7 +112,9 @@ export default function GasolinePage() {
     setNewRecord({
       date: '',
       quantity: 0,
-      files: []
+      files: [],
+      memoryFiles: [],
+      recordKey: ''
     })
   }, [newRecord, calculateTotals])
 
@@ -126,12 +136,21 @@ export default function GasolinePage() {
       const newRecords = prevData.records.map(record =>
         record.id === recordId ? { ...record, files } : record
       )
-      
+
       return {
         ...prevData,
         records: newRecords
       }
     })
+  }, [])
+
+  const handleRecordMemoryFileChange = useCallback((recordId: string, memFiles: MemoryFile[]) => {
+    setData(prevData => ({
+      ...prevData,
+      records: prevData.records.map(record =>
+        record.id === recordId ? { ...record, memoryFiles: memFiles } : record
+      )
+    }))
   }, [])
 
   const handleSubmit = useCallback(async () => {
@@ -158,12 +177,18 @@ export default function GasolinePage() {
       }
 
       // 步驟3：建立填報輸入資料
+      const notesText = `汽油使用記錄，總使用量：${data.totalQuantity?.toFixed(2) || 0} L，共 ${data.records.length} 筆記錄`
       const entryInput: UpsertEntryInput = {
         page_key: pageKey,
         period_year: currentYear,
         unit: 'L',
         monthly: monthly,
-        notes: `汽油使用記錄，總使用量：${data.totalQuantity?.toFixed(2) || 0} L，共 ${data.records.length} 筆記錄`,
+        notes: notesText,
+        extraPayload: {
+          monthly: monthly,
+          gasolineData: data,  // 保存完整的記錄和檔案資訊
+          notes: notesText
+        }
       }
 
       // 步驟4：使用診斷包裝執行關鍵操作
@@ -177,7 +202,27 @@ export default function GasolinePage() {
         setCurrentEntryId(entry_id)
       }
 
-      // 步驟6：提交所有檔案
+      // 步驟6：上傳所有記錄的檔案
+      for (const record of data.records) {
+        if (record.memoryFiles && record.memoryFiles.length > 0) {
+          for (const memFile of record.memoryFiles) {
+            await uploadEvidenceWithEntry(memFile.file, {
+              entryId: entry_id,
+              pageKey: pageKey,
+              year: currentYear,
+              category: 'other'
+            })
+          }
+        }
+      }
+
+      // 清空 memory files
+      setData(prevData => ({
+        ...prevData,
+        records: prevData.records.map(record => ({ ...record, memoryFiles: [] }))
+      }))
+
+      // 步驟7：提交所有檔案
       await debugRLSOperation(
         '提交證明檔案',
         async () => await commitEvidence({
@@ -186,7 +231,7 @@ export default function GasolinePage() {
         })
       )
 
-      // 步驟7：處理狀態轉換
+      // 步驟8：處理狀態轉換
       await handleSubmitSuccess()
       
       setHasChanges(false)
@@ -209,8 +254,51 @@ export default function GasolinePage() {
     }
   }, [data, currentYear, currentEntryId, handleSubmitSuccess, pageKey])
 
-  const handleClear = useCallback(() => {
-    if (window.confirm('確定要清除所有數據嗎？此操作無法復原。')) {
+  const handleClearAll = async () => {
+    console.log('🗑️ [GasolinePage] ===== CLEAR BUTTON CLICKED =====')
+
+    // 立即設置載入狀態
+    setClearLoading(true)
+
+    try {
+      console.log('🗑️ [GasolinePage] Starting complete clear operation...')
+      // 1. 刪除後端檔案
+      const deletionErrors: string[] = []
+
+      // 刪除所有記錄中的檔案
+      for (const record of data.records) {
+        if (record.files.length > 0) {
+          console.log(`🗑️ [GasolinePage] Deleting ${record.files.length} files for record ${record.id}...`)
+          for (const file of record.files) {
+            try {
+              await deleteEvidenceFile(file.id)
+              console.log(`✅ [GasolinePage] Deleted file: ${file.file_name}`)
+            } catch (error) {
+              const errorMsg = `刪除檔案 "${file.file_name}" 失敗`
+              console.error(`❌ [GasolinePage] ${errorMsg}:`, error)
+              deletionErrors.push(errorMsg)
+            }
+          }
+        }
+      }
+
+      // 刪除新記錄中的檔案
+      if (newRecord.files.length > 0) {
+        console.log(`🗑️ [GasolinePage] Deleting ${newRecord.files.length} files from new record...`)
+        for (const file of newRecord.files) {
+          try {
+            await deleteEvidenceFile(file.id)
+            console.log(`✅ [GasolinePage] Deleted new record file: ${file.file_name}`)
+          } catch (error) {
+            const errorMsg = `刪除新記錄檔案 "${file.file_name}" 失敗`
+            console.error(`❌ [GasolinePage] ${errorMsg}:`, error)
+            deletionErrors.push(errorMsg)
+          }
+        }
+      }
+
+      // 2. 清除前端狀態
+      console.log('🧹 [GasolinePage] Clearing frontend states...')
       setData({
         year: currentYear,
         records: [],
@@ -219,13 +307,38 @@ export default function GasolinePage() {
       setNewRecord({
         date: '',
         quantity: 0,
-        files: []
+        files: [],
+        memoryFiles: [],
+        recordKey: ''
       })
       setHasChanges(false)
       setError(null)
       setSuccess(null)
+      setShowClearConfirmModal(false)
+
+      // 3. 顯示結果訊息
+      if (deletionErrors.length > 0) {
+        const errorMessage = `清除完成，但有 ${deletionErrors.length} 個檔案刪除失敗：\n${deletionErrors.join('\n')}`
+        console.warn('⚠️ [GasolinePage] Clear completed with errors:', errorMessage)
+        setError(errorMessage)
+      } else {
+        const totalDeleted = data.records.reduce((sum, record) => sum + record.files.length, 0) + newRecord.files.length
+        const successMessage = totalDeleted > 0 ?
+          `已成功清除所有資料並刪除 ${totalDeleted} 個檔案` :
+          '已成功清除所有資料'
+        console.log('✅ [GasolinePage] Clear completed successfully:', successMessage)
+        setSuccess(successMessage)
+      }
+
+    } catch (error) {
+      console.error('❌ [GasolinePage] Clear operation failed:', error)
+      setError('清除操作失敗，請重試')
+      setShowClearConfirmModal(false)
+    } finally {
+      console.log('🗑️ [GasolinePage] Clear operation finished, resetting loading state')
+      setClearLoading(false)
     }
-  }, [currentYear])
+  }
 
   const handleStatusChange = async (newStatus: EntryStatus) => {
     try {
@@ -253,24 +366,39 @@ export default function GasolinePage() {
           setHasSubmittedBefore(true)
           
           // 載入已提交的記錄數據供編輯
-          if (existingEntry.payload?.gasolineData) {
-            const gasolineData = existingEntry.payload.gasolineData
-            
+          if (existingEntry.extraPayload?.gasolineData || existingEntry.payload?.gasolineData) {
+            const gasolineData = existingEntry.extraPayload?.gasolineData || existingEntry.payload?.gasolineData
+
             // 載入相關檔案
             if (existingEntry.id) {
               try {
                 const files = await getEntryFiles(existingEntry.id)
-                
-                // 分類檔案到對應的記錄
-                const usageFiles = files.filter(f => f.kind === 'usage_evidence' && f.page_key === pageKey)
-                
-                // 更新記錄的檔案
+
+                // 分類檔案：檢查 file_type === 'other' 或 'usage_evidence'，且 page_key 匹配
+                const gasolineFiles = files.filter(f =>
+                  (f.file_type === 'other' || f.file_type === 'usage_evidence') &&
+                  f.page_key === pageKey
+                )
+
+                // 更新記錄的檔案 - 使用時間戳或檔案名稱規則進行關聯
                 if (gasolineData.records) {
                   gasolineData.records.forEach((record: any) => {
-                    record.files = usageFiles.filter(f => f.record_id === record.id) || []
+                    // 根據記錄的 recordKey 或時間範圍關聯檔案
+                    const recordFiles = gasolineFiles.filter(f => {
+                      // 優先使用 recordKey 關聯
+                      if (record.recordKey && f.file_name.includes(record.recordKey)) {
+                        return true
+                      }
+                      // 備選：根據時間相近性關聯（檔案創建時間接近記錄日期）
+                      const recordDate = new Date(record.date)
+                      const fileDate = new Date(f.created_at)
+                      const timeDiff = Math.abs(fileDate.getTime() - recordDate.getTime())
+                      return timeDiff < 24 * 60 * 60 * 1000 // 24小時內
+                    })
+                    record.files = recordFiles || []
                   })
                 }
-                
+
                 setData(gasolineData)
               } catch (fileError) {
                 console.error('Failed to load files for gasoline records:', fileError)
@@ -279,7 +407,7 @@ export default function GasolinePage() {
             } else {
               setData(gasolineData)
             }
-            
+
             // 處理狀態變更
             handleDataChanged()
           }
@@ -427,9 +555,13 @@ export default function GasolinePage() {
                 pageKey={pageKey}
                 files={newRecord.files}
                 onFilesChange={(files) => setNewRecord(prev => ({ ...prev, files }))}
-                maxFiles={3}
+                memoryFiles={newRecord.memoryFiles}
+                onMemoryFilesChange={(memFiles) => setNewRecord(prev => ({ ...prev, memoryFiles: memFiles }))}
+                maxFiles={1}
                 disabled={submitting || !editPermissions.canUploadFiles}
-                kind="usage_evidence"
+                kind="other"
+                mode="edit"
+                hideFileCount={true}
               />
             </div>
             
@@ -489,15 +621,19 @@ export default function GasolinePage() {
                 )}
               </div>
               
-              {record.files.length > 0 && (
+              {(record.files.length > 0 || record.memoryFiles?.length > 0) && (
                 <div className="mt-3">
                   <EvidenceUpload
                     pageKey={pageKey}
                     files={record.files}
                     onFilesChange={(files) => handleRecordFileChange(record.id, files)}
-                    maxFiles={3}
+                    memoryFiles={record.memoryFiles || []}
+                    onMemoryFilesChange={(memFiles) => handleRecordMemoryFileChange(record.id, memFiles)}
+                    maxFiles={1}
                     disabled={!editPermissions.canUploadFiles}
-                    kind="usage_evidence"
+                    kind="other"
+                    mode="edit"
+                    hideFileCount={true}
                   />
                 </div>
               )}
@@ -562,9 +698,87 @@ export default function GasolinePage() {
         editPermissions={editPermissions}
         submitting={submitting}
         onSubmit={handleSubmit}
-        onClear={handleClear}
+        onClear={() => setShowClearConfirmModal(true)}
         designTokens={designTokens}
       />
+
+      {/* 清除確認模態框 */}
+      {showClearConfirmModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50 p-4">
+          <div
+            className="bg-white rounded-lg shadow-lg max-w-md w-full"
+            style={{ borderRadius: designTokens.borderRadius.lg }}
+          >
+            <div className="p-6">
+              <div className="flex items-start space-x-3 mb-4">
+                <div
+                  className="w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0"
+                  style={{ backgroundColor: `${designTokens.colors.warning}15` }}
+                >
+                  <AlertCircle
+                    className="h-5 w-5"
+                    style={{ color: designTokens.colors.warning }}
+                  />
+                </div>
+                <div className="flex-1">
+                  <h3
+                    className="text-xl font-semibold mb-2"
+                    style={{ color: designTokens.colors.textPrimary }}
+                  >
+                    確認清除
+                  </h3>
+                  <p
+                    className="text-base"
+                    style={{ color: designTokens.colors.textSecondary }}
+                  >
+                    清除後，這一頁所有資料都會被移除，包括已上傳到伺服器的檔案也會被永久刪除。此操作無法復原，確定要繼續嗎？
+                  </p>
+                </div>
+              </div>
+              <div className="flex justify-end space-x-3">
+                <button
+                  onClick={() => setShowClearConfirmModal(false)}
+                  className="px-4 py-2 border rounded-lg transition-colors font-medium"
+                  style={{
+                    borderColor: designTokens.colors.border,
+                    color: designTokens.colors.textSecondary
+                  }}
+                >
+                  取消
+                </button>
+                <button
+                  onClick={handleClearAll}
+                  disabled={clearLoading}
+                  className="px-4 py-2 text-white rounded-lg transition-colors font-medium flex items-center justify-center"
+                  style={{
+                    backgroundColor: clearLoading ? '#9ca3af' : designTokens.colors.error,
+                    opacity: clearLoading ? 0.7 : 1
+                  }}
+                  onMouseEnter={(e) => {
+                    if (!clearLoading) {
+                      (e.target as HTMLButtonElement).style.backgroundColor = '#dc2626';
+                    }
+                  }}
+                  onMouseLeave={(e) => {
+                    if (!clearLoading) {
+                      (e.target as HTMLButtonElement).style.backgroundColor = designTokens.colors.error;
+                    }
+                  }}
+                >
+                  {clearLoading ? (
+                    <>
+                      <Loader2 className="w-4 h-4 animate-spin mr-2" />
+                      清除中...
+                    </>
+                  ) : (
+                    '確定清除'
+                  )}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </>
   )
 }

@@ -2,8 +2,8 @@
 
 ---
 title: API 文檔
-version: 2.0
-last_updated: 2025-09-12
+version: 2.1
+last_updated: 2025-09-16
 author: System Documentation
 ---
 
@@ -18,6 +18,7 @@ author: System Documentation
 - 更新認證診斷工具
 - 新增用戶個人化配置系統 (filling_config)
 - 支援柴油發電機記錄模式設定
+- 新增首頁狀態篩選和項目管理 API
 
 ## 認證系統
 
@@ -473,6 +474,60 @@ interface RecentActivity {
 
 function getRecentActivities(): Promise<RecentActivity[]>
 ```
+
+#### getAllEntries()
+取得所有能源項目及其填報狀態。
+
+```typescript
+interface AllEntry {
+  pageKey: string           // 項目識別碼
+  title: string            // 項目名稱
+  category: string         // 範疇分類 (範疇一/範疇二/範疇三)
+  scope: string           // 排放範圍描述
+  status: 'pending' | 'submitted' | 'approved' | 'rejected' | null  // 項目狀態
+  updatedAt?: string      // 最後更新時間
+  rejectionReason?: string // 退回原因 (狀態為 rejected 時)
+}
+
+function getAllEntries(): Promise<AllEntry[]>
+```
+
+**功能**：
+- 返回所有 14 個能源項目的完整資訊
+- 包含項目當前填報狀態
+- 提供篩選和顯示所需的完整資料
+- 支援首頁狀態篩選功能
+
+**使用場景**：
+- 首頁項目列表顯示
+- 狀態統計和篩選
+- 項目進度追蹤
+
+#### getRejectionReason()
+取得特定項目的詳細退回資訊。
+
+```typescript
+interface RejectionDetail {
+  reason: string          // 退回原因
+  reviewer_notes: string  // 審核者備註
+  rejected_at: string    // 退回時間
+}
+
+function getRejectionReason(entryId: string): Promise<RejectionDetail>
+```
+
+**功能**：
+- 用於已退回項目的詳細資訊展開
+- 支援異步載入退回原因
+- 提供完整的審核回饋資訊
+
+**參數**：
+- `entryId`: 能源填報記錄的唯一識別碼
+
+**使用場景**：
+- 退回項目詳情展開
+- 審核意見查看
+- 修正指引顯示
 
 ## 類別常數系統
 

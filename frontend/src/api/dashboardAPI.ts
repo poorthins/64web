@@ -40,6 +40,23 @@ export interface RecentActivity {
   status: string
 }
 
+export interface AllEntry {
+  pageKey: string           // 項目識別碼
+  title: string            // 項目名稱
+  category: string         // 範疇分類 (範疇一/範疇二/範疇三)
+  scope: string           // 排放範圍描述
+  status: 'pending' | 'submitted' | 'approved' | 'rejected' | null  // 項目狀態
+  updatedAt?: string      // 最後更新時間
+  rejectionReason?: string // 退回原因 (狀態為 rejected 時)
+  entryId?: string        // 填報記錄 ID (用於取得退回原因)
+}
+
+export interface RejectionDetail {
+  reason: string          // 退回原因
+  reviewer_notes: string  // 審核者備註
+  rejected_at: string    // 退回時間
+}
+
 const allCategories = [
   { pageKey: 'wd40', title: 'WD-40', category: '範疇一', scope: '直接排放' },
   { pageKey: 'acetylene', title: '乙炔', category: '範疇一', scope: '直接排放' },
@@ -251,5 +268,92 @@ export async function getRecentActivities(): Promise<RecentActivity[]> {
       throw error
     }
     throw new Error('取得活動記錄時發生未知錯誤')
+  }
+}
+
+export async function getAllEntries(): Promise<AllEntry[]> {
+  try {
+    const authResult = await validateAuth()
+    if (authResult.error || !authResult.user) {
+      throw authResult.error || new Error('使用者未登入')
+    }
+    const user = authResult.user
+    const currentYear = new Date().getFullYear()
+
+    // 取得使用者所有填報記錄
+    const { data: entries, error } = await supabase
+      .from('energy_entries')
+      .select('id, page_key, status, updated_at, category')
+      .eq('owner_id', user.id)
+      .eq('period_year', currentYear)
+
+    if (error) {
+      throw handleAPIError(error, '取得項目記錄失敗')
+    }
+
+    // 建立狀態對應表
+    const entryStatusMap = new Map()
+    entries?.forEach(entry => {
+      entryStatusMap.set(entry.page_key, {
+        entryId: entry.id,
+        status: entry.status,
+        updatedAt: entry.updated_at,
+        category: entry.category
+      })
+    })
+
+    // 結合 allCategories 與實際狀態
+    return allCategories.map(category => {
+      const entryData = entryStatusMap.get(category.pageKey)
+      return {
+        pageKey: category.pageKey,
+        title: category.title,
+        category: category.category,
+        scope: category.scope,
+        status: entryData?.status || null,
+        updatedAt: entryData?.updatedAt,
+        rejectionReason: undefined, // 後續透過 getRejectionReason 載入
+        entryId: entryData?.entryId
+      }
+    })
+  } catch (error) {
+    console.error('Error in getAllEntries:', error)
+    if (error instanceof Error) {
+      throw error
+    }
+    throw new Error('取得所有項目時發生未知錯誤')
+  }
+}
+
+export async function getRejectionReason(entryId: string): Promise<RejectionDetail> {
+  try {
+    const authResult = await validateAuth()
+    if (authResult.error || !authResult.user) {
+      throw authResult.error || new Error('使用者未登入')
+    }
+    const user = authResult.user
+
+    const { data: entry, error } = await supabase
+      .from('energy_entries')
+      .select('review_notes, updated_at, status')
+      .eq('id', entryId)
+      .eq('owner_id', user.id) // 確保資料安全
+      .single()
+
+    if (error) {
+      throw handleAPIError(error, '取得退回原因失敗')
+    }
+
+    return {
+      reason: entry.review_notes || '無退回原因說明',
+      reviewer_notes: entry.review_notes || '',
+      rejected_at: entry.updated_at
+    }
+  } catch (error) {
+    console.error('Error in getRejectionReason:', error)
+    if (error instanceof Error) {
+      throw error
+    }
+    throw new Error('取得退回原因時發生未知錯誤')
   }
 }

@@ -1,24 +1,24 @@
 import { useState, useEffect, useMemo, useCallback } from 'react'
 import { AlertCircle, CheckCircle, Loader2, X, Trash2, Plus } from 'lucide-react'
-import EvidenceUpload from '../../components/EvidenceUpload'
+import EvidenceUpload, { MemoryFile } from '../../components/EvidenceUpload'
 import { EntryStatus } from '../../components/StatusSwitcher'
 import Toast, { ToastType } from '../../components/Toast'
 import BottomActionBar from '../../components/BottomActionBar'
 import { useEditPermissions } from '../../hooks/useEditPermissions'
 import { useFrontendStatus } from '../../hooks/useFrontendStatus'
-import { commitEvidence, getEntryFiles, EvidenceFile } from '../../api/files'
+import { commitEvidence, getEntryFiles, EvidenceFile, uploadEvidenceWithEntry } from '../../api/files'
 import { upsertEnergyEntry, UpsertEntryInput, updateEntryStatus, getEntryByPageKeyAndYear } from '../../api/entries'
 import { designTokens } from '../../utils/designTokens'
 
 // 簡化的帳單資料結構
 interface SimpleBillData {
   id: string
-  paymentMonth: number // 繳費月份 (1-12)
   billingStart: string // 計費開始日期 (民國年格式)
   billingEnd: string   // 計費結束日期 (民國年格式)
   billingDays: number  // 計費天數 (自動計算)
   billingUnits: number // 用電度數
   files: EvidenceFile[]
+  memoryFiles: MemoryFile[] // 記憶體暫存檔案
 }
 
 
@@ -55,15 +55,6 @@ const ElectricityBillPage = () => {
 
   // 監聽帳單變化，確保月份格子即時更新
   useEffect(() => {
-    console.log('帳單資料更新，月份格子將重新渲染', {
-      帳單數量: bills.length,
-      帳單內容: bills.map(b => ({
-        id: b.id,
-        開始: b.billingStart,
-        結束: b.billingEnd,
-        度數: b.billingUnits
-      }))
-    })
     // monthlyTotals 會自動重新計算，因為它依賴 bills
   }, [bills])
 
@@ -159,7 +150,6 @@ const ElectricityBillPage = () => {
 
   // 計算每月總使用量和狀態 - 使用 useMemo 確保即時更新
   const monthlyData = useMemo(() => {
-    console.log('重新計算月份資料，帳單數:', bills.length)
 
     const totals: Record<number, number> = {}
     const statuses: Record<number, { status: 'empty' | 'partial' | 'complete', percentage: number, coveredDays: number, daysInMonth: number }> = {}
@@ -229,48 +219,12 @@ const ElectricityBillPage = () => {
       }
     })
 
-    console.log('月份狀態更新:', statuses)
     return { totals, statuses }
   }, [bills])
 
   const monthlyTotals = monthlyData.totals
 
 
-  // 計算月份涵蓋度（該月被帳單涵蓋的天數百分比）
-  const calculateMonthCoverage = (month: number, bills: SimpleBillData[]): number => {
-    const year = new Date().getFullYear()
-    const daysInMonth = new Date(year, month, 0).getDate() // 該月總天數
-    let coveredDays = 0
-
-    bills.forEach(bill => {
-      if (!bill.billingStart || !bill.billingEnd || bill.billingUnits <= 0) return
-
-      try {
-        const [startYear, startMonth, startDay] = bill.billingStart.split('/').map(Number)
-        const [endYear, endMonth, endDay] = bill.billingEnd.split('/').map(Number)
-
-        // 計算該帳單與指定月份的重疊天數
-        const billStartDate = new Date(startYear + 1911, startMonth - 1, startDay)
-        const billEndDate = new Date(endYear + 1911, endMonth - 1, endDay)
-        const monthStartDate = new Date(year, month - 1, 1)
-        const monthEndDate = new Date(year, month - 1, daysInMonth)
-
-        // 找出重疊期間
-        const overlapStart = new Date(Math.max(billStartDate.getTime(), monthStartDate.getTime()))
-        const overlapEnd = new Date(Math.min(billEndDate.getTime(), monthEndDate.getTime()))
-
-        if (overlapStart <= overlapEnd) {
-          const overlapDays = Math.ceil((overlapEnd.getTime() - overlapStart.getTime()) / (1000 * 60 * 60 * 24)) + 1
-          coveredDays += Math.max(0, overlapDays)
-        }
-      } catch {
-        // 日期解析失敗，跳過
-      }
-    })
-
-    // 確保不超過100%
-    return Math.min(100, (coveredDays / daysInMonth) * 100)
-  }
 
   // 處理帳單變更 - 簡化版本專注即時更新
   const handleBillChange = (id: string, field: keyof SimpleBillData, value: any) => {
@@ -287,9 +241,6 @@ const ElectricityBillPage = () => {
       // 當有完整資料時，立即計算月份分配並觸發格子更新
       if (updated.billingStart && updated.billingEnd && updated.billingUnits > 0) {
         const distribution = calculateMonthlyDistribution(updated)
-        const affectedMonths = Object.keys(distribution).map(Number)
-        console.log(`帳單 ${id} 影響月份:`, affectedMonths, '分配:', distribution)
-
         // 影響月份將在下次 render 時自動更新
       }
 
@@ -301,12 +252,12 @@ const ElectricityBillPage = () => {
   const addBill = () => {
     const newBill: SimpleBillData = {
       id: Date.now().toString(),
-      paymentMonth: 1,
       billingStart: '',
       billingEnd: '',
       billingDays: 0,
       billingUnits: 0,
-      files: []
+      files: [],
+      memoryFiles: []
     }
     setBills(prev => [...prev, newBill])
   }
@@ -321,7 +272,7 @@ const ElectricityBillPage = () => {
     const errors: string[] = []
 
     if (bills.length === 0) {
-      errors.push('請至少新增一筆帳單資料')
+      errors.push('請至少新增一筆電費繳費單')
       return errors
     }
 
@@ -329,27 +280,27 @@ const ElectricityBillPage = () => {
       const billNum = index + 1
 
       if (!bill.billingStart) {
-        errors.push(`第${billNum}筆帳單：請填入計費開始日期`)
+        errors.push(`第${billNum}筆繳費單：請填入計費開始日期`)
       } else if (!validateRocDate(bill.billingStart)) {
-        errors.push(`第${billNum}筆帳單：計費開始日期格式不正確`)
+        errors.push(`第${billNum}筆繳費單：計費開始日期格式不正確`)
       }
 
       if (!bill.billingEnd) {
-        errors.push(`第${billNum}筆帳單：請填入計費結束日期`)
+        errors.push(`第${billNum}筆繳費單：請填入計費結束日期`)
       } else if (!validateRocDate(bill.billingEnd)) {
-        errors.push(`第${billNum}筆帳單：計費結束日期格式不正確`)
+        errors.push(`第${billNum}筆繳費單：計費結束日期格式不正確`)
       }
 
       if (bill.billingDays <= 0 || bill.billingDays > 70) {
-        errors.push(`第${billNum}筆帳單：計費天數異常 (${bill.billingDays}天)`)
+        errors.push(`第${billNum}筆繳費單：計費天數異常 (${bill.billingDays}天)`)
       }
 
       if (bill.billingUnits <= 0) {
-        errors.push(`第${billNum}筆帳單：請輸入用電度數`)
+        errors.push(`第${billNum}筆繳費單：請輸入用電度數`)
       }
 
       if (bill.files.length === 0) {
-        errors.push(`第${billNum}筆帳單：請上傳帳單檔案`)
+        errors.push(`第${billNum}筆繳費單：請上傳繳費單檔案`)
       }
     })
 
@@ -393,14 +344,38 @@ const ElectricityBillPage = () => {
         period_year: year,
         unit: 'kWh',
         monthly: monthly,
-        notes: `外購電力用量填報 - ${bills.length}筆帳單`
+        notes: `外購電力用量填報 - ${bills.length}筆繳費單`,
+        extraPayload: {
+          monthly: monthly,
+          billData: bills.map(bill => ({
+            id: bill.id,
+            billingStart: bill.billingStart,
+            billingEnd: bill.billingEnd,
+            billingDays: bill.billingDays,
+            billingUnits: bill.billingUnits
+          }))
+        }
       }
-
-      // 提交資料除錯 (可在需要時啟用)
-      // console.log('🔍 [Electricity] 準備提交的資料:', entryInput)
 
       const { entry_id } = await upsertEnergyEntry(entryInput, true)
       setCurrentEntryId(entry_id)
+
+      // 上傳所有帳單的佐證檔案
+      for (const bill of bills) {
+        if (bill.memoryFiles && bill.memoryFiles.length > 0) {
+          for (const memFile of bill.memoryFiles) {
+            await uploadEvidenceWithEntry(memFile.file, {
+              entryId: entry_id,
+              pageKey: pageKey,
+              year: year,
+              category: 'other'
+            })
+          }
+        }
+      }
+
+      // 清空 memory files
+      setBills(prev => prev.map(bill => ({ ...bill, memoryFiles: [] })))
 
       await commitEvidence({
         entryId: entry_id,
@@ -458,23 +433,23 @@ const ElectricityBillPage = () => {
           setHasSubmittedBefore(true)
 
           // 載入帳單資料
-          if (existingEntry.payload?.billData && Array.isArray(existingEntry.payload.billData)) {
+          if (existingEntry.extraPayload?.billData && Array.isArray(existingEntry.extraPayload.billData)) {
             const billDataWithFiles = await Promise.all(
-              existingEntry.payload.billData.map(async (bill: any) => {
+              existingEntry.extraPayload.billData.map(async (bill: any) => {
                 try {
                   const files = await getEntryFiles(existingEntry.id)
                   const associatedFiles = files.filter(f =>
-                    f.kind === 'usage_evidence' && f.page_key === pageKey
+                    f.file_type === 'other' && f.page_key === pageKey
                   )
 
                   return {
                     id: bill.id || Date.now().toString(),
-                    paymentMonth: bill.paymentMonth || 1,
-                    billingStart: bill.billingStartDate || '',
-                    billingEnd: bill.billingEndDate || '',
+                    billingStart: bill.billingStart || '',
+                    billingEnd: bill.billingEnd || '',
                     billingDays: bill.billingDays || 0,
                     billingUnits: bill.billingUnits || 0,
-                    files: associatedFiles
+                    files: associatedFiles,
+                    memoryFiles: []
                   }
                 } catch {
                   return bill
@@ -526,7 +501,7 @@ const ElectricityBillPage = () => {
             外購電力使用量填報
           </h1>
           <p className="text-base" style={{ color: designTokens.colors.textSecondary }}>
-            請填入外購電力帳單資料，系統將自動計算各月份使用量
+            請填入外購電力電費繳費單，系統將自動計算各月份使用量
           </p>
         </div>
 
@@ -550,7 +525,7 @@ const ElectricityBillPage = () => {
           </div>
         )}
 
-        {/* 帳單區域 */}
+        {/* 電費繳費單區域 */}
         <div
           className="rounded-lg border p-6"
           style={{
@@ -560,7 +535,7 @@ const ElectricityBillPage = () => {
           }}
         >
           <h3 className="text-lg font-medium mb-3" style={{ color: designTokens.colors.textPrimary }}>
-            帳單資料
+            電費繳費單
           </h3>
 
           {/* 月份進度格子 */}
@@ -716,12 +691,14 @@ const ElectricityBillPage = () => {
                   <div className="flex-1">
                     <EvidenceUpload
                       pageKey={pageKey}
-                      month={index + 1}
                       files={bill.files}
                       onFilesChange={(files) => handleBillChange(bill.id, 'files', files)}
-                      maxFiles={3}
+                      memoryFiles={bill.memoryFiles || []}
+                      onMemoryFilesChange={(memFiles) => handleBillChange(bill.id, 'memoryFiles', memFiles)}
+                      maxFiles={1}
                       disabled={submitting || !editPermissions.canUploadFiles}
-                      kind="usage_evidence"
+                      kind="other"
+                      mode="edit"
                     />
                   </div>
 
@@ -818,7 +795,7 @@ const ElectricityBillPage = () => {
               <AlertCircle className="w-6 h-6 text-orange-500 flex-shrink-0 mt-0.5" />
               <div>
                 <h3 className="text-lg font-semibold text-gray-900 mb-2">確認清除</h3>
-                <p className="text-gray-600">清除後，所有帳單資料都會被移除，確定要繼續嗎？</p>
+                <p className="text-gray-600">清除後，所有繳費單資料都會被移除，確定要繼續嗎？</p>
               </div>
             </div>
             <div className="flex justify-end space-x-3">

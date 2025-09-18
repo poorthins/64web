@@ -1,25 +1,13 @@
 import { supabase } from '../lib/supabaseClient'
 import { validateAuth, handleAPIError } from '../utils/authHelpers'
+import { getCategoryFromPageKey } from './entries'
+import { getCategoryInfo } from '../utils/categoryConstants'
 
-/**
- * 根據 page_key 推斷 category 名稱
- */
-function getCategoryFromPageKey(pageKey: string): string {
-  const categoryMap: Record<string, string> = {
-    'wd40': 'WD-40',
-    'acetylene': '乙炔',
-    'refrigerant': '冷媒',
-    'lpg': 'LPG',
-    'diesel': '柴油',
-    'gasoline': '汽油'
-  }
-  return categoryMap[pageKey] || pageKey.toUpperCase()
-}
 
 export interface FileMetadata {
   pageKey: string
   year: number
-  category: 'msds' | 'usage_evidence' | 'heat_value_evidence'
+  category: 'msds' | 'usage_evidence' | 'heat_value_evidence' | 'annual_evidence' | 'other'
   month?: number  // 僅用於 usage_evidence，表示月份 (1-12)
 }
 
@@ -36,8 +24,9 @@ export interface EvidenceFile {
   mime_type: string
   file_size: number
   created_at: string
-  month?: number | null  // 新增：月份欄位，NULL 表示 MSDS
-  page_key?: string      // 新增：頁面標識符，也可能從 join 取得
+  month?: number | null  // 月份欄位，NULL 表示 MSDS
+  page_key?: string      // 頁面標識符
+  file_type: 'msds' | 'usage_evidence' | 'other' | 'heat_value_evidence' | 'annual_evidence'  // 檔案類型欄位 (必填)
   // Join fields from energy_entries
   status?: 'draft' | 'submitted' | 'approved' | 'rejected'  // From energy_entries
   period_year?: number  // From energy_entries
@@ -138,6 +127,31 @@ async function uploadEvidenceWithValidation(file: File, meta: FileMetadata & { e
     // 推斷正確的 MIME 類型
     const resolvedType = inferMimeType(file)
 
+    // Month 和 file_type 參數驗證
+    const expectedFileType = meta.category === 'msds' ? 'msds' :
+                            meta.category === 'usage_evidence' ? 'usage_evidence' : 'other'
+
+    console.log('🔍 [uploadEvidence] File type validation:', {
+      file_name: file.name,
+      category: meta.category,
+      month_input: meta.month,
+      expected_file_type: expectedFileType
+    })
+
+    if (meta.category === 'usage_evidence') {
+      if (!meta.month || meta.month < 1 || meta.month > 12) {
+        const error = `usage_evidence 類型必須有有效的月份參數 (1-12)，但收到: ${meta.month}`
+        console.error('❌ [uploadEvidence] Month validation failed:', error)
+        throw new Error(error)
+      }
+    } else if (meta.category === 'msds') {
+      if (meta.month !== undefined && meta.month !== null) {
+        const error = `msds 類型不應該有 month 參數，但收到: ${meta.month}`
+        console.error('❌ [uploadEvidence] Month validation failed:', error)
+        throw new Error(error)
+      }
+    }
+
     // 只有當 allowOverwrite 為 true 時才刪除現有檔案
     if (meta.allowOverwrite) {
       // 檢查是否已有相同條件的檔案（同一使用者、頁面、年份）
@@ -235,17 +249,24 @@ async function uploadEvidenceWithValidation(file: File, meta: FileMetadata & { e
       
       // 嘗試尋找現有的草稿記錄
       // 根據資料庫唯一約束，使用 category 而不是 page_key 查詢
-      const category = getCategoryFromPageKey(meta.pageKey)
+      const categoryInfo = getCategoryInfo(meta.pageKey)
       const { data: existingEntry } = await supabase
         .from('energy_entries')
         .select('id')
         .eq('owner_id', user.id)
-        .eq('category', category)
+        .eq('category', categoryInfo.category)
         .eq('period_year', meta.year)
         .eq('status', 'draft')
         .maybeSingle()
       
       if (!existingEntry) {
+        console.log('🔍 [uploadEvidenceWithValidation] 沒有找到記錄，準備建立新記錄')
+        console.log('🔍 [uploadEvidenceWithValidation] pageKey:', meta.pageKey)
+
+        // 獲取完整的 category 資訊，包含 scope
+        const categoryInfo = getCategoryInfo(meta.pageKey)
+        console.log('🔍 [uploadEvidenceWithValidation] categoryInfo:', categoryInfo)
+
         // 如果沒有草稿記錄，嘗試建立或更新一個
         // 使用 upsert 避免重複插入錯誤
         const { data: upsertResult, error: entryError } = await supabase
@@ -254,8 +275,9 @@ async function uploadEvidenceWithValidation(file: File, meta: FileMetadata & { e
             owner_id: user.id,
             page_key: meta.pageKey,
             period_year: meta.year,
-            category: getCategoryFromPageKey(meta.pageKey),
-            unit: 'ML', // 預設單位
+            category: categoryInfo.category,
+            scope: categoryInfo.scope,
+            unit: categoryInfo.unit,
             amount: 0.00001, // 預設為最小值避免 amount > 0 約束錯誤
             status: 'draft',
             period_start: `${meta.year}-01-01`,
@@ -281,7 +303,7 @@ async function uploadEvidenceWithValidation(file: File, meta: FileMetadata & { e
             .from('energy_entries')
             .select('id')
             .eq('owner_id', user.id)
-            .eq('category', category)
+            .eq('category', categoryInfo.category)
             .eq('period_year', meta.year)
             .eq('status', 'draft')
             .maybeSingle()
@@ -297,7 +319,7 @@ async function uploadEvidenceWithValidation(file: File, meta: FileMetadata & { e
               .from('energy_entries')
               .select('id, status')
               .eq('owner_id', user.id)
-              .eq('category', category)
+              .eq('category', categoryInfo.category)
               .eq('period_year', meta.year)
               .maybeSingle()
             
@@ -310,7 +332,7 @@ async function uploadEvidenceWithValidation(file: File, meta: FileMetadata & { e
             } else {
               console.error('No record found after upsert. Debug info:', {
                 user_id: user.id,
-                category,
+                category: categoryInfo.category,
                 period_year: meta.year,
                 page_key: meta.pageKey
               })
@@ -333,6 +355,10 @@ async function uploadEvidenceWithValidation(file: File, meta: FileMetadata & { e
     }
 
     // 建立資料庫記錄
+    const monthValue = meta.category === 'usage_evidence' ? meta.month : null
+    const fileTypeValue = meta.category === 'msds' ? 'msds' :
+                         meta.category === 'usage_evidence' ? 'usage_evidence' : 'other'
+
     const fileRecord = {
       owner_id: user.id,
       entry_id: meta.entryId, // 現在保證有值
@@ -341,8 +367,19 @@ async function uploadEvidenceWithValidation(file: File, meta: FileMetadata & { e
       mime_type: resolvedType,
       file_size: file.size,
       page_key: meta.pageKey,
-      month: meta.category === 'usage_evidence' ? meta.month : null
+      month: monthValue,
+      file_type: fileTypeValue
     }
+
+    console.log('💾 [uploadEvidence] Database record:', {
+      file_name: file.name,
+      category: meta.category,
+      month_input: meta.month,
+      final_month_value: monthValue,
+      final_file_type: fileTypeValue,
+      page_key: meta.pageKey,
+      entry_id: meta.entryId
+    })
 
     const { data: dbData, error: dbError } = await supabase
       .from('entry_files')
@@ -372,7 +409,7 @@ async function uploadEvidenceWithValidation(file: File, meta: FileMetadata & { e
  */
 export async function listEvidenceByCategory(
   pageKey: string,
-  category: 'msds' | 'usage_evidence' | 'heat_value_evidence',
+  category: 'msds' | 'usage_evidence' | 'heat_value_evidence' | 'other',
   month?: number
 ): Promise<EvidenceFile[]> {
   try {
@@ -434,15 +471,147 @@ export async function listEvidenceByCategory(
 /**
  * 取得 MSDS 檔案清單
  */
-export async function listMSDSFiles(pageKey: string): Promise<EvidenceFile[]> {
-  return await listEvidenceByCategory(pageKey, 'msds')
+export async function listMSDSFiles(pageKey: string, year?: number): Promise<EvidenceFile[]> {
+  try {
+    const authResult = await validateAuth()
+    if (authResult.error || !authResult.user) {
+      throw authResult.error || new Error('使用者未登入')
+    }
+    const user = authResult.user
+
+    const currentYear = year || new Date().getFullYear()
+
+    console.log('🔍 [listMSDSFiles] Query params:', {
+      pageKey,
+      year: currentYear,
+      user_id: user.id,
+      file_type: 'msds'
+    })
+
+    const { data, error } = await supabase
+      .from('entry_files')
+      .select(`
+        *,
+        energy_entries!inner(page_key, status, period_year)
+      `)
+      .eq('owner_id', user.id)
+      .eq('energy_entries.page_key', pageKey)
+      .eq('energy_entries.owner_id', user.id)
+      .eq('energy_entries.period_year', currentYear)
+      .eq('file_type', 'msds')
+      .order('created_at', { ascending: false })
+
+    if (error) {
+      console.error('Error listing MSDS files:', error)
+      throw handleAPIError(error, '取得 MSDS 檔案清單失敗')
+    }
+
+    const flattenedData = (data || []).map(item => ({
+      ...item,
+      page_key: item.energy_entries?.page_key,
+      status: item.energy_entries?.status,
+      period_year: item.energy_entries?.period_year,
+      energy_entries: undefined
+    }))
+
+    // 去重處理
+    const deduplicatedData = Array.from(
+      new Map(flattenedData.map(file => [file.id, file])).values()
+    )
+
+    if (flattenedData.length !== deduplicatedData.length) {
+      console.log('🔄 [listMSDSFiles] Deduplication:', {
+        original_count: flattenedData.length,
+        deduplicated_count: deduplicatedData.length,
+        removed_duplicates: flattenedData.length - deduplicatedData.length
+      })
+    }
+
+    console.log('✅ [listMSDSFiles] Results:', {
+      count: deduplicatedData.length,
+      file_ids: deduplicatedData.map(f => f.id)
+    })
+
+    return deduplicatedData
+  } catch (error) {
+    console.error('Error in listMSDSFiles:', error)
+    throw error instanceof Error ? error : new Error('取得 MSDS 檔案清單時發生未知錯誤')
+  }
 }
 
 /**
  * 取得指定月份的使用證明檔案清單
  */
-export async function listUsageEvidenceFiles(pageKey: string, month: number): Promise<EvidenceFile[]> {
-  return await listEvidenceByCategory(pageKey, 'usage_evidence', month)
+export async function listUsageEvidenceFiles(pageKey: string, month: number, year?: number): Promise<EvidenceFile[]> {
+  try {
+    const authResult = await validateAuth()
+    if (authResult.error || !authResult.user) {
+      throw authResult.error || new Error('使用者未登入')
+    }
+    const user = authResult.user
+
+    const currentYear = year || new Date().getFullYear()
+
+    console.log('🔍 [listUsageEvidenceFiles] Query params:', {
+      pageKey,
+      month,
+      year: currentYear,
+      user_id: user.id,
+      file_type: 'usage_evidence'
+    })
+
+    const { data, error } = await supabase
+      .from('entry_files')
+      .select(`
+        *,
+        energy_entries!inner(page_key, status, period_year)
+      `)
+      .eq('owner_id', user.id)
+      .eq('energy_entries.page_key', pageKey)
+      .eq('energy_entries.owner_id', user.id)
+      .eq('energy_entries.period_year', currentYear)
+      .eq('file_type', 'usage_evidence')
+      .eq('month', month)
+      .order('created_at', { ascending: false })
+
+    if (error) {
+      console.error('Error listing usage evidence files:', error)
+      throw handleAPIError(error, '取得使用證明檔案清單失敗')
+    }
+
+    const flattenedData = (data || []).map(item => ({
+      ...item,
+      page_key: item.energy_entries?.page_key,
+      status: item.energy_entries?.status,
+      period_year: item.energy_entries?.period_year,
+      energy_entries: undefined
+    }))
+
+    // 去重處理
+    const deduplicatedData = Array.from(
+      new Map(flattenedData.map(file => [file.id, file])).values()
+    )
+
+    if (flattenedData.length !== deduplicatedData.length) {
+      console.log('🔄 [listUsageEvidenceFiles] Deduplication:', {
+        month,
+        original_count: flattenedData.length,
+        deduplicated_count: deduplicatedData.length,
+        removed_duplicates: flattenedData.length - deduplicatedData.length
+      })
+    }
+
+    console.log('✅ [listUsageEvidenceFiles] Results:', {
+      month,
+      count: deduplicatedData.length,
+      file_ids: deduplicatedData.map(f => f.id)
+    })
+
+    return deduplicatedData
+  } catch (error) {
+    console.error('Error in listUsageEvidenceFiles:', error)
+    throw error instanceof Error ? error : new Error('取得使用證明檔案清單時發生未知錯誤')
+  }
 }
 
 /**
@@ -800,4 +969,80 @@ export { getCategoryFromPageKey }
 // Add missing function for WD40Page
 export async function debugDatabaseContent(): Promise<void> {
   console.log('Debug database content called')
+}
+
+/**
+ * 批次上傳多個檔案
+ * @param files 檔案陣列
+ * @param metadataArray 對應的中繼資料陣列
+ * @param onProgress 進度回調函數
+ * @returns 上傳結果陣列
+ */
+export async function batchUploadEvidence(
+  files: File[],
+  metadataArray: (FileMetadata & { entryId?: string; allowOverwrite?: boolean })[],
+  onProgress?: (completed: number, total: number, currentFile: string) => void
+): Promise<{ successes: EvidenceFile[], failures: { file: File, error: string }[] }> {
+  if (files.length !== metadataArray.length) {
+    throw new Error('檔案數量與中繼資料數量不符')
+  }
+
+  const successes: EvidenceFile[] = []
+  const failures: { file: File, error: string }[] = []
+  let completed = 0
+
+  console.log('🚀 [batchUploadEvidence] Starting batch upload:', {
+    totalFiles: files.length,
+    files: files.map(f => f.name)
+  })
+
+  // 逐一上傳檔案（避免並發導致的資料庫壓力）
+  for (let i = 0; i < files.length; i++) {
+    const file = files[i]
+    const metadata = metadataArray[i]
+
+    try {
+      onProgress?.(completed, files.length, file.name)
+
+      console.log(`📤 [batchUploadEvidence] Uploading file ${i + 1}/${files.length}:`, {
+        fileName: file.name,
+        fileSize: file.size,
+        category: metadata.category,
+        month: metadata.month
+      })
+
+      const result = await uploadEvidence(file, metadata)
+      successes.push(result)
+
+      completed++
+      console.log(`✅ [batchUploadEvidence] File uploaded successfully:`, {
+        fileName: file.name,
+        fileId: result.id,
+        completed: completed,
+        remaining: files.length - completed
+      })
+
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : '上傳失敗'
+      failures.push({ file, error: errorMessage })
+
+      console.error(`❌ [batchUploadEvidence] File upload failed:`, {
+        fileName: file.name,
+        error: errorMessage
+      })
+    }
+
+    // 通知進度更新
+    onProgress?.(completed, files.length, completed < files.length ? files[completed]?.name || '' : '')
+  }
+
+  console.log('🏁 [batchUploadEvidence] Batch upload completed:', {
+    totalFiles: files.length,
+    successes: successes.length,
+    failures: failures.length,
+    successFiles: successes.map(s => s.file_name),
+    failureFiles: failures.map(f => f.file.name)
+  })
+
+  return { successes, failures }
 }

@@ -3,10 +3,10 @@ import { Plus, Trash2, Shield, AlertCircle, CheckCircle, Upload, Loader2 } from 
 import { useFrontendStatus } from '../../hooks/useFrontendStatus'
 import { useEditPermissions } from '../../hooks/useEditPermissions'
 import StatusIndicator from '../../components/StatusIndicator'
-import EvidenceUpload from '../../components/EvidenceUpload'
+import EvidenceUpload, { MemoryFile } from '../../components/EvidenceUpload'
 import BottomActionBar from '../../components/BottomActionBar'
 import { EntryStatus } from '../../components/StatusSwitcher'
-import { listMSDSFiles, listUsageEvidenceFiles, commitEvidence, deleteEvidence, EvidenceFile } from '../../api/files'
+import { listMSDSFiles, listUsageEvidenceFiles, commitEvidence, deleteEvidence, EvidenceFile, uploadEvidenceWithEntry } from '../../api/files'
 import { upsertEnergyEntry, sumMonthly, UpsertEntryInput, updateEntryStatus, getEntryByPageKeyAndYear } from '../../api/entries'
 import { getEntryFiles } from '../../api/files'
 import { designTokens } from '../../utils/designTokens'
@@ -21,6 +21,8 @@ interface FireExtinguisherRecord {
   refilledAmount?: number  // 填充量（可選）
   unit: string            // 單位
   location: string        // 位置
+  files: EvidenceFile[]       // 銘牌照片（已上傳）
+  memoryFiles: MemoryFile[]    // 銘牌照片（待上傳）
 }
 
 interface FireExtinguisherData {
@@ -29,7 +31,7 @@ interface FireExtinguisherData {
   totalEquipment: number
 }
 
-const equipmentTypes = ['乾粉式', '二氧化碳式', '泡沫式', '海龍式', '其他']
+const equipmentTypes = ['乾粉式', '二氧化碳式', '泡沫式', '海龍式', '潔淨式', '其他']
 const unitOptions = ['kg', 'L', '瓶', '個']
 
 export default function FireExtinguisherPage() {
@@ -52,6 +54,7 @@ export default function FireExtinguisherPage() {
   })
 
   const [evidenceFiles, setEvidenceFiles] = useState<EvidenceFile[]>([])
+  const [evidenceMemoryFiles, setEvidenceMemoryFiles] = useState<MemoryFile[]>([])
 
   const [newRecord, setNewRecord] = useState<Omit<FireExtinguisherRecord, 'id'>>({
     equipmentType: '乾粉式',
@@ -59,8 +62,13 @@ export default function FireExtinguisherPage() {
     isRefilled: false,
     refilledAmount: undefined,
     unit: 'kg',
-    location: ''
+    location: '',
+    files: [],
+    memoryFiles: []
   })
+
+  // 自訂設備類型狀態
+  const [customEquipmentType, setCustomEquipmentType] = useState('')
 
   const [showSuccess, setShowSuccess] = useState(false)
   const [showError, setShowError] = useState(false)
@@ -89,9 +97,26 @@ export default function FireExtinguisherPage() {
     return { totalEquipment }
   }, [])
 
+  // 處理設備類型變更
+  const handleEquipmentTypeChange = (value: string) => {
+    setNewRecord(prev => ({ ...prev, equipmentType: value }))
+
+    // 如果不是選擇「其他」，清除自訂類型
+    if (value !== '其他') {
+      setCustomEquipmentType('')
+    }
+  }
+
   const addRecord = useCallback(() => {
     if (!newRecord.location || newRecord.quantity <= 0) {
       setErrorMessage('請填寫完整的滅火器記錄資訊')
+      setShowError(true)
+      return
+    }
+
+    // 驗證自訂設備類型
+    if (newRecord.equipmentType === '其他' && !customEquipmentType.trim()) {
+      setErrorMessage('選擇「其他」時請輸入具體的設備類型')
       setShowError(true)
       return
     }
@@ -102,16 +127,22 @@ export default function FireExtinguisherPage() {
       return
     }
 
+    // 決定最終的設備類型
+    const finalEquipmentType = newRecord.equipmentType === '其他' ? customEquipmentType.trim() : newRecord.equipmentType
+
     const record: FireExtinguisherRecord = {
       id: `fire_extinguisher_${Date.now()}`,
       ...newRecord,
-      refilledAmount: newRecord.isRefilled ? newRecord.refilledAmount : undefined
+      equipmentType: finalEquipmentType,
+      refilledAmount: newRecord.isRefilled ? newRecord.refilledAmount : undefined,
+      files: newRecord.files || [],
+      memoryFiles: newRecord.memoryFiles || []
     }
 
     setData(prevData => {
       const newRecords = [...prevData.records, record]
       const totals = calculateTotals(newRecords)
-      
+
       return {
         ...prevData,
         records: newRecords,
@@ -125,15 +156,20 @@ export default function FireExtinguisherPage() {
       isRefilled: false,
       refilledAmount: undefined,
       unit: 'kg',
-      location: ''
+      location: '',
+      files: [],
+      memoryFiles: []
     })
-  }, [newRecord, calculateTotals])
+
+    // 清除自訂設備類型
+    setCustomEquipmentType('')
+  }, [newRecord, customEquipmentType, calculateTotals])
 
   const removeRecord = useCallback((recordId: string) => {
     setData(prevData => {
       const newRecords = prevData.records.filter(record => record.id !== recordId)
       const totals = calculateTotals(newRecords)
-      
+
       return {
         ...prevData,
         records: newRecords,
@@ -142,10 +178,28 @@ export default function FireExtinguisherPage() {
     })
   }, [calculateTotals])
 
+  const handleRecordFileChange = (recordId: string, files: EvidenceFile[]) => {
+    setData(prevData => ({
+      ...prevData,
+      records: prevData.records.map(record =>
+        record.id === recordId ? { ...record, files } : record
+      )
+    }))
+  }
+
+  const handleRecordMemoryFileChange = (recordId: string, memFiles: MemoryFile[]) => {
+    setData(prevData => ({
+      ...prevData,
+      records: prevData.records.map(record =>
+        record.id === recordId ? { ...record, memoryFiles: memFiles } : record
+      )
+    }))
+  }
+
   const handleSubmit = useCallback(async () => {
     console.log('=== 滅火器填報提交除錯開始 ===')
     
-    if (evidenceFiles.length === 0) {
+    if (evidenceFiles.length === 0 && evidenceMemoryFiles.length === 0) {
       setError('請上傳消防安全設備檢修表')
       return
     }
@@ -182,6 +236,9 @@ export default function FireExtinguisherPage() {
         unit: '台',
         monthly: monthly,
         notes: `滅火器填報記錄，總設備數量：${data.totalEquipment} 台，共 ${data.records.length} 筆記錄`,
+        extraPayload: {
+          fireExtinguisherData: data  // 保存完整的滅火器記錄數據
+        }
       }
 
       // 步驟4：使用診斷包裝執行關鍵操作
@@ -195,7 +252,31 @@ export default function FireExtinguisherPage() {
         setCurrentEntryId(entry_id)
       }
 
-      // 步驟6：提交所有檔案
+      // 步驟6：上傳消防檢修表
+      for (const memFile of evidenceMemoryFiles) {
+        await uploadEvidenceWithEntry(memFile.file, {
+          entryId: entry_id,
+          pageKey: pageKey,
+          year: currentYear,
+          category: 'other'
+        })
+      }
+
+      // 步驟7：上傳各滅火器銘牌照片
+      for (const record of data.records) {
+        if (record.memoryFiles && record.memoryFiles.length > 0) {
+          for (const memFile of record.memoryFiles) {
+            await uploadEvidenceWithEntry(memFile.file, {
+              entryId: entry_id,
+              pageKey: pageKey,
+              year: currentYear,
+              category: 'other'
+            })
+          }
+        }
+      }
+
+      // 步驟8：提交所有檔案
       await debugRLSOperation(
         '提交證明檔案',
         async () => await commitEvidence({
@@ -204,9 +285,16 @@ export default function FireExtinguisherPage() {
         })
       )
 
-      // 步驟7：處理狀態轉換
+      // 步驟9：處理狀態轉換
       await handleSubmitSuccess()
-      
+
+      // 步驟10：清空 memory files
+      setEvidenceMemoryFiles([])
+      setData(prevData => ({
+        ...prevData,
+        records: prevData.records.map(record => ({ ...record, memoryFiles: [] }))
+      }))
+
       setHasChanges(false)
       setHasSubmittedBefore(true)
 
@@ -240,9 +328,12 @@ export default function FireExtinguisherPage() {
         isRefilled: false,
         refilledAmount: undefined,
         unit: 'kg',
-        location: ''
+        location: '',
+        files: [],
+        memoryFiles: []
       })
       setEvidenceFiles([])
+      setEvidenceMemoryFiles([])
       setHasChanges(false)
       setError(null)
       setSuccess(null)
@@ -288,7 +379,7 @@ export default function FireExtinguisherPage() {
                 const files = await getEntryFiles(existingEntry.id)
                 
                 // 分類檔案到對應的記錄
-                const msdsFiles = files.filter(f => f.kind === 'msds' && f.page_key === pageKey)
+                const msdsFiles = files.filter(f => f.page_key === pageKey)
                 
                 setEvidenceFiles(msdsFiles)
                 setData(fireExtinguisherData)
@@ -418,9 +509,12 @@ export default function FireExtinguisherPage() {
               pageKey={pageKey}
               files={evidenceFiles}
               onFilesChange={setEvidenceFiles}
+              memoryFiles={evidenceMemoryFiles}
+              onMemoryFilesChange={setEvidenceMemoryFiles}
               maxFiles={3}
               disabled={submitting || !editPermissions.canUploadFiles}
-              kind="msds"
+              kind="other"
+              mode="edit"
             />
             <p 
               className="text-sm mt-1"
@@ -455,7 +549,7 @@ export default function FireExtinguisherPage() {
                 </label>
                 <select
                   value={newRecord.equipmentType}
-                  onChange={(e) => setNewRecord(prev => ({ ...prev, equipmentType: e.target.value }))}
+                  onChange={(e) => handleEquipmentTypeChange(e.target.value)}
                   className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                   style={{ borderColor: designTokens.colors.border }}
                 >
@@ -463,6 +557,24 @@ export default function FireExtinguisherPage() {
                     <option key={type} value={type}>{type}</option>
                   ))}
                 </select>
+
+                {/* 當選擇「其他」時顯示自訂輸入框 */}
+                {newRecord.equipmentType === '其他' && (
+                  <div className="mt-3">
+                    <label className="block text-sm font-medium mb-2" style={{ color: designTokens.colors.textPrimary }}>
+                      請輸入具體類型 <span className="text-red-500">*</span>
+                    </label>
+                    <input
+                      type="text"
+                      value={customEquipmentType}
+                      onChange={(e) => setCustomEquipmentType(e.target.value)}
+                      className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                      style={{ borderColor: designTokens.colors.border }}
+                      placeholder="例如：水霧式、潔淨氣體式等"
+                      maxLength={50}
+                    />
+                  </div>
+                )}
               </div>
               
               <div>
@@ -546,6 +658,25 @@ export default function FireExtinguisherPage() {
                   placeholder="設備所在位置"
                 />
               </div>
+            </div>
+
+            <div className="col-span-full">
+              <label className="block text-base font-medium mb-2">
+                滅火器銘牌照片
+              </label>
+              <EvidenceUpload
+                pageKey={pageKey}
+                files={newRecord.files || []}
+                onFilesChange={(files) => setNewRecord(prev => ({ ...prev, files }))}
+                memoryFiles={newRecord.memoryFiles || []}
+                onMemoryFilesChange={(memFiles) => setNewRecord(prev => ({ ...prev, memoryFiles: memFiles }))}
+                maxFiles={1}
+                kind="other"
+                mode="edit"
+              />
+              <p className="text-sm mt-1" style={{ color: designTokens.colors.textSecondary }}>
+                請上傳此滅火器的銘牌照片作為佐證
+              </p>
             </div>
             
             <button
@@ -631,6 +762,21 @@ export default function FireExtinguisherPage() {
                   </button>
                 )}
               </div>
+              {(record.files.length > 0 || record.memoryFiles.length > 0) && (
+                <div className="mt-3">
+                  <EvidenceUpload
+                    pageKey={pageKey}
+                    files={record.files}
+                    onFilesChange={(files) => handleRecordFileChange(record.id, files)}
+                    memoryFiles={record.memoryFiles || []}
+                    onMemoryFilesChange={(memFiles) => handleRecordMemoryFileChange(record.id, memFiles)}
+                    maxFiles={1}
+                    disabled={!editPermissions.canUploadFiles}
+                    kind="other"
+                    mode="view"
+                  />
+                </div>
+              )}
               </div>
             ))}
           </div>

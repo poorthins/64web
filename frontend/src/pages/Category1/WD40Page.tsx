@@ -1,20 +1,73 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Upload, AlertCircle, CheckCircle, Loader2, X, Trash2 } from 'lucide-react'
-import EvidenceUpload from '../../components/EvidenceUpload'
+import { Upload, AlertCircle, CheckCircle, Loader2, X, Trash2, Edit, Eye } from 'lucide-react'
+import EnergyFileManager from '../../components/EnergyFileManager'
 import StatusSwitcher, { EntryStatus, canEdit, canUploadFiles, getButtonText } from '../../components/StatusSwitcher'
 import StatusIndicator from '../../components/StatusIndicator'
 import Toast, { ToastType } from '../../components/Toast'
 import BottomActionBar from '../../components/BottomActionBar'
+import EvidenceUpload from '../../components/EvidenceUpload'
 import { useEditPermissions } from '../../hooks/useEditPermissions'
 import { useFrontendStatus } from '../../hooks/useFrontendStatus'
-import { listMSDSFiles, listUsageEvidenceFiles, commitEvidence, deleteEvidence, getEntryFiles, updateFileEntryAssociation, debugDatabaseContent, EvidenceFile } from '../../api/files'
+import {
+  commitEvidence,
+  debugDatabaseContent,
+  deleteEvidenceFile,
+  EvidenceFile,
+  getEntryFiles,
+  listMSDSFiles,
+  listUsageEvidenceFiles,
+  updateFileEntryAssociation,
+  uploadEvidenceWithEntry
+} from '../../api/files'
+import { MemoryFile } from '../../components/EvidenceUpload'
+
 import { upsertEnergyEntry, sumMonthly, UpsertEntryInput, updateEntryStatus, getEntryByPageKeyAndYear } from '../../api/entries'
 import { supabase } from '../../lib/supabaseClient'
 import { designTokens } from '../../utils/designTokens'
 import { debugRLSOperation, diagnoseAuthState } from '../../utils/authDiagnostics'
 import { logDetailedAuthStatus } from '../../utils/authHelpers'
 
+// 增強的檔案去重工具函數
+function deduplicateFilesByID(files: EvidenceFile[], context: string = ''): EvidenceFile[] {
+  console.log(`🔄 [${context}] Starting deduplication:`, {
+    input_count: files.length,
+    input_files: files.map(f => ({
+      id: f.id,
+      name: f.file_name,
+      entry_id: f.entry_id,
+      file_type: f.file_type,
+      month: f.month
+    }))
+  })
+
+  // 按 ID 去重，如果有重複的 ID，優先保留最新的（created_at 最新）
+  const deduplicated = Array.from(
+    new Map(files.map(file => [file.id, file])).values()
+  )
+
+  if (files.length !== deduplicated.length) {
+    const duplicateIds = files
+      .filter((file, index, array) =>
+        array.findIndex(f => f.id === file.id) !== index
+      )
+      .map(f => f.id)
+
+    console.log(`🔄 [${context}] File deduplication completed:`, {
+      original_count: files.length,
+      deduplicated_count: deduplicated.length,
+      removed_duplicates: files.length - deduplicated.length,
+      duplicate_ids: [...new Set(duplicateIds)],
+      final_files: deduplicated.map(f => ({
+        id: f.id,
+        name: f.file_name,
+        entry_id: f.entry_id
+      }))
+    })
+  }
+
+  return deduplicated
+}
 
 // 自定義 debounce 函式
 function debounce<T extends (...args: any[]) => any>(func: T, wait: number): T {
@@ -35,6 +88,7 @@ interface MonthData {
 const WD40Page = () => {
   const navigate = useNavigate()
   const [loading, setLoading] = useState(true)
+  const [clearLoading, setClearLoading] = useState(false)
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [success, setSuccess] = useState<string | null>(null)
@@ -70,7 +124,6 @@ const WD40Page = () => {
   const [year] = useState(new Date().getFullYear())
   const [unitCapacity, setUnitCapacity] = useState<number>(0)
   const [carbonRate, setCarbonRate] = useState<number>(0)
-  const [msdsFiles, setMsdsFiles] = useState<EvidenceFile[]>([])
   const [monthlyData, setMonthlyData] = useState<MonthData[]>(
     Array.from({ length: 12 }, (_, i) => ({
       month: i + 1,
@@ -78,6 +131,19 @@ const WD40Page = () => {
       totalUsage: 0,
       files: []
     }))
+  )
+
+  // 檔案管理模式
+  const [fileManagerMode, setFileManagerMode] = useState<'edit' | 'view'>('view')
+  const [hasFileChanges, setHasFileChanges] = useState(false)
+
+  // MSDS 檔案狀態
+  const [msdsFiles, setMsdsFiles] = useState<EvidenceFile[]>([])
+
+  // 記憶體暫存檔案狀態
+  const [msdsMemoryFiles, setMsdsMemoryFiles] = useState<MemoryFile[]>([])
+  const [monthlyMemoryFiles, setMonthlyMemoryFiles] = useState<MemoryFile[][]>(
+    Array.from({ length: 12 }, () => [])
   )
 
   const pageKey = 'wd40'
@@ -89,9 +155,9 @@ const WD40Page = () => {
   const hasAnyData = useMemo(() => {
     const hasMonthlyData = monthlyData?.some(m => m.quantity > 0) || false
     const hasBasicData = unitCapacity > 0 || carbonRate > 0
-    const hasFiles = (msdsFiles?.length || 0) > 0
-    return hasMonthlyData || hasBasicData || hasFiles
-  }, [monthlyData, unitCapacity, carbonRate, msdsFiles])
+    const hasMemoryFiles = msdsMemoryFiles.length > 0 || monthlyMemoryFiles.some(files => files.length > 0)
+    return hasMonthlyData || hasBasicData || hasMemoryFiles
+  }, [monthlyData, unitCapacity, carbonRate, msdsMemoryFiles, monthlyMemoryFiles])
   
   // 允許所有狀態編輯
   const isReadOnly = false
@@ -107,13 +173,14 @@ const WD40Page = () => {
       // 重置所有表單狀態
       setUnitCapacity(0)
       setCarbonRate(0)
-      setMsdsFiles([])
       setMonthlyData(Array.from({ length: 12 }, (_, i) => ({
         month: i + 1,
         quantity: 0,
         totalUsage: 0,
         files: []
       })))
+      setMsdsMemoryFiles([])
+      setMonthlyMemoryFiles(Array.from({ length: 12 }, () => []))
       setError(null)
       setSuccess(null)
     }
@@ -126,19 +193,25 @@ const WD40Page = () => {
         setLoading(true)
         setError(null)
 
-        // 並行載入基本資料
-        const [msdsFiles, existingEntry] = await Promise.all([
-          listMSDSFiles(pageKey),
-          getEntryByPageKeyAndYear(pageKey, year)
-        ])
+        // 清理所有舊狀態，避免重複顯示
+        console.log('🧹 [WD40Page] Clearing previous state')
+        setMsdsFiles([])
+        setMsdsMemoryFiles([])
+        setMonthlyMemoryFiles(Array.from({ length: 12 }, () => []))
+        setMonthlyData(Array.from({ length: 12 }, (_, i) => ({
+          month: i + 1,
+          quantity: 0,
+          totalUsage: 0,
+          files: []
+        })))
 
-        console.log('🔍 [WD40] Loading entry:', {
-          existingEntry: existingEntry ? {
-            id: existingEntry.id,
-            status: existingEntry.status,
-            hasPayload: !!existingEntry.payload
-          } : null,
-          msdsFilesCount: msdsFiles?.length || 0
+        // 載入基本資料
+        const existingEntry = await getEntryByPageKeyAndYear(pageKey, year)
+
+        console.log('🚀 [WD40Page] Starting file loading process:', {
+          pageKey,
+          year,
+          hasExistingEntry: !!existingEntry
         })
 
         // 如果有現有記錄，載入資料
@@ -156,37 +229,73 @@ const WD40Page = () => {
           setCurrentEntryId(existingEntry.id)
           setInitialStatus(existingEntry.status as EntryStatus)
 
+          // 只有非草稿狀態才載入檔案，草稿狀態使用記憶體暫存
+          const shouldLoadFiles = existingEntry.status !== 'draft'
+          console.log('📁 [WD40Page] File loading decision:', {
+            status: existingEntry.status,
+            shouldLoadFiles
+          })
+
           // 載入表單資料
           if (existingEntry.payload?.monthly) {
             const entryMonthly = existingEntry.payload.monthly
-            
-            // 解析 notes 中的參數
+
+            // 載入基本參數（新結構優先，舊結構備用）
             let loadedUnitCapacity = 0
             let loadedCarbonRate = 0
-            
-            if (existingEntry.payload.notes) {
+
+            console.log('📝 [WD40] Loading parameters from payload:', {
+              hasNewStructure: !!(existingEntry.payload.unitCapacity && existingEntry.payload.carbonRate),
+              unitCapacity: existingEntry.payload.unitCapacity,
+              carbonRate: existingEntry.payload.carbonRate,
+              hasNotes: !!existingEntry.payload.notes
+            })
+
+            // 優先使用新結構的資料
+            if (existingEntry.payload.unitCapacity && existingEntry.payload.carbonRate) {
+              loadedUnitCapacity = existingEntry.payload.unitCapacity
+              loadedCarbonRate = existingEntry.payload.carbonRate
+              console.log('✅ [WD40] Using new structure data:', { loadedUnitCapacity, loadedCarbonRate })
+            }
+            // 回退到舊結構（從 notes 解析）
+            else if (existingEntry.payload.notes) {
+              console.log('⚠️ [WD40] Falling back to parsing notes for legacy data')
               const unitCapacityMatch = existingEntry.payload.notes.match(/單位容量: ([\d.]+)/)
               const carbonRateMatch = existingEntry.payload.notes.match(/含碳率: ([\d.]+)/)
-              
+
               if (unitCapacityMatch) {
                 loadedUnitCapacity = parseFloat(unitCapacityMatch[1]) || 0
-                setUnitCapacity(loadedUnitCapacity)
               }
               if (carbonRateMatch) {
                 loadedCarbonRate = parseFloat(carbonRateMatch[1]) || 0
-                setCarbonRate(loadedCarbonRate)
               }
+              console.log('📊 [WD40] Parsed from notes:', { loadedUnitCapacity, loadedCarbonRate })
             }
-            
-            // 恢復各月份的數量資料（使用正確的 unitCapacity 值）
+
+            setUnitCapacity(loadedUnitCapacity)
+            setCarbonRate(loadedCarbonRate)
+
+            // 恢復各月份的數量資料（新結構優先）
             const restoredMonthlyData = monthlyData.map((data, index) => {
               const monthKey = (index + 1).toString()
               const monthUsage = entryMonthly[monthKey] || 0
-              const calculatedQuantity = (monthUsage > 0 && loadedUnitCapacity > 0) ? monthUsage / loadedUnitCapacity : 0
-              
+
+              let quantity = 0
+
+              // 優先使用新結構的瓶數資料
+              if (existingEntry.payload.monthlyQuantity && existingEntry.payload.monthlyQuantity[monthKey]) {
+                quantity = existingEntry.payload.monthlyQuantity[monthKey]
+                console.log(`📅 [WD40] Month ${monthKey}: Using stored quantity ${quantity}`)
+              }
+              // 回退到計算瓶數（舊邏輯）
+              else if (monthUsage > 0 && loadedUnitCapacity > 0) {
+                quantity = monthUsage / loadedUnitCapacity
+                console.log(`📅 [WD40] Month ${monthKey}: Calculated quantity ${quantity} from usage ${monthUsage} / unitCapacity ${loadedUnitCapacity}`)
+              }
+
               return {
                 ...data,
-                quantity: calculatedQuantity,
+                quantity,
                 totalUsage: monthUsage
               }
             })
@@ -200,84 +309,105 @@ const WD40Page = () => {
             // 診斷資料庫內容
             await debugDatabaseContent()
 
-            // 載入已關聯的檔案
-            try {
-              const entryFiles = await getEntryFiles(existingEntry.id)
-              console.log('📁 [WD40] Loaded entry files:', {
-                totalCount: entryFiles.length,
-                files: entryFiles.map(f => ({
+            // 載入檔案：只有非草稿狀態才載入檔案
+            if (shouldLoadFiles) {
+              try {
+                console.log('📁 [WD40Page] Loading files for existing entry:', existingEntry.id)
+
+              // 使用 getEntryFiles 獲取該記錄的所有檔案
+              const allEntryFiles = await getEntryFiles(existingEntry.id)
+
+              console.log('📁 [WD40Page] Raw entry files:', {
+                entryId: existingEntry.id,
+                totalFiles: allEntryFiles.length,
+                fileDetails: allEntryFiles.map(f => ({
                   id: f.id,
                   name: f.file_name,
+                  type: f.file_type,
                   month: f.month,
                   page_key: f.page_key,
                   entry_id: f.entry_id
                 }))
               })
 
-              // 基於資料庫欄位分類檔案（新方法）
-              const msdsEntryFiles = entryFiles.filter(f => !f.month) // month = null 表示 MSDS
-              const monthlyEntryFiles = entryFiles.filter(f => f.month && f.month >= 1 && f.month <= 12)
+              // 分類檔案
+              const msdsFilesFromEntry = allEntryFiles.filter(f =>
+                f.file_type === 'msds' && f.page_key === pageKey
+              )
+              const usageFilesFromEntry = allEntryFiles.filter(f =>
+                f.file_type === 'usage_evidence' && f.page_key === pageKey
+              )
 
-              console.log('📋 [WD40] File classification (database-based):', {
-                msdsCount: msdsEntryFiles.length,
-                monthlyCount: monthlyEntryFiles.length,
-                msdsFiles: msdsEntryFiles.map(f => ({ id: f.id, name: f.file_name, month: f.month })),
-                monthlyFiles: monthlyEntryFiles.map(f => ({ id: f.id, name: f.file_name, month: f.month }))
+              console.log('📁 [WD40Page] File classification:', {
+                msdsCount: msdsFilesFromEntry.length,
+                usageCount: usageFilesFromEntry.length,
+                msdsFileIds: msdsFilesFromEntry.map(f => f.id),
+                usageFileIds: usageFilesFromEntry.map(f => f.id)
               })
 
-              // 設置 MSDS 檔案
-              setMsdsFiles(msdsEntryFiles)
-              console.log('📋 [WD40] Set MSDS files (database-based):', msdsEntryFiles.length)
+              // 設置 MSDS 檔案（加入去重和診斷）
+              const deduplicatedMsdsFiles = deduplicateFilesByID(msdsFilesFromEntry, 'WD40Page-MSDS-Entry')
+              console.log('🔄 [WD40Page] MSDS deduplication result:', {
+                original: msdsFilesFromEntry.length,
+                deduplicated: deduplicatedMsdsFiles.length
+              })
+              setMsdsFiles(deduplicatedMsdsFiles)
 
-              // 分配月份檔案到對應月份
+              // 分配月份檔案（加入診斷）
               const updatedMonthlyData = restoredMonthlyData.map((data, index) => {
-                const month = index + 1
-                const monthFiles = monthlyEntryFiles.filter(file => file.month === month)
+                const monthNumber = index + 1
+                const monthFiles = usageFilesFromEntry.filter(f => f.month === monthNumber)
+                const deduplicatedFiles = deduplicateFilesByID(monthFiles, `WD40Page-Month${monthNumber}-Entry`)
 
-                if (monthFiles.length > 0) {
-                  console.log(`📅 [WD40] Month ${month} assigned ${monthFiles.length} files:`,
-                    monthFiles.map(f => `${f.file_name} (month: ${f.month})`))
-                }
+                console.log(`📅 [WD40Page] Month ${monthNumber} files:`, {
+                  found: monthFiles.length,
+                  deduplicated: deduplicatedFiles.length,
+                  fileIds: deduplicatedFiles.map(f => f.id)
+                })
 
                 return {
                   ...data,
-                  files: monthFiles
+                  files: deduplicatedFiles
                 }
               })
 
-              console.log('📅 [WD40] Monthly file distribution (database-based):',
-                updatedMonthlyData.map((data, i) => `月${i+1}: ${data.files.length}個檔案`).join(', ')
+              console.log('📅 [WD40Page] Final monthly data summary:',
+                updatedMonthlyData.map((data, i) =>
+                  `月${i+1}: ${data.files.length}個檔案`
+                ).join(', ')
               )
+
               setMonthlyData(updatedMonthlyData)
-            } catch (fileError) {
-              console.error('❌ [WD40] Failed to load entry files:', fileError)
-              // 即使檔案載入失敗，也要設置恢復的月份資料
-              setMonthlyData(restoredMonthlyData)
+              } catch (fileError) {
+                console.error('❌ [WD40Page] Failed to load files:', fileError)
+                // 即使檔案載入失敗，也要設置恢復的月份資料
+                setMonthlyData(restoredMonthlyData)
+              }
+            } else {
+              // 草稿狀態：不載入檔案，使用記憶體暫存
+              console.log('📁 [WD40Page] Draft status - using memory files instead of loading existing files')
+              setMsdsFiles([])
+              setMonthlyData(restoredMonthlyData.map(data => ({ ...data, files: [] })))
             }
           }
         } else {
-          // 新記錄處理
-          console.log('📝 [WD40] No existing entry found, creating new record')
+          // 新記錄處理：不載入任何檔案，使用記憶體暫存
+          console.log('📝 [WD40Page] No existing entry found, starting with clean state for memory file usage')
           setExistingEntry(null)
           setHasSubmittedBefore(false)
           setCurrentEntryId(null)
           setInitialStatus('draft' as EntryStatus)
 
-          const initialMsdsFiles = msdsFiles || []
-          setMsdsFiles(initialMsdsFiles)
+          // 保持檔案狀態為空，讓用戶使用記憶體暫存功能
+          setMsdsFiles([])
+          setMonthlyData(Array.from({ length: 12 }, (_, i) => ({
+            month: i + 1,
+            quantity: 0,
+            totalUsage: 0,
+            files: []
+          })))
 
-          // 載入暫存檔案
-          const monthlyFilesArray = await Promise.all(
-            Array.from({ length: 12 }, (_, i) => 
-              listUsageEvidenceFiles(pageKey, i + 1)
-            )
-          )
-
-          const updatedMonthlyData = monthlyData.map((data, index) => ({
-            ...data,
-            files: monthlyFilesArray[index] || []
-          }))
-          setMonthlyData(updatedMonthlyData)
+          console.log('📁 [WD40Page] New record initialized with empty file states for memory file usage')
         }
 
         isInitialLoad.current = false
@@ -308,9 +438,11 @@ const WD40Page = () => {
   useEffect(() => {
     const handleBeforeUnload = (e: BeforeUnloadEvent) => {
       // 檢查是否有填寫資料但未提交
-      const hasData = unitCapacity > 0 || carbonRate > 0 || 
+      const hasData = unitCapacity > 0 || carbonRate > 0 ||
                      monthlyData.some(d => d.quantity > 0) ||
-                     msdsFiles.length > 0
+                     msdsFiles.length > 0 ||
+                     msdsMemoryFiles.length > 0 ||
+                     monthlyMemoryFiles.some(files => files.length > 0)
       
       if (hasData && !hasSubmittedBefore) {
         e.preventDefault()
@@ -340,7 +472,7 @@ const WD40Page = () => {
 
 
   const handleMonthFilesChange = (month: number, files: EvidenceFile[]) => {
-    setMonthlyData(prev => prev.map(data => 
+    setMonthlyData(prev => prev.map(data =>
       data.month === month ? { ...data, files } : data
     ))
   }
@@ -349,14 +481,53 @@ const WD40Page = () => {
     setMsdsFiles(files)
   }
 
+  // 記憶體檔案處理函數
+  const handleMsdsMemoryFilesChange = (files: MemoryFile[]) => {
+    console.log('📁 [WD40Page] MSDS memory files changed:', files.length)
+    setMsdsMemoryFiles(files)
+  }
+
+  const handleMonthMemoryFilesChange = (month: number, files: MemoryFile[]) => {
+    console.log(`📁 [WD40Page] Month ${month} memory files changed:`, files.length)
+    setMonthlyMemoryFiles(prev => {
+      const newFiles = [...prev]
+      newFiles[month - 1] = files
+      return newFiles
+    })
+  }
+
   const getTotalUsage = () => {
     return monthlyData.reduce((sum, data) => sum + data.totalUsage, 0)
   }
 
   const validateData = () => {
     const errors: string[] = []
-    
-    if (msdsFiles.length === 0) {
+
+    console.log('📋 [Validation] Starting validation with current state:', {
+      msdsFiles: msdsFiles.length,
+      msdsMemoryFiles: msdsMemoryFiles.length,
+      monthlyData: monthlyData.map(data => ({
+        month: data.month,
+        quantity: data.quantity,
+        files: data.files.length
+      })),
+      monthlyMemoryFiles: monthlyMemoryFiles.map((files, i) => ({
+        month: i + 1,
+        memoryFiles: files.length
+      })),
+      unitCapacity,
+      carbonRate
+    })
+
+    // MSDS 檢查：已上傳檔案 OR 記憶體檔案
+    const totalMsdsFiles = msdsFiles.length + msdsMemoryFiles.length
+    console.log('📋 [Validation] MSDS files check:', {
+      msdsFiles: msdsFiles.length,
+      msdsMemoryFiles: msdsMemoryFiles.length,
+      total: totalMsdsFiles
+    })
+
+    if (totalMsdsFiles === 0) {
       errors.push('請上傳 MSDS 安全資料表')
     }
 
@@ -368,10 +539,29 @@ const WD40Page = () => {
       errors.push('請輸入含碳率')
     }
 
+    // 月份檔案檢查：已上傳檔案 OR 記憶體檔案
     monthlyData.forEach((data, index) => {
-      if (data.quantity > 0 && data.files.length === 0) {
-        errors.push(`${monthNames[index]}有使用量但未上傳使用證明`)
+      if (data.quantity > 0) {
+        const monthMemoryFiles = monthlyMemoryFiles[index] || []
+        const totalFiles = data.files.length + monthMemoryFiles.length
+
+        console.log(`📋 [Validation] Month ${data.month} files check:`, {
+          quantity: data.quantity,
+          uploadedFiles: data.files.length,
+          memoryFiles: monthMemoryFiles.length,
+          total: totalFiles
+        })
+
+        if (totalFiles === 0) {
+          errors.push(`${monthNames[index]}有使用量但未上傳使用證明`)
+        }
       }
+    })
+
+    console.log('📋 [Validation] Validation completed:', {
+      totalErrors: errors.length,
+      errors: errors,
+      result: errors.length === 0 ? 'PASS' : 'FAIL'
     })
 
     return errors
@@ -413,20 +603,28 @@ const WD40Page = () => {
 
       // 步驟3：準備每月數據
       const monthly: Record<string, number> = {}
+      const monthlyQuantity: Record<string, number> = {}
       monthlyData.forEach(data => {
         if (data.quantity > 0) {
           monthly[data.month.toString()] = data.totalUsage
+          monthlyQuantity[data.month.toString()] = data.quantity
         }
       })
-      console.log('📋 處理後的每月數據:', monthly)
+      console.log('📋 處理後的每月數據:', { monthly, monthlyQuantity })
 
-      // 步驟4：建立填報輸入資料
+      // 步驟4：建立填報輸入資料（使用新的 payload 結構）
       const entryInput: UpsertEntryInput = {
         page_key: pageKey,
         period_year: year,
         unit: 'ML',
         monthly: monthly,
-        notes: `單位容量: ${unitCapacity} ML/瓶, 含碳率: ${carbonRate}%`
+        extraPayload: {
+          unitCapacity,
+          carbonRate,
+          monthly,
+          monthlyQuantity,
+          notes: '' // 純備註，目前為空
+        }
       }
       console.log('📝 準備提交的 entryInput:', entryInput)
 
@@ -440,6 +638,77 @@ const WD40Page = () => {
       // 步驟6：設置 entryId（如果是新建的記錄）
       if (!currentEntryId) {
         setCurrentEntryId(entry_id)
+      }
+
+      // 步驟6.5：批次上傳記憶體檔案
+      console.log('📁 [WD40] Starting memory files upload...')
+      console.log('📁 [WD40] Memory files to upload:', {
+        msdsMemoryFiles: msdsMemoryFiles.length,
+        monthlyMemoryFiles: monthlyMemoryFiles.map((files, i) => ({ month: i + 1, count: files.length }))
+      })
+
+      const uploadedFiles: EvidenceFile[] = []
+
+      try {
+        // 上傳 MSDS 記憶體檔案
+        if (msdsMemoryFiles.length > 0) {
+          console.log(`📁 [WD40] Uploading ${msdsMemoryFiles.length} MSDS memory files...`)
+          for (const memoryFile of msdsMemoryFiles) {
+            const uploadedFile = await uploadEvidenceWithEntry(memoryFile.file, {
+              entryId: entry_id,
+              pageKey,
+              year,
+              category: 'msds'
+            })
+            uploadedFiles.push(uploadedFile)
+            console.log(`✅ [WD40] MSDS file uploaded: ${uploadedFile.file_name}`)
+          }
+        }
+
+        // 上傳月份使用證明記憶體檔案
+        for (let month = 1; month <= 12; month++) {
+          const monthFiles = monthlyMemoryFiles[month - 1] || []
+          if (monthFiles.length > 0) {
+            console.log(`📁 [WD40] Uploading ${monthFiles.length} files for month ${month}...`)
+            for (const memoryFile of monthFiles) {
+              const uploadedFile = await uploadEvidenceWithEntry(memoryFile.file, {
+                entryId: entry_id,
+                pageKey,
+                year,
+                category: 'usage_evidence',
+                month
+              })
+              uploadedFiles.push(uploadedFile)
+              console.log(`✅ [WD40] Month ${month} file uploaded: ${uploadedFile.file_name}`)
+            }
+          }
+        }
+
+        console.log(`✅ [WD40] All memory files uploaded successfully: ${uploadedFiles.length} files`)
+
+        // 清空記憶體檔案
+        setMsdsMemoryFiles([])
+        setMonthlyMemoryFiles(Array.from({ length: 12 }, () => []))
+
+        // 更新檔案狀態
+        const newMsdsFiles = [...msdsFiles, ...uploadedFiles.filter(f => f.file_type === 'msds')]
+        setMsdsFiles(newMsdsFiles)
+
+        // 更新月份檔案
+        const newMonthlyData = monthlyData.map(data => {
+          const monthUploadedFiles = uploadedFiles.filter(f =>
+            f.file_type === 'usage_evidence' && f.month === data.month
+          )
+          return {
+            ...data,
+            files: [...data.files, ...monthUploadedFiles]
+          }
+        })
+        setMonthlyData(newMonthlyData)
+
+      } catch (uploadError) {
+        console.error('❌ [WD40] Memory files upload failed:', uploadError)
+        throw new Error(`檔案上傳失敗: ${uploadError instanceof Error ? uploadError.message : '未知錯誤'}`)
       }
 
       // 步驟7：使用改進的錯誤恢復機制關聯檔案
@@ -617,21 +886,90 @@ const WD40Page = () => {
     }
   }
 
-  const handleClearAll = () => {
-    setUnitCapacity(0)
-    setCarbonRate(0)
-    handleMsdsFilesChange([])
-    setMonthlyData(Array.from({ length: 12 }, (_, i) => ({
-      month: i + 1,
-      quantity: 0,
-      totalUsage: 0,
-      files: []
-    })))
-    
-    setHasSubmittedBefore(false)
-    setError(null)
-    setSuccess(null)
-    setShowClearConfirmModal(false)
+  const handleClearAll = async () => {
+    console.log('🗑️ [WD40Page] ===== CLEAR BUTTON CLICKED =====')
+
+    // 立即設置載入狀態
+    setClearLoading(true)
+
+    try {
+      console.log('🗑️ [WD40Page] Starting complete clear operation...')
+      // 1. 刪除後端檔案
+      const deletionErrors: string[] = []
+
+      // 刪除 MSDS 檔案
+      if (msdsFiles.length > 0) {
+        console.log(`🗑️ [WD40Page] Deleting ${msdsFiles.length} MSDS files from backend...`)
+        for (const file of msdsFiles) {
+          try {
+            await deleteEvidenceFile(file.id)
+            console.log(`✅ [WD40Page] Deleted MSDS file: ${file.file_name}`)
+          } catch (error) {
+            const errorMsg = `刪除 MSDS 檔案 "${file.file_name}" 失敗`
+            console.error(`❌ [WD40Page] ${errorMsg}:`, error)
+            deletionErrors.push(errorMsg)
+          }
+        }
+      }
+
+      // 刪除月份用量佐證檔案
+      for (const monthData of monthlyData) {
+        if (monthData.files.length > 0) {
+          console.log(`🗑️ [WD40Page] Deleting ${monthData.files.length} files for month ${monthData.month}...`)
+          for (const file of monthData.files) {
+            try {
+              await deleteEvidenceFile(file.id)
+              console.log(`✅ [WD40Page] Deleted monthly file: ${file.file_name} (month ${monthData.month})`)
+            } catch (error) {
+              const errorMsg = `刪除 ${monthData.month}月檔案 "${file.file_name}" 失敗`
+              console.error(`❌ [WD40Page] ${errorMsg}:`, error)
+              deletionErrors.push(errorMsg)
+            }
+          }
+        }
+      }
+
+      // 2. 清除前端狀態
+      console.log('🧹 [WD40Page] Clearing frontend states...')
+      setUnitCapacity(0)
+      setCarbonRate(0)
+      handleMsdsFilesChange([])
+      setMsdsMemoryFiles([])
+      setMonthlyMemoryFiles(Array.from({ length: 12 }, () => []))
+      setMonthlyData(Array.from({ length: 12 }, (_, i) => ({
+        month: i + 1,
+        quantity: 0,
+        totalUsage: 0,
+        files: []
+      })))
+
+      setHasSubmittedBefore(false)
+      setError(null)
+      setSuccess(null)
+      setShowClearConfirmModal(false)
+
+      // 3. 顯示結果訊息
+      if (deletionErrors.length > 0) {
+        const errorMessage = `清除完成，但有 ${deletionErrors.length} 個檔案刪除失敗：\n${deletionErrors.join('\n')}`
+        console.warn('⚠️ [WD40Page] Clear completed with errors:', errorMessage)
+        setError(errorMessage)
+      } else {
+        const totalDeleted = msdsFiles.length + monthlyData.reduce((sum, month) => sum + month.files.length, 0)
+        const successMessage = totalDeleted > 0 ?
+          `已成功清除所有資料並刪除 ${totalDeleted} 個檔案` :
+          '已成功清除所有資料'
+        console.log('✅ [WD40Page] Clear completed successfully:', successMessage)
+        setSuccess(successMessage)
+      }
+
+    } catch (error) {
+      console.error('❌ [WD40Page] Clear operation failed:', error)
+      setError('清除操作失敗，請重試')
+      setShowClearConfirmModal(false)
+    } finally {
+      console.log('🗑️ [WD40Page] Clear operation finished, resetting loading state')
+      setClearLoading(false)
+    }
   }
 
   // Loading 狀態
@@ -739,6 +1077,9 @@ const WD40Page = () => {
                 maxFiles={3}
                 kind="msds"
                 disabled={submitting}
+                mode="edit"
+                memoryFiles={msdsMemoryFiles}
+                onMemoryFilesChange={handleMsdsMemoryFilesChange}
               />
             </div>
             
@@ -930,6 +1271,9 @@ const WD40Page = () => {
                       maxFiles={3}
                       kind="usage_evidence"
                       disabled={submitting}
+                      mode="edit"
+                      memoryFiles={monthlyMemoryFiles[data.month - 1] || []}
+                      onMemoryFilesChange={(files) => handleMonthMemoryFilesChange(data.month, files)}
                     />
                   </div>
                 </div>
@@ -1122,7 +1466,7 @@ const WD40Page = () => {
                     className="text-base"
                     style={{ color: designTokens.colors.textSecondary }}
                   >
-                    清除後，這一頁所有資料都會被移除，確定要繼續嗎？
+                    清除後，這一頁所有資料都會被移除，包括已上傳到伺服器的檔案也會被永久刪除。此操作無法復原，確定要繼續嗎？
                   </p>
                 </div>
               </div>
@@ -1139,16 +1483,31 @@ const WD40Page = () => {
                 </button>
                 <button
                   onClick={handleClearAll}
-                  className="px-4 py-2 text-white rounded-lg transition-colors font-medium"
-                  style={{ backgroundColor: designTokens.colors.error }}
+                  disabled={clearLoading}
+                  className="px-4 py-2 text-white rounded-lg transition-colors font-medium flex items-center justify-center"
+                  style={{
+                    backgroundColor: clearLoading ? '#9ca3af' : designTokens.colors.error,
+                    opacity: clearLoading ? 0.7 : 1
+                  }}
                   onMouseEnter={(e) => {
-                    (e.target as HTMLButtonElement).style.backgroundColor = '#dc2626';
+                    if (!clearLoading) {
+                      (e.target as HTMLButtonElement).style.backgroundColor = '#dc2626';
+                    }
                   }}
                   onMouseLeave={(e) => {
-                    (e.target as HTMLButtonElement).style.backgroundColor = designTokens.colors.error;
+                    if (!clearLoading) {
+                      (e.target as HTMLButtonElement).style.backgroundColor = designTokens.colors.error;
+                    }
                   }}
                 >
-                  確定清除
+                  {clearLoading ? (
+                    <>
+                      <Loader2 className="w-4 h-4 animate-spin mr-2" />
+                      清除中...
+                    </>
+                  ) : (
+                    '確定清除'
+                  )}
                 </button>
               </div>
             </div>

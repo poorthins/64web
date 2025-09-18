@@ -130,7 +130,9 @@
       "Bash(git checkout:*)",
       "Bash(kill:*)",
       "Bash(node:*)",
-      "Bash(awk:*)"
+      "Bash(awk:*)",
+      "Bash(timeout 10 npm run dev)",
+      "Bash(taskkill:*)"
     ],
     "deny": [],
     "ask": []

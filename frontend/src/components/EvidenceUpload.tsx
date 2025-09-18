@@ -1,8 +1,43 @@
 import { useState, useRef, useEffect } from 'react'
-import { Upload, X, File, AlertCircle, CheckCircle, FileText, Trash2 } from 'lucide-react'
+import { Upload, X, File, AlertCircle, CheckCircle, FileText, Trash2, Eye, FileSpreadsheet } from 'lucide-react'
 import { uploadEvidence, uploadEvidenceSimple, deleteEvidence, deleteEvidenceFile, getFileUrl, EvidenceFile, listMSDSFiles, listUsageEvidenceFiles, getCategoryFromPageKey } from '../api/files'
+import FilePreview from './FilePreview'
+
+// 檔案去重工具函數
+function deduplicateFilesByID(files: EvidenceFile[], context: string = ''): EvidenceFile[] {
+  const deduplicated = Array.from(
+    new Map(files.map(file => [file.id, file])).values()
+  )
+
+  if (files.length !== deduplicated.length) {
+    const duplicateIds = files
+      .filter((file, index, array) =>
+        array.findIndex(f => f.id === file.id) !== index
+      )
+      .map(f => f.id)
+
+    console.log(`🔄 [${context}] File deduplication:`, {
+      original_count: files.length,
+      deduplicated_count: deduplicated.length,
+      removed_duplicates: files.length - deduplicated.length,
+      duplicate_ids: [...new Set(duplicateIds)]
+    })
+  }
+
+  return deduplicated
+}
 
 export type EntryStatus = 'submitted' | 'approved' | 'rejected'
+
+// 檔案暫存類型 - 用於記憶體暫存的檔案
+export interface MemoryFile {
+  id: string
+  file: File
+  preview: string
+  file_name: string
+  file_size: number
+  mime_type: string
+}
 
 interface EvidenceUploadProps {
   pageKey: string
@@ -12,8 +47,13 @@ interface EvidenceUploadProps {
   disabled?: boolean
   maxFiles?: number
   className?: string
-  kind?: 'usage_evidence' | 'msds' | 'unit_weight' | 'other' | 'heat_value_evidence'
+  kind?: 'usage_evidence' | 'msds' | 'unit_weight' | 'other' | 'heat_value_evidence' | 'annual_evidence'
   currentStatus?: EntryStatus
+  // 新增記憶體暫存模式
+  mode?: 'edit' | 'view'
+  memoryFiles?: MemoryFile[]
+  onMemoryFilesChange?: (files: MemoryFile[]) => void
+  hideFileCount?: boolean  // 隱藏檔案數量顯示
 }
 
 // 輔助函數：判斷當前狀態是否允許上傳檔案
@@ -37,7 +77,11 @@ const EvidenceUpload: React.FC<EvidenceUploadProps> = ({
   maxFiles = 5,
   className = '',
   kind = 'usage_evidence',
-  currentStatus
+  currentStatus,
+  mode = 'view',
+  memoryFiles = [],
+  onMemoryFilesChange,
+  hideFileCount = false
 }) => {
   const [uploading, setUploading] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -46,6 +90,8 @@ const EvidenceUpload: React.FC<EvidenceUploadProps> = ({
   const [isDragging, setIsDragging] = useState(false)
   const [showDeleteConfirm, setShowDeleteConfirm] = useState<string | null>(null)
   const [deletingFileId, setDeletingFileId] = useState<string | null>(null)
+  const [previewFile, setPreviewFile] = useState<EvidenceFile | MemoryFile | null>(null)
+  const [showPreview, setShowPreview] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const lastUploadTimeRef = useRef<number>(0) // 追蹤最後一次上傳時間
   const uploadingRef = useRef(false) // 雙重上傳鎖，避免 closure 問題
@@ -57,25 +103,29 @@ const EvidenceUpload: React.FC<EvidenceUploadProps> = ({
   const handleFileSelect = async (selectedFiles: FileList | null) => {
     if (!selectedFiles || selectedFiles.length === 0) return
 
+    // 計算總檔案數（已上傳 + 記憶體暫存）
+    const totalCurrentFiles = files.length + memoryFiles.length
+
     // 檢查當前檔案數是否已達上限
-    if (files.length >= maxFiles) {
+    if (totalCurrentFiles >= maxFiles) {
       setError(`已達到最大檔案數量限制 (${maxFiles} 個)，請先刪除一些檔案後再上傳`)
       return
     }
 
     // 檢查上傳後總檔案數是否會超過限制
-    if (files.length + selectedFiles.length > maxFiles) {
-      const remainingSlots = maxFiles - files.length
-      setError(`最多只能上傳 ${maxFiles} 個檔案，目前已有 ${files.length} 個檔案，還可以上傳 ${remainingSlots} 個檔案`)
+    if (totalCurrentFiles + selectedFiles.length > maxFiles) {
+      const remainingSlots = maxFiles - totalCurrentFiles
+      setError(`最多只能上傳 ${maxFiles} 個檔案，目前已有 ${totalCurrentFiles} 個檔案，還可以上傳 ${remainingSlots} 個檔案`)
       return
     }
 
-    // 檔案重複檢查
+    // 檔案重複檢查（包含已上傳檔案和記憶體暫存檔案）
     const duplicateFiles: string[] = []
-    const existingFingerprints = new Set(
-      files.map(f => `${f.file_name}-${f.file_size}`)
-    )
-    
+    const existingFingerprints = new Set([
+      ...files.map(f => `${f.file_name}-${f.file_size}`),
+      ...memoryFiles.map(f => `${f.file_name}-${f.file_size}`)
+    ])
+
     Array.from(selectedFiles).forEach(newFile => {
       const fingerprint = `${newFile.name}-${newFile.size}`
       if (existingFingerprints.has(fingerprint)) {
@@ -96,7 +146,59 @@ const EvidenceUpload: React.FC<EvidenceUploadProps> = ({
     setError(null)
     setIsDragging(false)
 
-    // 直接上傳邏輯
+    // 根據模式處理檔案
+    if (mode === 'edit' && onMemoryFilesChange) {
+      // 編輯模式：將檔案暫存到記憶體
+      await handleMemoryFileAdd(selectedFiles)
+    } else {
+      // 檢視模式：直接上傳檔案
+      await handleDirectUpload(selectedFiles)
+    }
+  }
+
+  // 記憶體暫存檔案處理
+  const handleMemoryFileAdd = async (selectedFiles: FileList) => {
+    if (!onMemoryFilesChange) return
+
+    try {
+      const newMemoryFiles: MemoryFile[] = []
+
+      for (const file of Array.from(selectedFiles)) {
+        // 生成預覽URL
+        let preview = ''
+        if (file.type.startsWith('image/')) {
+          preview = URL.createObjectURL(file)
+        }
+
+        const memoryFile: MemoryFile = {
+          id: `memory-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+          file,
+          preview,
+          file_name: file.name,
+          file_size: file.size,
+          mime_type: file.type
+        }
+
+        newMemoryFiles.push(memoryFile)
+      }
+
+      // 更新記憶體檔案清單
+      onMemoryFilesChange([...memoryFiles, ...newMemoryFiles])
+
+      const message = `已暫存 ${selectedFiles.length} 個檔案到記憶體`
+      setSuccessMessage(message)
+      setTimeout(() => setSuccessMessage(null), 3000)
+
+    } catch (error) {
+      console.error('Memory file add error:', error)
+      setError('暫存檔案到記憶體時發生錯誤')
+    }
+  }
+
+  // 直接上傳處理
+  const handleDirectUpload = async (selectedFiles: FileList) => {
+
+    // 檢查是否正在上傳
     if (uploadingRef.current || uploading) {
       console.log('上傳中，忽略新請求')
       return
@@ -115,7 +217,10 @@ const EvidenceUpload: React.FC<EvidenceUploadProps> = ({
 
     try {
       const uploadPromises = Array.from(selectedFiles).map(async (file) => {
-        const category = kind === 'msds' ? 'msds' : kind === 'heat_value_evidence' ? 'heat_value_evidence' : 'usage_evidence'
+        const category = kind === 'msds' ? 'msds' :
+                        kind === 'heat_value_evidence' ? 'heat_value_evidence' :
+                        kind === 'annual_evidence' ? 'annual_evidence' :
+                        kind === 'other' ? 'other' : 'usage_evidence'
         return await uploadEvidence(file, {
           pageKey,
           year: new Date().getFullYear(),
@@ -138,8 +243,21 @@ const EvidenceUpload: React.FC<EvidenceUploadProps> = ({
       } else {
         updatedFilesList = []
       }
-      
-      onFilesChange(updatedFilesList)
+
+      // 去重處理
+      const deduplicatedFiles = deduplicateFilesByID(
+        updatedFilesList,
+        `EvidenceUpload-${kind}-${month || 'nomonth'}`
+      )
+
+      console.log('🔄 [EvidenceUpload] Post-upload file update:', {
+        kind: kind,
+        month: month,
+        original_query_count: updatedFilesList.length,
+        final_deduplicated_count: deduplicatedFiles.length
+      })
+
+      onFilesChange(deduplicatedFiles)
 
       const message = `成功上傳 ${selectedFiles.length} 個檔案`
       setSuccessMessage(message)
@@ -153,11 +271,11 @@ const EvidenceUpload: React.FC<EvidenceUploadProps> = ({
     } catch (error) {
       console.error('Upload error:', error)
       let errorMessage = error instanceof Error ? error.message : '上傳失敗'
-      
+
       if (errorMessage.includes('401') || errorMessage.includes('403')) {
         errorMessage = '請重新登入或檢查權限'
       }
-      
+
       setError(errorMessage)
     } finally {
       uploadingRef.current = false
@@ -200,10 +318,35 @@ const EvidenceUpload: React.FC<EvidenceUploadProps> = ({
     }
   }
 
+  // 移除記憶體檔案
+  const handleMemoryFileRemove = (fileId: string) => {
+    if (!onMemoryFilesChange) return
+
+    const memoryFile = memoryFiles.find(f => f.id === fileId)
+    if (memoryFile && memoryFile.preview) {
+      // 清理預覽URL
+      URL.revokeObjectURL(memoryFile.preview)
+    }
+
+    // 從記憶體檔案清單中移除
+    onMemoryFilesChange(memoryFiles.filter(f => f.id !== fileId))
+
+    setSuccessMessage('檔案已從暫存中移除')
+    setTimeout(() => setSuccessMessage(null), 3000)
+  }
+
   const handleRemoveFile = async (fileId: string) => {
+    // 檢查是否為記憶體檔案
+    const isMemoryFile = memoryFiles.some(f => f.id === fileId)
+
+    if (isMemoryFile) {
+      handleMemoryFileRemove(fileId)
+      return
+    }
+
     setDeletingFileId(fileId)
 
-    // 刪除邏輯
+    // 刪除已上傳檔案的邏輯
     try {
       const file = files.find(f => f.id === fileId)
       if (!file) {
@@ -211,7 +354,7 @@ const EvidenceUpload: React.FC<EvidenceUploadProps> = ({
       }
 
       const isAssociatedFile = file.entry_id && file.entry_id !== ''
-      
+
       if (isAssociatedFile) {
         await deleteEvidenceFile(file.id)
       } else {
@@ -234,11 +377,11 @@ const EvidenceUpload: React.FC<EvidenceUploadProps> = ({
     } catch (error) {
       console.error('Delete error:', error)
       let errorMessage = error instanceof Error ? error.message : '刪除失敗'
-      
+
       if (errorMessage.includes('401') || errorMessage.includes('403')) {
         errorMessage = '請重新登入或檢查權限'
       }
-      
+
       setError(errorMessage)
     } finally {
       setDeletingFileId(null)
@@ -251,6 +394,17 @@ const EvidenceUpload: React.FC<EvidenceUploadProps> = ({
   
   const cancelDelete = () => {
     setShowDeleteConfirm(null)
+  }
+
+  // 預覽功能
+  const handlePreviewFile = (file: EvidenceFile | MemoryFile) => {
+    setPreviewFile(file)
+    setShowPreview(true)
+  }
+
+  const closePreview = () => {
+    setShowPreview(false)
+    setPreviewFile(null)
   }
 
   const generateThumbnail = async (file: EvidenceFile) => {
@@ -281,6 +435,31 @@ const EvidenceUpload: React.FC<EvidenceUploadProps> = ({
     return `${truncatedName}.${extension}`
   }
 
+  // 渲染記憶體檔案預覽
+  const renderMemoryFilePreview = (memoryFile: MemoryFile) => {
+    if (memoryFile.mime_type.startsWith('image/') && memoryFile.preview) {
+      return (
+        <img
+          src={memoryFile.preview}
+          alt={memoryFile.file_name}
+          className="w-10 h-10 object-cover rounded border"
+          onError={() => {
+            console.warn('Memory file preview failed to load:', memoryFile.file_name)
+          }}
+        />
+      )
+    } else if (memoryFile.mime_type === 'application/pdf') {
+      return <FileText className="w-10 h-10 text-red-500 p-2 bg-red-50 rounded" />
+    } else if (memoryFile.mime_type?.includes('spreadsheet') ||
+               memoryFile.mime_type?.includes('excel') ||
+               memoryFile.file_name?.toLowerCase().endsWith('.xlsx') ||
+               memoryFile.file_name?.toLowerCase().endsWith('.xls')) {
+      return <FileSpreadsheet className="w-10 h-10 text-green-500 p-2 bg-green-50 rounded" />
+    } else {
+      return <File className="w-10 h-10 text-gray-500 p-2 bg-gray-50 rounded" />
+    }
+  }
+
   const renderFilePreview = (file: EvidenceFile) => {
     if (file.mime_type.startsWith('image/')) {
       const thumbnailUrl = thumbnails[file.id]
@@ -305,6 +484,11 @@ const EvidenceUpload: React.FC<EvidenceUploadProps> = ({
       }
     } else if (file.mime_type === 'application/pdf') {
       return <FileText className="w-10 h-10 text-red-500 p-2 bg-red-50 rounded" />
+    } else if (file.mime_type?.includes('spreadsheet') ||
+               file.mime_type?.includes('excel') ||
+               file.file_name?.toLowerCase().endsWith('.xlsx') ||
+               file.file_name?.toLowerCase().endsWith('.xls')) {
+      return <FileSpreadsheet className="w-10 h-10 text-green-500 p-2 bg-green-50 rounded" />
     } else {
       return <File className="w-10 h-10 text-gray-500 p-2 bg-gray-50 rounded" />
     }
@@ -319,20 +503,33 @@ const EvidenceUpload: React.FC<EvidenceUploadProps> = ({
     })
   }, [files]) // 添加依賴，當 files 變更時重新生成縮圖
 
+  // 清理記憶體檔案的預覽URL，防止記憶體洩漏
+  useEffect(() => {
+    return () => {
+      memoryFiles.forEach(memoryFile => {
+        if (memoryFile.preview) {
+          URL.revokeObjectURL(memoryFile.preview)
+        }
+      })
+    }
+  }, [memoryFiles])
+
   // 檢查是否已達到檔案上限和狀態限制
-  const isAtMaxCapacity = files.length >= maxFiles
+  const totalFiles = files.length + memoryFiles.length
+  const isAtMaxCapacity = totalFiles >= maxFiles
   const isUploadDisabled = disabled || uploading || isAtMaxCapacity || isStatusUploadDisabled
 
   return (
-    <div className={`space-y-3 ${className}`}>
+    <div className={`relative space-y-3 ${className}`}>
       {/* 上傳區域 */}
       <div
         className={`
-          relative border-2 border-dashed rounded-lg p-4 text-center transition-all duration-200
+          min-h-[120px] border-2 border-dashed rounded-lg text-center transition-all duration-200
+          flex flex-col items-center justify-center py-6 px-4
           ${isUploadDisabled
             ? 'border-gray-200 bg-gray-50 cursor-not-allowed'
             : isDragging
-            ? 'border-blue-500 bg-blue-50 scale-105 shadow-lg'
+            ? 'border-blue-500 bg-blue-50 scale-[1.02] shadow-lg'
             : 'border-gray-300 hover:border-blue-400 hover:bg-blue-50 cursor-pointer'
           }
         `}
@@ -353,7 +550,7 @@ const EvidenceUpload: React.FC<EvidenceUploadProps> = ({
           ref={fileInputRef}
           type="file"
           multiple
-          accept="image/*,application/pdf"
+          accept="image/*,application/pdf,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel"
           onChange={(e) => {
             // 事件處理器中再次檢查狀態
             if (!uploading && e.target.files) {
@@ -370,27 +567,31 @@ const EvidenceUpload: React.FC<EvidenceUploadProps> = ({
             <span className="text-sm text-gray-600">上傳中...</span>
           </div>
         ) : (
-          <div className="flex flex-col items-center space-y-2">
+          <>
             <Upload className={`h-6 w-6 transition-all ${
-              disabled ? 'text-gray-400' : 
+              disabled ? 'text-gray-400' :
               isDragging ? 'text-blue-600 scale-125' : 'text-gray-500'
             }`} />
-            <div className="text-sm">
+            <div className="text-sm mt-2">
               <span className={disabled || isStatusUploadDisabled ? 'text-gray-400' : isDragging ? 'text-blue-700 font-semibold' : 'text-blue-600 font-medium'}>
-                {isStatusUploadDisabled 
+                {isStatusUploadDisabled
                   ? `${currentStatus === 'submitted' ? '已提交' : currentStatus === 'approved' ? '已核准' : ''}狀態下無法上傳檔案`
-                  : isDragging ? '拖放檔案到這裡' : '點擊或拖放檔案上傳'
+                  : isDragging
+                    ? '拖放檔案到這裡'
+                    : mode === 'edit'
+                      ? '點擊或拖放檔案暫存'
+                      : '點擊或拖放檔案上傳'
                 }
               </span>
               {!isStatusUploadDisabled && (
                 <p className={`text-xs mt-1 transition-colors ${
                   isDragging ? 'text-blue-600' : 'text-gray-500'
                 }`}>
-                  支援 JPG、PNG、WebP、HEIC、PDF 檔案，最大 10MB
+                  支援 JPG、PNG、WebP、HEIC、PDF、Excel 檔案，最大 10MB
                 </p>
               )}
             </div>
-          </div>
+          </>
         )}
       </div>
 
@@ -423,28 +624,42 @@ const EvidenceUpload: React.FC<EvidenceUploadProps> = ({
       )}
 
       {/* 檔案清單 */}
-      {files.length > 0 && (
+      {(files.length > 0 || memoryFiles.length > 0) && (
         <div className="space-y-2">
-          <div className="text-sm font-medium text-gray-700">
-            已上傳檔案 ({files.length}/{maxFiles})
-          </div>
-          
+          {!hideFileCount && (
+            <div className="text-sm font-medium text-gray-700">
+              檔案列表 ({totalFiles}/{maxFiles})
+              {mode === 'edit' && memoryFiles.length > 0 && (
+                <span className="ml-2 text-xs text-orange-600">(含 {memoryFiles.length} 個暫存檔案)</span>
+              )}
+            </div>
+          )}
+
+          {/* 已上傳檔案 */}
           {files.map((file, index) => (
             <div
-              key={`${file.id}-${index}`}
+              key={`uploaded-${file.id}-${index}`}
               className={`flex items-center justify-between p-3 rounded-lg transition-all ${
-                file.entry_id 
-                  ? 'bg-blue-50 border border-blue-200' 
+                file.entry_id
+                  ? 'bg-blue-50 border border-blue-200'
                   : 'bg-gray-50 border border-gray-200'
               }`}
             >
               <div className="flex items-center space-x-3 flex-1 min-w-0">
-                {renderFilePreview(file)}
+                <div
+                  className="cursor-pointer hover:opacity-75 transition-opacity"
+                  onClick={() => handlePreviewFile(file)}
+                  title="點擊預覽檔案"
+                >
+                  {renderFilePreview(file)}
+                </div>
                 <div className="flex-1 min-w-0">
                   <div className="text-sm font-medium text-gray-900" title={file.file_name}>
                     {truncateFileName(file.file_name)}
-                    {file.entry_id && (
+                    {file.entry_id ? (
                       <span className="ml-2 text-xs text-blue-600">(已提交)</span>
+                    ) : (
+                      <span className="ml-2 text-xs text-green-600">(已上傳)</span>
                     )}
                   </div>
                   <div className="text-xs text-gray-500">
@@ -452,29 +667,88 @@ const EvidenceUpload: React.FC<EvidenceUploadProps> = ({
                   </div>
                 </div>
               </div>
-              
-              <button
-                onClick={() => confirmDelete(file.id)}
-                disabled={deletingFileId === file.id || isStatusDeleteDisabled}
-                className="ml-3 flex items-center space-x-1 px-2 py-1 text-xs font-medium rounded border border-red-600 text-red-600 hover:bg-red-600 hover:text-white transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                title={isStatusDeleteDisabled ? "當前狀態下無法刪除檔案" : "刪除檔案"}
-              >
-                {deletingFileId === file.id ? (
-                  <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-red-600"></div>
-                ) : (
+
+              <div className="flex items-center space-x-2">
+                <button
+                  onClick={() => handlePreviewFile(file)}
+                  className="flex items-center space-x-1 px-2 py-1 text-xs font-medium rounded border border-blue-600 text-blue-600 hover:bg-blue-600 hover:text-white transition-colors"
+                  title="預覽檔案"
+                >
+                  <Eye className="h-3 w-3" />
+                  <span>預覽</span>
+                </button>
+                <button
+                  onClick={() => confirmDelete(file.id)}
+                  disabled={deletingFileId === file.id || isStatusDeleteDisabled}
+                  className="flex items-center space-x-1 px-2 py-1 text-xs font-medium rounded border border-red-600 text-red-600 hover:bg-red-600 hover:text-white transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                  title={isStatusDeleteDisabled ? "當前狀態下無法刪除檔案" : "刪除檔案"}
+                >
+                  {deletingFileId === file.id ? (
+                    <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-red-600"></div>
+                  ) : (
+                    <Trash2 className="h-3 w-3" />
+                  )}
+                  <span>{deletingFileId === file.id ? '刪除中' : '刪除'}</span>
+                </button>
+              </div>
+            </div>
+          ))}
+
+          {/* 記憶體暫存檔案 */}
+          {memoryFiles.map((memoryFile, index) => (
+            <div
+              key={`memory-${memoryFile.id}-${index}`}
+              className="flex items-center justify-between p-3 rounded-lg transition-all bg-orange-50 border border-orange-200"
+            >
+              <div className="flex items-center space-x-3 flex-1 min-w-0">
+                <div
+                  className="cursor-pointer hover:opacity-75 transition-opacity"
+                  onClick={() => handlePreviewFile(memoryFile)}
+                  title="點擊預覽檔案"
+                >
+                  {renderMemoryFilePreview(memoryFile)}
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="text-sm font-medium text-gray-900" title={memoryFile.file_name}>
+                    {truncateFileName(memoryFile.file_name)}
+                    <span className="ml-2 text-xs text-orange-600">(暫存中)</span>
+                  </div>
+                  <div className="text-xs text-gray-500">
+                    {formatFileSize(memoryFile.file_size)}
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex items-center space-x-2">
+                <button
+                  onClick={() => handlePreviewFile(memoryFile)}
+                  className="flex items-center space-x-1 px-2 py-1 text-xs font-medium rounded border border-blue-600 text-blue-600 hover:bg-blue-600 hover:text-white transition-colors"
+                  title="預覽檔案"
+                >
+                  <Eye className="h-3 w-3" />
+                  <span>預覽</span>
+                </button>
+                <button
+                  onClick={() => handleRemoveFile(memoryFile.id)}
+                  className="flex items-center space-x-1 px-2 py-1 text-xs font-medium rounded border border-orange-600 text-orange-600 hover:bg-orange-600 hover:text-white transition-colors"
+                  title="從暫存中移除"
+                >
                   <Trash2 className="h-3 w-3" />
-                )}
-                <span>{deletingFileId === file.id ? '刪除中' : '刪除'}</span>
-              </button>
+                  <span>移除</span>
+                </button>
+              </div>
             </div>
           ))}
         </div>
       )}
 
       {/* 檔案數量提示和狀態提示 */}
-      {files.length >= maxFiles && (
+      {!hideFileCount && totalFiles >= maxFiles && (
         <div className="text-xs text-amber-600 bg-amber-50 border border-amber-200 rounded p-2">
           已達到最大檔案數量限制 ({maxFiles} 個)
+          {mode === 'edit' && memoryFiles.length > 0 && (
+            <span className="block mt-1">請提交後才會正式上傳暫存檔案</span>
+          )}
         </div>
       )}
       
@@ -538,6 +812,13 @@ const EvidenceUpload: React.FC<EvidenceUploadProps> = ({
           </div>
         </div>
       )}
+
+      {/* 檔案預覽模態框 */}
+      <FilePreview
+        file={previewFile}
+        isOpen={showPreview}
+        onClose={closePreview}
+      />
     </div>
   )
 }

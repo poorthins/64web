@@ -1,14 +1,14 @@
 import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Upload, AlertCircle, CheckCircle, Loader2, X, Trash2 } from 'lucide-react'
-import EvidenceUpload from '../../components/EvidenceUpload'
+import EvidenceUpload, { MemoryFile } from '../../components/EvidenceUpload'
 import StatusSwitcher, { EntryStatus, canEdit, canUploadFiles, getButtonText } from '../../components/StatusSwitcher'
 import StatusIndicator from '../../components/StatusIndicator'
 import Toast, { ToastType } from '../../components/Toast'
 import BottomActionBar from '../../components/BottomActionBar'
 import { useEditPermissions } from '../../hooks/useEditPermissions'
 import { useFrontendStatus } from '../../hooks/useFrontendStatus'
-import { listMSDSFiles, listUsageEvidenceFiles, commitEvidence, deleteEvidence, EvidenceFile } from '../../api/files'
+import { listMSDSFiles, listUsageEvidenceFiles, commitEvidence, deleteEvidence, EvidenceFile, uploadEvidenceWithEntry } from '../../api/files'
 import { upsertEnergyEntry, sumMonthly, UpsertEntryInput, updateEntryStatus, getEntryByPageKeyAndYear } from '../../api/entries'
 import { getEntryFiles } from '../../api/files'
 import { supabase } from '../../lib/supabaseClient'
@@ -21,11 +21,44 @@ interface MonthData {
   quantity: number      // 使用數量 (支)
   totalWeight: number   // 總重量 (KG)
   files: EvidenceFile[]
+  memoryFiles: MemoryFile[]
+}
+
+const createInitialMonthlyData = (): MonthData[] => {
+  return Array.from({ length: 12 }, (_, i) => ({
+    month: i + 1,
+    quantity: 0,
+    totalWeight: 0,
+    files: [],
+    memoryFiles: []
+  }))
+}
+
+const loadMSDSFiles = async (pageKey: string) => {
+  return await listMSDSFiles(pageKey)
+}
+
+const loadExistingEntry = async (pageKey: string, year: number) => {
+  const existingEntry = await getEntryByPageKeyAndYear(pageKey, year)
+  return existingEntry
+}
+
+const loadMonthlyFiles = async (existingEntry: any) => {
+  if (!existingEntry?.id) return createInitialMonthlyData()
+
+  const files = await getEntryFiles(existingEntry.id)
+  const monthlyFiles = files.filter(f => f.month && f.file_type === 'usage_evidence')
+
+  return createInitialMonthlyData().map(data => ({
+    ...data,
+    files: monthlyFiles.filter(f => f.month === data.month) as EvidenceFile[]
+  }))
 }
 
 const WeldingRodPage = () => {
   const navigate = useNavigate()
   const [loading, setLoading] = useState(true)
+  const [clearLoading, setClearLoading] = useState(false)
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [success, setSuccess] = useState<string | null>(null)
@@ -34,7 +67,6 @@ const WeldingRodPage = () => {
   const [showClearConfirmModal, setShowClearConfirmModal] = useState(false)
   const [currentEntryId, setCurrentEntryId] = useState<string | null>(null)
   const [initialStatus, setInitialStatus] = useState<EntryStatus>('submitted')
-  const [currentStatus, setCurrentStatus] = useState<EntryStatus | null>(null)
   const [hasChanges, setHasChanges] = useState(false)
   const [toast, setToast] = useState<{ message: string; type: ToastType } | null>(null)
   
@@ -59,19 +91,13 @@ const WeldingRodPage = () => {
   const [unitWeight, setUnitWeight] = useState<number>(0)     // 單位重量 (KG/支)
   const [carbonContent, setCarbonContent] = useState<number>(0) // 含碳率 (%)
   const [msdsFiles, setMsdsFiles] = useState<EvidenceFile[]>([])
-  const [monthlyData, setMonthlyData] = useState<MonthData[]>(
-    Array.from({ length: 12 }, (_, i) => ({
-      month: i + 1,
-      quantity: 0,
-      totalWeight: 0,
-      files: [] as EvidenceFile[]
-    }))
-  )
+  const [msdsMemoryFiles, setMsdsMemoryFiles] = useState<MemoryFile[]>([])
+  const [monthlyData, setMonthlyData] = useState<MonthData[]>(createInitialMonthlyData())
 
   const pageKey = 'welding_rod'
   
   // 編輯權限控制
-  const editPermissions = useEditPermissions(frontendCurrentStatus || currentStatus || 'submitted')
+  const editPermissions = useEditPermissions(frontendCurrentStatus || 'submitted')
 
   const monthNames = [
     '1月', '2月', '3月', '4月', '5月', '6月',
@@ -86,46 +112,38 @@ const WeldingRodPage = () => {
         setError(null)
 
         // 讀取「檢驗報告（原 MSDS）」檔案清單
-        const msdsFilesList = await listMSDSFiles(pageKey)
+        const msdsFilesList = await loadMSDSFiles(pageKey)
         setMsdsFiles(msdsFilesList)
 
         // 檢查是否已有非草稿記錄
-        const existingEntry = await getEntryByPageKeyAndYear(pageKey, year)
+        const existingEntry = await loadExistingEntry(pageKey, year)
         if (existingEntry && existingEntry.status !== 'draft') {
           setInitialStatus(existingEntry.status as EntryStatus)
-          setCurrentStatus(existingEntry.status as EntryStatus)
           setCurrentEntryId(existingEntry.id)
           setHasSubmittedBefore(true)
-          
+
           // 載入已提交記錄的表單數據
           if (existingEntry.payload?.monthly) {
-            const entryMonthly = existingEntry.payload.monthly
             const entryUnitWeight = existingEntry.payload.notes?.match(/單位重量: ([\d.]+)/)?.[1]
             const entryCarbonContent = existingEntry.payload.notes?.match(/含碳率: ([\d.]+)/)?.[1]
-            
+
             if (entryUnitWeight) setUnitWeight(parseFloat(entryUnitWeight))
             if (entryCarbonContent) setCarbonContent(parseFloat(entryCarbonContent))
           }
         }
 
         // 載入各月份使用證明檔案
-        let monthlyDataWithFiles = monthlyData.map(data => ({ ...data, files: [] as EvidenceFile[] }))
-        
-        if (existingEntry && existingEntry.id) {
-          try {
-            const files = await getEntryFiles(existingEntry.id)
-            const monthlyFiles = files.filter(f => f.month && f.kind === 'usage_evidence')
-            monthlyDataWithFiles = monthlyDataWithFiles.map(data => ({
-              ...data,
-              files: monthlyFiles.filter(f => f.month === data.month) as EvidenceFile[]
-            }))
+        try {
+          const monthlyDataWithFiles = await loadMonthlyFiles(existingEntry)
+          setMonthlyData(monthlyDataWithFiles)
+          if (existingEntry?.id) {
             handleDataChanged()
-          } catch (fileError) {
-            console.error('Failed to load files for welding rod records:', fileError)
           }
+        } catch (fileError) {
+          console.error('Failed to load files for welding rod records:', fileError)
+          setMonthlyData(createInitialMonthlyData())
         }
-        
-        setMonthlyData(monthlyDataWithFiles)
+
         isInitialLoad.current = false
       } catch (error) {
         console.error('Error loading data:', error)
@@ -180,6 +198,12 @@ const WeldingRodPage = () => {
     setMsdsFiles(files)
   }
 
+  const handleMonthMemoryFilesChange = (month: number, memFiles: MemoryFile[]) => {
+    setMonthlyData(prev => prev.map(data =>
+      data.month === month ? { ...data, memoryFiles: memFiles } : data
+    ))
+  }
+
   const getTotalWeight = () => {
     return monthlyData.reduce((sum, data) => sum + data.totalWeight, 0)
   }
@@ -190,8 +214,10 @@ const WeldingRodPage = () => {
 
   const validateData = () => {
     const errors: string[] = []
-    
-    if (msdsFiles.length === 0) {
+
+    // MSDS 檢查：已上傳檔案 OR 記憶體檔案
+    const totalMsdsFiles = msdsFiles.length + msdsMemoryFiles.length
+    if (totalMsdsFiles === 0) {
       errors.push('請上傳銲條檢驗報告')
     }
 
@@ -204,8 +230,11 @@ const WeldingRodPage = () => {
     }
 
     monthlyData.forEach((data, index) => {
-      if (data.quantity > 0 && data.files.length === 0) {
-        errors.push(`${monthNames[index]}有使用量但未上傳使用證明`)
+      if (data.quantity > 0) {
+        const totalFiles = data.files.length + (data.memoryFiles ? data.memoryFiles.length : 0)
+        if (totalFiles === 0) {
+          errors.push(`${monthNames[index]}有使用量但未上傳使用證明`)
+        }
       }
     })
 
@@ -264,7 +293,33 @@ const WeldingRodPage = () => {
         setCurrentEntryId(entry_id)
       }
 
-      // 步驟6：提交所有檔案
+      // 步驟6：上傳記憶體檔案
+      // 上傳銲條檢驗報告
+      for (const memFile of msdsMemoryFiles) {
+        await uploadEvidenceWithEntry(memFile.file, {
+          entryId: entry_id,
+          pageKey: pageKey,
+          year: year,
+          category: 'msds'
+        })
+      }
+
+      // 上傳各月份使用證明
+      for (const monthData of monthlyData) {
+        if (monthData.memoryFiles && monthData.memoryFiles.length > 0) {
+          for (const memFile of monthData.memoryFiles) {
+            await uploadEvidenceWithEntry(memFile.file, {
+              entryId: entry_id,
+              pageKey: pageKey,
+              year: year,
+              category: 'usage_evidence',
+              month: monthData.month
+            })
+          }
+        }
+      }
+
+      // 步驟7：提交所有檔案
       await debugRLSOperation(
         '提交證明檔案',
         async () => await commitEvidence({
@@ -273,9 +328,13 @@ const WeldingRodPage = () => {
         })
       )
 
-      // 步驟7：處理狀態轉換
+      // 步驟8：處理狀態轉換
       await handleSubmitSuccess()
-      
+
+      // 清空 memory files
+      setMsdsMemoryFiles([])
+      setMonthlyData(prev => prev.map(data => ({ ...data, memoryFiles: [] })))
+
       setHasChanges(false)
       setHasSubmittedBefore(true)
 
@@ -306,21 +365,51 @@ const WeldingRodPage = () => {
     }
   }
 
-  const handleClearAll = () => {
-    setUnitWeight(0)
-    setCarbonContent(0)
-    handleMsdsFilesChange([])
-    setMonthlyData(Array.from({ length: 12 }, (_, i) => ({
-      month: i + 1,
-      quantity: 0,
-      totalWeight: 0,
-      files: []
-    })))
-    
-    setHasSubmittedBefore(false)
-    setError(null)
-    setSuccess(null)
-    setShowClearConfirmModal(false)
+  const handleClear = async () => {
+    console.log('🗑️ [WeldingRodPage] ===== CLEAR BUTTON CLICKED =====')
+
+    // 檢查是否為已通過狀態
+    if (frontendCurrentStatus === 'approved') {
+      setToast({
+        message: '已通過的資料無法清除',
+        type: 'error'
+      })
+      return
+    }
+
+    // 立即設置載入狀態
+    setClearLoading(true)
+
+    try {
+      console.log('🗑️ [WeldingRodPage] Starting complete clear operation...')
+
+      // 清除前端狀態
+      console.log('🧹 [WeldingRodPage] Clearing frontend states...')
+      setUnitWeight(0)
+      setCarbonContent(0)
+      setMsdsFiles([])
+      setMsdsMemoryFiles([])
+      setMonthlyData(createInitialMonthlyData())
+
+      setHasChanges(false)
+      setError(null)
+      setSuccess(null)
+      setShowClearConfirmModal(false)
+
+      console.log('✅ [WeldingRodPage] Clear operation completed successfully')
+      setToast({
+        message: '資料已清除',
+        type: 'success'
+      })
+
+    } catch (error) {
+      console.error('❌ [WeldingRodPage] Clear operation failed:', error)
+      setError('清除操作失敗，請重試')
+      setShowClearConfirmModal(false)
+    } finally {
+      console.log('🗑️ [WeldingRodPage] Clear operation finished, resetting loading state')
+      setClearLoading(false)
+    }
   }
 
   // Loading 狀態
@@ -505,9 +594,12 @@ const WeldingRodPage = () => {
                 pageKey={pageKey}
                 files={msdsFiles}
                 onFilesChange={handleMsdsFilesChange}
+                memoryFiles={msdsMemoryFiles}
+                onMemoryFilesChange={setMsdsMemoryFiles}
                 maxFiles={3}
                 disabled={submitting || !editPermissions.canUploadFiles}
                 kind="msds"  // 維持後端型別，僅前端顯示改名
+                mode="edit"
               />
             </div>
           </div>
@@ -649,9 +741,12 @@ const WeldingRodPage = () => {
                       month={data.month}
                       files={data.files}
                       onFilesChange={(files) => handleMonthFilesChange(data.month, files)}
+                      memoryFiles={data.memoryFiles}
+                      onMemoryFilesChange={(memFiles) => handleMonthMemoryFilesChange(data.month, memFiles)}
                       maxFiles={3}
                       disabled={submitting || !editPermissions.canUploadFiles}
                       kind="usage_evidence"
+                      mode="edit"
                     />
                   </div>
                 </div>
@@ -825,11 +920,32 @@ const WeldingRodPage = () => {
                   取消
                 </button>
                 <button
-                  onClick={handleClearAll}
-                  className="px-4 py-2 text-white rounded-lg transition-colors font-medium"
-                  style={{ backgroundColor: designTokens.colors.error }}
+                  onClick={handleClear}
+                  disabled={clearLoading}
+                  className="px-4 py-2 text-white rounded-lg transition-colors font-medium flex items-center justify-center"
+                  style={{
+                    backgroundColor: clearLoading ? '#9ca3af' : designTokens.colors.error,
+                    opacity: clearLoading ? 0.7 : 1
+                  }}
+                  onMouseEnter={(e) => {
+                    if (!clearLoading) {
+                      (e.target as HTMLButtonElement).style.backgroundColor = '#dc2626';
+                    }
+                  }}
+                  onMouseLeave={(e) => {
+                    if (!clearLoading) {
+                      (e.target as HTMLButtonElement).style.backgroundColor = designTokens.colors.error;
+                    }
+                  }}
                 >
-                  確定清除
+                  {clearLoading ? (
+                    <>
+                      <Loader2 className="w-4 h-4 animate-spin mr-2" />
+                      清除中...
+                    </>
+                  ) : (
+                    '確定清除'
+                  )}
                 </button>
               </div>
             </div>
@@ -839,7 +955,7 @@ const WeldingRodPage = () => {
 
       {/* 底部操作欄 */}
       <BottomActionBar
-        currentStatus={frontendCurrentStatus || currentStatus || 'draft'}
+        currentStatus={frontendCurrentStatus || 'submitted'}
         currentEntryId={currentEntryId}
         isUpdating={false}
         editPermissions={editPermissions}

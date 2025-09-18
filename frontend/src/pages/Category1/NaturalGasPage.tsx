@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo, useCallback } from 'react'
 import { AlertCircle, CheckCircle, Loader2, X, Trash2, Plus } from 'lucide-react'
-import EvidenceUpload from '../../components/EvidenceUpload'
+import EvidenceUpload, { MemoryFile } from '../../components/EvidenceUpload'
 import { EntryStatus } from '../../components/StatusSwitcher'
 import Toast, { ToastType } from '../../components/Toast'
 import BottomActionBar from '../../components/BottomActionBar'
@@ -447,7 +447,18 @@ const NaturalGasPage = () => {
         period_year: year,
         unit: 'kcal',
         monthly: monthly,
-        notes: `天然氣用量填報 - ${bills.length}筆帳單，熱值${heatValue}kcal/m³`
+        extraPayload: {
+          billData: bills.map(bill => ({
+            id: bill.id,
+            paymentMonth: bill.paymentMonth,
+            billingStartDate: bill.billingStart,
+            billingEndDate: bill.billingEnd,
+            billingDays: bill.billingDays,
+            billingUnits: bill.billingUnits
+          })),
+          heatValue: heatValue,
+          notes: `天然氣用量填報 - ${bills.length}筆帳單，熱值${heatValue}kcal/m³`
+        }
       }
 
       // 提交資料除錯 (可在需要時啟用)
@@ -514,13 +525,13 @@ const NaturalGasPage = () => {
           setHasSubmittedBefore(true)
 
           // 載入帳單資料
-          if (existingEntry.payload?.billData && Array.isArray(existingEntry.payload.billData)) {
+          if (existingEntry.extraPayload?.billData && Array.isArray(existingEntry.extraPayload.billData)) {
             const billDataWithFiles = await Promise.all(
-              existingEntry.payload.billData.map(async (bill: any) => {
+              existingEntry.extraPayload.billData.map(async (bill: any) => {
                 try {
                   const files = await getEntryFiles(existingEntry.id)
                   const associatedFiles = files.filter(f =>
-                    f.kind === 'usage_evidence' && f.page_key === pageKey
+                    f.file_type === 'usage_evidence' && f.page_key === pageKey
                   )
 
                   return {
@@ -542,15 +553,15 @@ const NaturalGasPage = () => {
           }
 
           // 載入熱值
-          if (existingEntry.payload?.heatValue) {
-            setHeatValue(existingEntry.payload.heatValue)
+          if (existingEntry.extraPayload?.heatValue) {
+            setHeatValue(existingEntry.extraPayload.heatValue)
           }
 
           // 載入熱值佐證文件
           try {
             const entryFiles = await getEntryFiles(existingEntry.id)
             const heatValueFiles = entryFiles.filter(f =>
-              f.kind === 'heat_value_evidence' && f.page_key === pageKey
+              f.file_type === 'annual_evidence' && f.page_key === pageKey
             )
             setHeatValueFiles(heatValueFiles)
           } catch (error) {
@@ -628,15 +639,15 @@ const NaturalGasPage = () => {
           borderColor: designTokens.colors.border,
           boxShadow: designTokens.shadows.sm
         }}>
-          <h2 className="text-xl font-medium mb-6" style={{ color: designTokens.colors.textPrimary }}>
-            天然氣熱值設定與佐證文件
+          <h2 className="text-xl font-medium mb-6 text-center" style={{ color: designTokens.colors.textPrimary }}>
+            天然氣低位熱值設定與佐證文件
           </h2>
 
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
             {/* 左側：熱值設定 */}
             <div>
               <label className="block text-sm font-medium mb-3" style={{ color: designTokens.colors.textPrimary }}>
-                熱值 (kcal/m³)
+                低位熱值 (kcal/m³)
               </label>
               <input
                 type="number"
@@ -667,7 +678,7 @@ const NaturalGasPage = () => {
                 files={heatValueFiles}
                 onFilesChange={setHeatValueFiles}
                 maxFiles={3}
-                kind="heat_value_evidence"
+                kind="annual_evidence"
                 disabled={submitting || !editPermissions.canUploadFiles}
               />
             </div>
@@ -877,7 +888,7 @@ const NaturalGasPage = () => {
             <button
               onClick={addBill}
               disabled={submitting}
-              className="w-full py-3 border-2 border-dashed border-gray-300 rounded-lg text-gray-600 hover:border-green-500 hover:text-green-600 transition-colors"
+              className="w-full py-3 bg-green-500 hover:bg-green-600 text-white rounded-lg font-medium transition-colors"
             >
               + 新增帳單
             </button>

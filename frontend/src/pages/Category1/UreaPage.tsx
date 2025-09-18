@@ -8,10 +8,13 @@ import Toast, { ToastType } from '../../components/Toast'
 import BottomActionBar from '../../components/BottomActionBar'
 import { useEditPermissions } from '../../hooks/useEditPermissions'
 import { useFrontendStatus } from '../../hooks/useFrontendStatus'
-import { listMSDSFiles, listUsageEvidenceFiles, commitEvidence, deleteEvidence, EvidenceFile } from '../../api/files'
+import { listMSDSFiles, listUsageEvidenceFiles, commitEvidence, deleteEvidence, EvidenceFile, uploadEvidenceWithEntry } from '../../api/files'
 import { upsertEnergyEntry, sumMonthly, UpsertEntryInput, updateEntryStatus, getEntryByPageKeyAndYear } from '../../api/entries'
 import { getEntryFiles } from '../../api/files'
 import { designTokens } from '../../utils/designTokens'
+import { getCategoryInfo } from '../../utils/categoryConstants'
+import { MemoryFile } from '../../components/EvidenceUpload'
+import { supabase } from '../../lib/supabaseClient'
 
 
 // 尿素日期使用量資料結構
@@ -20,6 +23,7 @@ interface UsageRecord {
   date: string           // 使用日期 YYYY-MM-DD
   quantity: number       // 使用量 (L)
   files: EvidenceFile[]  // 使用證明檔案
+  memoryFiles?: MemoryFile[]  // 記憶體暫存檔案
 }
 
 const UreaPage = () => {
@@ -48,12 +52,15 @@ const UreaPage = () => {
   // 表單資料
   const [year] = useState(new Date().getFullYear())
   const [msdsFiles, setMsdsFiles] = useState<EvidenceFile[]>([])
+  // 記憶體暫存檔案狀態
+  const [msdsMemoryFiles, setMsdsMemoryFiles] = useState<MemoryFile[]>([])
   const [usageRecords, setUsageRecords] = useState<UsageRecord[]>([
     {
       id: crypto.randomUUID(),
       date: '',
       quantity: 0,
-      files: []
+      files: [],
+      memoryFiles: []
     }
   ])
 
@@ -64,10 +71,10 @@ const UreaPage = () => {
   
   // 判斷是否有資料
   const hasAnyData = useMemo(() => {
-    const hasUsageRecords = usageRecords.some(r => r.date !== '' || r.quantity > 0 || r.files.length > 0)
-    const hasFiles = msdsFiles.length > 0
+    const hasUsageRecords = usageRecords.some(r => r.date !== '' || r.quantity > 0 || r.files.length > 0 || (r.memoryFiles && r.memoryFiles.length > 0))
+    const hasFiles = msdsFiles.length > 0 || msdsMemoryFiles.length > 0
     return hasUsageRecords || hasFiles
-  }, [usageRecords, msdsFiles])
+  }, [usageRecords, msdsFiles, msdsMemoryFiles])
   
   // 唯讀模式判斷
   const isReadOnly = false
@@ -93,18 +100,19 @@ const UreaPage = () => {
           setHasSubmittedBefore(true)
           
           // 載入已提交的記錄數據供編輯
-          if (existingEntry.payload?.usageRecords) {
+          // 優先從 extraPayload 讀取
+          if (existingEntry.extraPayload?.usageRecords) {
             // 載入相關檔案
-            let updatedRecords = existingEntry.payload.usageRecords
+            let updatedRecords = existingEntry.extraPayload.usageRecords
             
             if (existingEntry.id) {
               try {
                 const files = await getEntryFiles(existingEntry.id)
                 
                 // 更新使用記錄中的檔案
-                updatedRecords = existingEntry.payload.usageRecords.map((record: any) => {
+                updatedRecords = existingEntry.extraPayload.usageRecords.map((record: any) => {
                   const associatedFiles = files.filter(f => 
-                    f.kind === 'usage_evidence' && 
+                    f.file_type === 'usage_evidence' && 
                     f.page_key === pageKey
                   )
                   
@@ -117,9 +125,39 @@ const UreaPage = () => {
                 console.error('Failed to load files:', fileError)
               }
             }
-            
+
             setUsageRecords(updatedRecords)
             handleDataChanged()
+          } else if (existingEntry.payload?.usageRecords) {
+            // 向後相容：從舊的 payload 結構讀取
+            let updatedRecords = existingEntry.payload.usageRecords
+
+            if (existingEntry.id) {
+              try {
+                const files = await getEntryFiles(existingEntry.id)
+
+                // 更新使用記錄中的檔案
+                updatedRecords = existingEntry.payload.usageRecords.map((record: any) => {
+                  const associatedFiles = files.filter(f =>
+                    f.file_type === 'usage_evidence' &&
+                    f.page_key === pageKey
+                  )
+
+                  return {
+                    ...record,
+                    files: associatedFiles
+                  }
+                })
+              } catch (fileError) {
+                console.error('Failed to load files:', fileError)
+              }
+            }
+
+            setUsageRecords(updatedRecords)
+            handleDataChanged()
+          } else if (existingEntry.payload?.monthly) {
+            // 向後相容：從 monthly 推算使用記錄
+            console.log('Loading from legacy monthly format - data migration may be needed')
           }
         }
         // 如果是草稿記錄或無記錄，保持表單空白狀態
@@ -143,7 +181,8 @@ const UreaPage = () => {
       id: crypto.randomUUID(),
       date: '',
       quantity: 0,
-      files: []
+      files: [],
+      memoryFiles: []
     }])
   }
 
@@ -167,16 +206,27 @@ const UreaPage = () => {
     setMsdsFiles(files)
   }
 
+  const handleMsdsMemoryFilesChange = (files: MemoryFile[]) => {
+    console.log('📁 [UreaPage] MSDS memory files changed:', files.length)
+    setMsdsMemoryFiles(files)
+  }
+
+  const handleMemoryFilesChange = (recordId: string, files: MemoryFile[]) => {
+    console.log('📁 [UreaPage] Usage memory files changed for record:', recordId, files.length)
+    updateUsageRecord(recordId, 'memoryFiles', files)
+  }
+
   const getTotalUsage = () => {
     return usageRecords.reduce((sum, record) => sum + (record.quantity || 0), 0)
   }
 
   const validateData = () => {
     const errors: string[] = []
-    
-    if (msdsFiles.length === 0) {
-      errors.push('請上傳 MSDS 安全資料表')
-    }
+
+    // 移除 MSDS 必填驗證
+    // if (msdsFiles.length === 0) {
+    //   errors.push('請上傳 MSDS 安全資料表')
+    // }
 
     usageRecords.forEach((record, index) => {
       if (!record.date) {
@@ -185,7 +235,10 @@ const UreaPage = () => {
       if (record.quantity <= 0) {
         errors.push(`第${index + 1}筆記錄使用量必須大於0`)
       }
-      if (record.files.length === 0) {
+
+      // 檢查已上傳檔案 OR 記憶體檔案
+      const totalFiles = record.files.length + (record.memoryFiles?.length || 0)
+      if (totalFiles === 0) {
         errors.push(`第${index + 1}筆記錄未上傳使用證明`)
       }
     })
@@ -212,9 +265,16 @@ const UreaPage = () => {
     setSuccess(null)
 
     try {
+      console.log('🔍 ========== 尿素提交診斷開始 ==========')
+      console.log('🔍 [1] pageKey:', pageKey)
+
+      // 獲取正確的 category 資訊
+      const categoryInfo = getCategoryInfo(pageKey)
+      console.log('🔍 [2] categoryInfo:', categoryInfo)
+
       // 將日期記錄轉換為月份資料格式
       const monthly: Record<string, number> = {}
-      
+
       usageRecords.forEach(record => {
         if (record.date && record.quantity > 0) {
           const month = new Date(record.date).getMonth() + 1
@@ -225,15 +285,55 @@ const UreaPage = () => {
       const entryInput: UpsertEntryInput = {
         page_key: pageKey,
         period_year: year,
-        unit: 'L',
+        unit: categoryInfo.unit,
         monthly: monthly,
-        notes: `尿素使用量，共${usageRecords.length}筆記錄`
+        extraPayload: {
+          usageRecords: usageRecords.map(record => ({
+            id: record.id,
+            date: record.date,
+            quantity: record.quantity
+          })),
+          totalUsage: getTotalUsage(),
+          notes: `尿素使用量，共${usageRecords.length}筆記錄`
+        }
       }
+
+      console.log('🔍 [3] entryInput:', entryInput)
+      console.log('🔍 [4] entryInput.page_key 確認:', entryInput.page_key)
 
       const { entry_id } = await upsertEnergyEntry(entryInput, true)
 
       if (!currentEntryId) {
         setCurrentEntryId(entry_id)
+      }
+
+      // 上傳 MSDS 記憶體檔案
+      if (msdsMemoryFiles.length > 0) {
+        console.log(`📁 [UreaPage] Uploading ${msdsMemoryFiles.length} MSDS memory files...`)
+        for (const memoryFile of msdsMemoryFiles) {
+          await uploadEvidenceWithEntry(memoryFile.file, {
+            entryId: entry_id,
+            pageKey: pageKey,
+            year: year,
+            category: 'msds'
+          })
+        }
+        setMsdsMemoryFiles([]) // 清空記憶體檔案
+      }
+
+      // 上傳使用證明記憶體檔案
+      for (const record of usageRecords) {
+        if (record.memoryFiles && record.memoryFiles.length > 0) {
+          console.log(`📁 [UreaPage] Uploading ${record.memoryFiles.length} usage files for record ${record.id}...`)
+          for (const memoryFile of record.memoryFiles) {
+            await uploadEvidenceWithEntry(memoryFile.file, {
+              entryId: entry_id,
+              pageKey: pageKey,
+              year: year,
+              category: 'usage_evidence'
+            })
+          }
+        }
       }
 
       await commitEvidence({
@@ -245,7 +345,7 @@ const UreaPage = () => {
       await handleSubmitSuccess()
 
       const totalUsage = getTotalUsage()
-      setSuccess(`年度總使用量：${totalUsage.toFixed(2)} 公升`)
+      setSuccess(`年度總使用量：${totalUsage.toFixed(2)} 公斤`)
       setHasSubmittedBefore(true)
       setShowSuccessModal(true)
 
@@ -267,9 +367,11 @@ const UreaPage = () => {
       id: crypto.randomUUID(),
       date: '',
       quantity: 0,
-      files: []
+      files: [],
+      memoryFiles: []
     }])
     setMsdsFiles([])
+    setMsdsMemoryFiles([])
     setHasSubmittedBefore(false)
     setError(null)
     setSuccess(null)
@@ -356,26 +458,22 @@ const UreaPage = () => {
           }}
         >
           <h2 
-            className="text-xl font-medium mb-6" 
+            className="text-xl font-medium mb-6 text-center" 
             style={{ color: designTokens.colors.textPrimary }}
           >
-            MSDS 安全資料表
+            請上傳尿素的MSDS；若尿素由中油加注，則可免
           </h2>
-          
           <div>
-            <label 
-              className="block text-sm font-medium mb-3" 
-              style={{ color: designTokens.colors.textPrimary }}
-            >
-              MSDS 安全資料表
-            </label>
             <EvidenceUpload
               pageKey={pageKey}
               files={msdsFiles}
               onFilesChange={handleMsdsFilesChange}
+              memoryFiles={msdsMemoryFiles}
+              onMemoryFilesChange={handleMsdsMemoryFilesChange}
               maxFiles={3}
               disabled={submitting || !editPermissions.canUploadFiles}
               kind="msds"
+              mode="edit"
             />
           </div>
         </div>
@@ -389,24 +487,13 @@ const UreaPage = () => {
             boxShadow: designTokens.shadows.sm
           }}
         >
-          <div className="flex justify-between items-center mb-6">
-            <h2 
-              className="text-xl font-medium" 
+          <div className="mb-6">
+            <h2
+              className="text-xl font-medium"
               style={{ color: designTokens.colors.textPrimary }}
             >
               尿素使用量記錄
             </h2>
-            {editPermissions.canEdit && (
-              <button
-                onClick={addUsageRecord}
-                className="px-4 py-2 text-white rounded-lg transition-colors flex items-center space-x-2"
-                style={{ backgroundColor: designTokens.colors.accentPrimary }}
-                disabled={submitting}
-              >
-                <Plus className="w-4 h-4" />
-                <span>新增記錄</span>
-              </button>
-            )}
           </div>
 
           {/* 使用量統計 */}
@@ -425,7 +512,7 @@ const UreaPage = () => {
                 className="text-lg font-bold"
                 style={{ color: designTokens.colors.accentSecondary }}
               >
-                {getTotalUsage().toFixed(2)} 公升
+                {getTotalUsage().toFixed(2)} 公斤
               </span>
             </div>
           </div>
@@ -472,7 +559,7 @@ const UreaPage = () => {
                   {/* 使用量 */}
                   <div>
                     <label className="block text-sm font-medium mb-2">
-                      使用量 (公升)
+                      使用量 (公斤)
                     </label>
                     <input
                       type="number"
@@ -501,14 +588,28 @@ const UreaPage = () => {
                     month={index + 1}
                     files={record.files}
                     onFilesChange={(files) => handleUsageFilesChange(record.id, files)}
+                    memoryFiles={record.memoryFiles || []}
+                    onMemoryFilesChange={(files) => handleMemoryFilesChange(record.id, files)}
                     maxFiles={3}
                     disabled={submitting || !editPermissions.canUploadFiles}
                     kind="usage_evidence"
+                    mode="edit"
                   />
                 </div>
               </div>
             ))}
           </div>
+
+          {/* 新增記錄按鈕 */}
+          {editPermissions.canEdit && (
+            <button
+              onClick={addUsageRecord}
+              disabled={submitting}
+              className="w-full py-3 bg-green-500 hover:bg-green-600 text-white rounded-lg font-medium transition-colors"
+            >
+              + 新增記錄
+            </button>
+          )}
         </div>
 
         {/* 底部空間 */}
