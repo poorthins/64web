@@ -132,6 +132,12 @@ const DieselGeneratorTestPage = () => {
   }, [])
 
   const updateTestData = <K extends keyof TestData>(field: K, value: TestData[K]) => {
+    console.log('🔍 [DEBUG] updateTestData called:', {
+      field,
+      valueType: typeof value,
+      isArray: Array.isArray(value),
+      length: Array.isArray(value) ? value.length : 'N/A'
+    })
     setTestData(prev => ({ ...prev, [field]: value }))
   }
 
@@ -140,8 +146,13 @@ const DieselGeneratorTestPage = () => {
   }
 
   const handleNameplateMemoryFilesChange = (files: MemoryFile[]) => {
-    console.log('📁 [DieselGeneratorTestPage] Nameplate memory files changed:', files.length)
+    console.log('🔍 [DEBUG] handleNameplateMemoryFilesChange called with:', {
+      filesCount: files.length,
+      fileNames: files.map(f => f.file_name),
+      testDataBefore: testData.nameplateMemoryFiles?.length || 0
+    })
     updateTestData('nameplateMemoryFiles', files)
+    console.log('✅ [DEBUG] nameplateMemoryFiles updated successfully')
   }
 
   const validateData = () => {
@@ -245,6 +256,9 @@ const DieselGeneratorTestPage = () => {
 
       await handleSubmitSuccess()
 
+      // 清空記憶體檔案
+      updateTestData('nameplateMemoryFiles', [])
+
       setSuccess(`發電機測試資料已提交成功\n年度總測試時間：${testData.annualTestTime} 分鐘`)
       setHasSubmittedBefore(true)
       setShowSuccessModal(true)
@@ -261,60 +275,37 @@ const DieselGeneratorTestPage = () => {
     console.log('Status change requested:', newStatus)
   }
 
-  const handleClearAll = async () => {
-    console.log('🗑️ [DieselGeneratorTestPage] ===== CLEAR BUTTON CLICKED =====')
-
-    const clearSuccess = DocumentHandler.handleClear({
-      currentStatus: currentStatus,
-      title: '柴油發電機測試資料清除',
-      message: '確定要清除所有柴油發電機測試資料嗎？此操作無法復原。',
-      onClear: () => {
-        setSubmitting(true)
-        try {
-          console.log('🗑️ [DieselGeneratorTestPage] Starting complete clear operation...')
-
-          // 清理記憶體檔案
-          if (testData.nameplateMemoryFiles) {
-            DocumentHandler.clearAllMemoryFiles(testData.nameplateMemoryFiles)
-          }
-
-          // 清除所有測試資料
-          setTestData({
-            generatorLocation: '',
-            powerRating: 0,
-            testFrequency: '',
-            testDuration: 0,
-            annualTestTime: 0,
-            nameplateFiles: [],
-            nameplateMemoryFiles: []
-          })
-
-          setHasSubmittedBefore(false)
-          setError(null)
-          setSuccess(null)
-          setShowClearConfirmModal(false)
-
-          setToast({
-            message: '資料已清除',
-            type: 'success'
-          })
-
-        } catch (error) {
-          console.error('❌ [DieselGeneratorTestPage] Clear operation failed:', error)
-          setError('清除操作失敗，請重試')
-        } finally {
-          console.log('🗑️ [DieselGeneratorTestPage] Clear operation finished, resetting loading state')
-          setSubmitting(false)
+  const handleClearAll = () => {
+    // 清理記憶體檔案的預覽 URL
+    if (testData.nameplateMemoryFiles) {
+      testData.nameplateMemoryFiles.forEach(memFile => {
+        if (memFile.preview) {
+          URL.revokeObjectURL(memFile.preview)
         }
-      }
-    })
-
-    if (!clearSuccess && currentStatus === 'approved') {
-      setToast({
-        message: '已通過的資料無法清除',
-        type: 'error'
       })
     }
+
+    // 重置所有資料
+    setTestData({
+      generatorLocation: '',
+      powerRating: 0,
+      testFrequency: '',
+      testDuration: 0,
+      annualTestTime: 0,
+      nameplateFiles: [],
+      nameplateMemoryFiles: []
+    })
+
+    setHasSubmittedBefore(false)
+    setError(null)
+    setSuccess(null)
+    setShowClearConfirmModal(false)
+
+    // 顯示成功訊息
+    setToast({
+      message: '資料已清除',
+      type: 'success'
+    })
   }
 
   // Loading 狀態
@@ -517,6 +508,16 @@ const DieselGeneratorTestPage = () => {
             <label className="block text-sm font-medium mb-2">
               發電機銘牌佐證資料
             </label>
+            {(() => {
+              console.log('🔍 [DEBUG] EvidenceUpload props check:', {
+                pageKey,
+                mode: 'edit',
+                hasOnMemoryFilesChange: !!handleNameplateMemoryFilesChange,
+                currentMemoryFiles: testData.nameplateMemoryFiles?.length || 0,
+                currentFiles: testData.nameplateFiles.length
+              })
+              return null
+            })()}
             <EvidenceUpload
               pageKey={pageKey}
               month={1}
@@ -629,43 +630,30 @@ const DieselGeneratorTestPage = () => {
         </div>
       )}
 
-      {/* 清除確認模態框 */}
+      {/* 清除確認 Modal - 與 WD40 相同的介面 */}
       {showClearConfirmModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50 p-4">
           <div
-            className="bg-white rounded-lg shadow-lg max-w-md w-full"
+            className="bg-white rounded-lg shadow-lg max-w-md w-full animate-in fade-in duration-200"
             style={{ borderRadius: designTokens.borderRadius.lg }}
           >
             <div className="p-6">
-              <div className="flex items-start space-x-3 mb-4">
-                <div
-                  className="w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0"
-                  style={{ backgroundColor: `${designTokens.colors.warning}15` }}
-                >
-                  <AlertCircle
-                    className="h-5 w-5"
-                    style={{ color: designTokens.colors.warning }}
-                  />
-                </div>
-                <div className="flex-1">
-                  <h3
-                    className="text-lg font-semibold mb-2"
-                    style={{ color: designTokens.colors.textPrimary }}
-                  >
-                    確認清除
-                  </h3>
-                  <p
-                    className="text-sm"
-                    style={{ color: designTokens.colors.textSecondary }}
-                  >
-                    清除後，這一頁所有資料都會被移除，確定要繼續嗎？
-                  </p>
-                </div>
-              </div>
+              <h3
+                className="text-lg font-semibold mb-4"
+                style={{ color: designTokens.colors.textPrimary }}
+              >
+                清除所有資料
+              </h3>
+              <p
+                className="mb-6"
+                style={{ color: designTokens.colors.textSecondary }}
+              >
+                確定要清除所有柴油發電機測試資料嗎？此操作無法復原。
+              </p>
               <div className="flex justify-end space-x-3">
                 <button
                   onClick={() => setShowClearConfirmModal(false)}
-                  className="px-4 py-2 border rounded-lg transition-colors font-medium"
+                  className="px-4 py-2 border rounded-lg transition-colors"
                   style={{
                     borderColor: designTokens.colors.border,
                     color: designTokens.colors.textSecondary
@@ -675,10 +663,12 @@ const DieselGeneratorTestPage = () => {
                 </button>
                 <button
                   onClick={handleClearAll}
-                  className="px-4 py-2 text-white rounded-lg transition-colors font-medium"
-                  style={{ backgroundColor: designTokens.colors.error }}
+                  className="px-4 py-2 text-white rounded-lg transition-colors"
+                  style={{
+                    backgroundColor: designTokens.colors.error
+                  }}
                 >
-                  確定清除
+                  確認清除
                 </button>
               </div>
             </div>

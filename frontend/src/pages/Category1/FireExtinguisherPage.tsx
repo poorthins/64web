@@ -807,7 +807,7 @@ export default function FireExtinguisherPage() {
                     maxFiles={1}
                     disabled={!editPermissions.canUploadFiles}
                     kind="other"
-                    mode="view"
+                    mode="edit"
                   />
                 </div>
               )}

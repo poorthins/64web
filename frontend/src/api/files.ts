@@ -111,9 +111,24 @@ export async function uploadEvidenceWithEntry(file: File, meta: FileMetadata & {
  * @param allowAutoCreateEntry - 是否允許自動建立 energy_entry
  */
 async function uploadEvidenceWithValidation(file: File, meta: FileMetadata & { entryId?: string; allowOverwrite?: boolean }, allowAutoCreateEntry: boolean): Promise<EvidenceFile> {
+  console.log('🔍 [DEBUG] uploadEvidenceWithValidation called:', {
+    fileName: file.name,
+    fileSize: file.size,
+    meta,
+    allowAutoCreateEntry
+  })
+
   try {
     const authResult = await validateAuth()
+    console.log('🔍 [DEBUG] Auth validation result:', {
+      hasError: !!authResult.error,
+      hasUser: !!authResult.user,
+      userId: authResult.user?.id,
+      errorMessage: authResult.error?.message
+    })
+
     if (authResult.error || !authResult.user) {
+      console.error('❌ [DEBUG] Auth validation failed:', authResult.error)
       throw authResult.error || new Error('使用者未登入')
     }
     const user = authResult.user
@@ -211,10 +226,26 @@ async function uploadEvidenceWithValidation(file: File, meta: FileMetadata & { e
     // 使用時間戳 + 隨機字串確保檔案名稱唯一性
     const fileName = `${timestamp}_${randomSuffix}_${safeName}`
     
+    console.log('🔍 [DEBUG] Building file path:', {
+      userId: user.id,
+      pageKey: meta.pageKey,
+      year: meta.year,
+      category: meta.category,
+      month: meta.month,
+      fileName: fileName,
+      safeName: safeName
+    })
+
     // 構造檔案路徑：{userId}/{pageKey}/{year}/{category}/{month?}/{filename}
     const categoryPath = meta.category
     const monthPath = meta.category === 'usage_evidence' && meta.month ? `/${meta.month}` : ''
     const filePath = `${user.id}/${meta.pageKey}/${meta.year}/${categoryPath}${monthPath}/${fileName}`
+
+    console.log('🔍 [DEBUG] Constructed file path:', {
+      categoryPath,
+      monthPath,
+      fullFilePath: filePath
+    })
 
     // 驗證檔案路徑格式
     if (filePath.includes('//') || filePath.includes('..') || filePath.length > 1024) {
@@ -223,6 +254,15 @@ async function uploadEvidenceWithValidation(file: File, meta: FileMetadata & { e
 
 
     // 上傳檔案到 Storage
+    console.log('🔍 [DEBUG] Starting storage upload:', {
+      bucket: 'evidence',
+      filePath,
+      fileSize: file.size,
+      contentType: resolvedType,
+      supabaseUrl: supabase.supabaseUrl,
+      hasStorageClient: !!supabase.storage
+    })
+
     const { data: uploadData, error: uploadError } = await supabase.storage
       .from('evidence')
       .upload(filePath, file, {
@@ -231,15 +271,32 @@ async function uploadEvidenceWithValidation(file: File, meta: FileMetadata & { e
       })
 
     if (uploadError) {
-      console.error('Error uploading file:', uploadError)
-      
+      console.error('❌ [DEBUG] Storage upload failed:', {
+        error: uploadError,
+        errorMessage: uploadError.message,
+        errorCode: uploadError.code,
+        statusCode: uploadError.statusCode,
+        filePath,
+        fileSize: file.size
+      })
+
       // 特殊錯誤處理
       if (uploadError.message.includes('Bucket not found')) {
+        console.error('❌ [DEBUG] Bucket not found error - evidence bucket does not exist')
         throw new Error('請先建立 evidence bucket 並確認名稱')
       }
-      
+
+      if (uploadError.message.includes('Permission denied') || uploadError.statusCode === 401) {
+        console.error('❌ [DEBUG] Permission denied - authentication or RLS issue')
+      }
+
       throw handleAPIError(uploadError, '檔案上傳失敗')
     }
+
+    console.log('✅ [DEBUG] Storage upload successful:', {
+      uploadPath: uploadData?.path,
+      uploadId: uploadData?.id
+    })
 
     // 驗證 entry_id 是否存在（必須關聯到現有的 energy_entries 記錄）
     if (!meta.entryId) {

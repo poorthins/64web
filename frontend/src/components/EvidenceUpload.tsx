@@ -19,12 +19,6 @@ function deduplicateFilesByID(files: EvidenceFile[], context: string = ''): Evid
       )
       .map(f => f.id)
 
-    console.log(`🔄 [${context}] File deduplication:`, {
-      original_count: files.length,
-      deduplicated_count: deduplicated.length,
-      removed_duplicates: files.length - deduplicated.length,
-      duplicate_ids: [...new Set(duplicateIds)]
-    })
   }
 
   return deduplicated
@@ -76,6 +70,7 @@ const EvidenceUpload: React.FC<EvidenceUploadProps> = ({
   onMemoryFilesChange,
   hideFileCount = false
 }) => {
+
   const [uploading, setUploading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [successMessage, setSuccessMessage] = useState<string | null>(null)
@@ -94,7 +89,9 @@ const EvidenceUpload: React.FC<EvidenceUploadProps> = ({
   const isStatusDeleteDisabled = !canDeleteFiles(currentStatus)
 
   const handleFileSelect = async (selectedFiles: FileList | null) => {
-    if (!selectedFiles || selectedFiles.length === 0) return
+    if (!selectedFiles || selectedFiles.length === 0) {
+      return
+    }
 
     // 計算總檔案數（已上傳 + 記憶體暫存）
     const totalCurrentFiles = files.length + memoryFiles.length
@@ -131,21 +128,23 @@ const EvidenceUpload: React.FC<EvidenceUploadProps> = ({
       return
     }
 
-    // 立即清除 input value，避免瀏覽器快取問題
-    if (fileInputRef.current) {
-      fileInputRef.current.value = ''
-    }
-
     setError(null)
     setIsDragging(false)
 
     // 根據模式處理檔案
-    if (mode === 'edit' && onMemoryFilesChange) {
-      // 編輯模式：將檔案暫存到記憶體
-      await handleMemoryFileAdd(selectedFiles)
-    } else {
-      // 檢視模式：直接上傳檔案
-      await handleDirectUpload(selectedFiles)
+    try {
+      if (mode === 'edit' && onMemoryFilesChange) {
+        // 編輯模式：將檔案暫存到記憶體
+        await handleMemoryFileAdd(selectedFiles)
+      } else {
+        // 檢視模式：直接上傳檔案
+        await handleDirectUpload(selectedFiles)
+      }
+    } finally {
+      // 在處理完成後才清除 input value
+      if (fileInputRef.current) {
+        fileInputRef.current.value = ''
+      }
     }
   }
 
@@ -160,7 +159,11 @@ const EvidenceUpload: React.FC<EvidenceUploadProps> = ({
         // 生成預覽URL
         let preview = ''
         if (file.type.startsWith('image/')) {
-          preview = URL.createObjectURL(file)
+          try {
+            preview = URL.createObjectURL(file)
+          } catch (previewError) {
+            console.warn('Failed to create preview for image:', previewError)
+          }
         }
 
         const memoryFile: MemoryFile = {
@@ -178,7 +181,7 @@ const EvidenceUpload: React.FC<EvidenceUploadProps> = ({
       // 更新記憶體檔案清單
       onMemoryFilesChange([...memoryFiles, ...newMemoryFiles])
 
-      const message = `已暫存 ${selectedFiles.length} 個檔案到記憶體`
+      const message = `已暫存 ${newMemoryFiles.length} 個檔案到記憶體`
       setSuccessMessage(message)
       setTimeout(() => setSuccessMessage(null), 3000)
 
@@ -193,14 +196,12 @@ const EvidenceUpload: React.FC<EvidenceUploadProps> = ({
 
     // 檢查是否正在上傳
     if (uploadingRef.current || uploading) {
-      console.log('上傳中，忽略新請求')
       return
     }
 
     // 防抖保護
     const now = Date.now()
     if (now - lastUploadTimeRef.current < 1000) {
-      console.log('上傳過於頻繁，忽略')
       return
     }
     lastUploadTimeRef.current = now
@@ -243,12 +244,6 @@ const EvidenceUpload: React.FC<EvidenceUploadProps> = ({
         `EvidenceUpload-${kind}-${month || 'nomonth'}`
       )
 
-      console.log('🔄 [EvidenceUpload] Post-upload file update:', {
-        kind: kind,
-        month: month,
-        original_query_count: updatedFilesList.length,
-        final_deduplicated_count: deduplicatedFiles.length
-      })
 
       onFilesChange(deduplicatedFiles)
 
@@ -301,7 +296,6 @@ const EvidenceUpload: React.FC<EvidenceUploadProps> = ({
     
     // 提前檢查狀態，避免不必要的處理
     if (disabled || uploading) {
-      console.log('拖放被禁用：disabled=' + disabled + ', uploading=' + uploading)
       return
     }
     
@@ -529,7 +523,7 @@ const EvidenceUpload: React.FC<EvidenceUploadProps> = ({
         onClick={(e) => {
           // 防止事件冒泡
           e.stopPropagation()
-          
+
           // 再次檢查上傳狀態
           if (!isUploadDisabled && !uploading && fileInputRef.current) {
             fileInputRef.current.click()
