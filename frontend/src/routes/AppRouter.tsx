@@ -26,6 +26,7 @@ import CommutePage from '../pages/Category3/CommuteePage'
 import PingPage from '../pages/PingPage'
 import AdminPage from '../pages/AdminPage'
 import UserDetailPage from '../pages/admin/UserDetailPage'
+import { AdminDashboardPOC, CreateUserPOC, EditUserPOC, StatisticsDetailPOC } from '../pages/admin/poc'
 import AdminRoute from '../components/AdminRoute'
 import UserRoute from '../components/UserRoute'
 import TestUserCheck from '../pages/TestUserCheck'
@@ -56,6 +57,26 @@ function AppRouter() {
               <Route path="admin/users/:userId" element={
                 <AdminRoute fallback={<DashboardPage />}>
                   <UserDetailPage />
+                </AdminRoute>
+              } />
+              <Route path="admin/poc" element={
+                <AdminRoute fallback={<DashboardPage />}>
+                  <AdminDashboardPOC />
+                </AdminRoute>
+              } />
+              <Route path="admin/poc/create" element={
+                <AdminRoute fallback={<DashboardPage />}>
+                  <CreateUserPOC />
+                </AdminRoute>
+              } />
+              <Route path="admin/poc/edit/:userId" element={
+                <AdminRoute fallback={<DashboardPage />}>
+                  <EditUserPOC />
+                </AdminRoute>
+              } />
+              <Route path="admin/poc/statistics" element={
+                <AdminRoute fallback={<DashboardPage />}>
+                  <StatisticsDetailPOC />
                 </AdminRoute>
               } />
               

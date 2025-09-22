@@ -87,20 +87,95 @@ interface UserCard {
 
 #### 假資料需求
 ```typescript
-// 模擬統計資料
-const mockStatistics = {
-  submitted: 42,
-  pending: 7,
-  approved: 28,
-  rejected: 7
-}
-
-// 模擬用戶資料（至少 6 個用戶，包含不同狀態）
-const mockUsers = [
-  { name: '張三', company: '三媽臭臭鍋', status: 'active', ... },
-  { name: '李四', company: '鼎泰豐', status: 'active', ... },
-  { name: '王五', company: '麥當勞', status: 'inactive', ... },
-  // ... 更多用戶
+// 模擬填報記錄（包含不同狀態和審核資訊）
+const mockSubmissions = [
+  // 待審核記錄
+  {
+    id: 'sub-001',
+    userId: 'user-001',
+    userName: '張三',
+    company: '三媽臭臭鍋',
+    category: '天然氣',
+    status: 'pending',
+    submitTime: '2024-09-18 14:30',
+    totalAmount: '1,250',
+    unit: 'm³',
+    fileCount: 5
+  },
+  {
+    id: 'sub-002',
+    userId: 'user-002',
+    userName: '李四',
+    company: '鼎泰豐',
+    category: '外購電力',
+    status: 'pending',
+    submitTime: '2024-09-17 10:15',
+    totalAmount: '25,400',
+    unit: 'kWh',
+    fileCount: 12
+  },
+  
+  // 已通過記錄
+  {
+    id: 'sub-003',
+    userId: 'user-002',
+    userName: '李四',
+    company: '鼎泰豐',
+    category: '員工通勤',
+    status: 'approved',
+    submitTime: '2024-09-13 15:45',
+    totalAmount: '2,400',
+    unit: 'person-km',
+    fileCount: 4,
+    approvedAt: '2024-09-14 09:20',
+    approvedBy: '管理員 Timmy'
+  },
+  
+  // 已退回記錄
+  {
+    id: 'sub-004',
+    userId: 'user-003',
+    userName: '王五',
+    company: '麥當勞',
+    category: '冷媒',
+    status: 'rejected',
+    submitTime: '2024-09-12 13:20',
+    totalAmount: '25',
+    unit: 'kg',
+    fileCount: 2,
+    rejectionReason: '佐證檔案不齊全，缺少MSDS安全資料表，請補充相關證明文件後重新提交。',
+    rejectedAt: '2024-09-13 16:45',
+    rejectedBy: '管理員 Timmy'
+  },
+  {
+    id: 'sub-005',
+    userId: 'user-001',
+    userName: '張三',
+    company: '三媽臭臭鍋',
+    category: '汽油',
+    status: 'rejected',
+    submitTime: '2024-09-10 11:30',
+    totalAmount: '320',
+    unit: 'L',
+    fileCount: 3,
+    rejectionReason: '使用量數據異常，8月份填報量過高，請確認數據正確性。',
+    rejectedAt: '2024-09-11 14:20',
+    rejectedBy: '管理員 Timmy'
+  },
+  
+  // 已提交記錄
+  {
+    id: 'sub-006',
+    userId: 'user-004',
+    userName: '陳六',
+    company: '7-ELEVEN',
+    category: 'WD-40',
+    status: 'submitted',
+    submitTime: '2024-09-15 11:30',
+    totalAmount: '150',
+    unit: 'ML',
+    fileCount: 3
+  }
 ]
 ```
 
@@ -188,7 +263,65 @@ const energyCategories = {
 - 4個狀態卡片（可點擊切換）
 - 篩選功能（用戶、類別、排序）
 - 記錄列表顯示
+- **🆕 審核操作功能**
 - 分頁功能
+
+#### 審核功能設計
+```typescript
+// 待審核狀態：顯示審核按鈕
+interface PendingActions {
+  onApprove: (recordId: string) => void
+  onReject: (recordId: string, reason: string) => void
+}
+
+// 已退回狀態：顯示退回原因
+interface RejectedRecord extends SubmissionRecord {
+  rejectionReason: string
+  rejectedAt: string
+  rejectedBy: string
+}
+```
+
+#### 審核操作 UI 設計
+```typescript
+// 待審核記錄的操作區
+<div className="flex gap-2 mt-3">
+  <button 
+    className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700"
+    onClick={() => handleApprove(record.id)}
+  >
+    ✅ 通過
+  </button>
+  <button 
+    className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700"
+    onClick={() => setRejectingId(record.id)}
+  >
+    ❌ 退回
+  </button>
+</div>
+
+// 退回原因輸入彈窗
+{rejectingId && (
+  <RejectModal
+    recordId={rejectingId}
+    onConfirm={handleReject}
+    onCancel={() => setRejectingId(null)}
+  />
+)}
+
+// 已退回記錄的原因顯示
+{record.status === 'rejected' && (
+  <div className="mt-3 p-3 bg-red-50 border border-red-200 rounded-lg">
+    <div className="text-sm text-red-800">
+      <span className="font-medium">退回原因：</span>
+      {record.rejectionReason}
+    </div>
+    <div className="text-xs text-red-600 mt-1">
+      {record.rejectedAt} 由 {record.rejectedBy} 退回
+    </div>
+  </div>
+)}
+```
 
 #### 資料結構
 ```typescript
@@ -203,6 +336,61 @@ interface SubmissionRecord {
   totalAmount: string
   unit: string
   fileCount: number
+  
+  // 🆕 審核相關欄位
+  rejectionReason?: string    // 退回原因
+  rejectedAt?: string        // 退回時間
+  rejectedBy?: string        // 退回者
+  approvedAt?: string        // 通過時間
+  approvedBy?: string        // 通過者
+}
+```
+
+#### 退回原因彈窗元件
+```typescript
+interface RejectModalProps {
+  recordId: string
+  onConfirm: (recordId: string, reason: string) => void
+  onCancel: () => void
+}
+
+const RejectModal: React.FC<RejectModalProps> = ({ recordId, onConfirm, onCancel }) => {
+  const [reason, setReason] = useState('')
+  
+  return (
+    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+      <div className="bg-white rounded-lg p-6 w-full max-w-md">
+        <h3 className="text-lg font-semibold mb-4">退回填報記錄</h3>
+        <div className="mb-4">
+          <label className="block text-sm font-medium text-gray-700 mb-2">
+            退回原因 <span className="text-red-500">*</span>
+          </label>
+          <textarea
+            value={reason}
+            onChange={(e) => setReason(e.target.value)}
+            placeholder="請說明退回原因..."
+            className="w-full px-3 py-2 border border-gray-300 rounded-lg resize-none"
+            rows={4}
+          />
+        </div>
+        <div className="flex gap-3 justify-end">
+          <button
+            onClick={onCancel}
+            className="px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50"
+          >
+            取消
+          </button>
+          <button
+            onClick={() => onConfirm(recordId, reason)}
+            disabled={!reason.trim()}
+            className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 disabled:opacity-50"
+          >
+            確認退回
+          </button>
+        </div>
+      </div>
+    </div>
+  )
 }
 ```
 
@@ -283,6 +471,18 @@ interface SubmissionRecord {
    - 狀態卡片切換
    - 篩選和排序功能
    - 列表項目點擊
+   - **🆕 審核操作測試**
+     - 待審核記錄顯示審核按鈕
+     - 通過按鈕功能
+     - 退回彈窗和原因輸入
+     - 已退回記錄顯示原因
+
+5. **🆕 審核工作流測試**
+   - 點擊「待審核」狀態卡片
+   - 確認記錄有審核按鈕
+   - 測試通過操作（狀態變更）
+   - 測試退回操作（彈窗 + 原因輸入）
+   - 退回後在「已退回」狀態查看原因顯示
 
 ### 響應式測試
 - iPhone SE (375px)
@@ -381,9 +581,9 @@ interface SubmissionRecord {
 實現建立用戶和編輯用戶頁面，包含完整表單、類別選擇、側邊欄功能
 ```
 
-### Task 3: 填報管理頁面
+### Task 3: 填報管理頁面 + 審核功能
 ```
-實現填報管理頁面，包含狀態篩選、記錄列表、排序功能
+實現填報管理頁面，包含狀態篩選、記錄列表、排序功能，以及完整的審核操作功能（通過/退回按鈕、退回原因彈窗、已退回記錄的原因顯示）
 ```
 
 每個任務都提供詳細的技術規格和假資料，確保 Claude Code 能夠準確實現設計需求。

@@ -1,0 +1,607 @@
+export type UserStatus = 'submitted' | 'pending' | 'approved' | 'rejected'
+
+export interface User {
+  id: string
+  name: string
+  email: string
+  department: string
+  status: UserStatus
+  submissionDate: string
+  lastActivity: string
+  entries: number
+  avatar: string
+}
+
+export interface StatsData {
+  submitted: number
+  pending: number
+  approved: number
+  rejected: number
+}
+
+export const mockUsers: User[] = [
+  {
+    id: '1',
+    name: '王小明',
+    email: 'ming.wang@company.com',
+    department: '研發部',
+    status: 'approved',
+    submissionDate: '2024-03-15',
+    lastActivity: '2024-03-20',
+    entries: 12,
+    avatar: '👨‍💻'
+  },
+  {
+    id: '2',
+    name: '李美華',
+    email: 'meihua.li@company.com',
+    department: '行銷部',
+    status: 'pending',
+    submissionDate: '2024-03-18',
+    lastActivity: '2024-03-21',
+    entries: 8,
+    avatar: '👩‍💼'
+  },
+  {
+    id: '3',
+    name: '張志豪',
+    email: 'zhihao.zhang@company.com',
+    department: '財務部',
+    status: 'submitted',
+    submissionDate: '2024-03-20',
+    lastActivity: '2024-03-22',
+    entries: 5,
+    avatar: '🧑‍💼'
+  },
+  {
+    id: '4',
+    name: '陳雅婷',
+    email: 'yating.chen@company.com',
+    department: '人資部',
+    status: 'rejected',
+    submissionDate: '2024-03-10',
+    lastActivity: '2024-03-19',
+    entries: 15,
+    avatar: '👩'
+  },
+  {
+    id: '5',
+    name: '林俊傑',
+    email: 'junjie.lin@company.com',
+    department: '業務部',
+    status: 'approved',
+    submissionDate: '2024-03-12',
+    lastActivity: '2024-03-21',
+    entries: 20,
+    avatar: '👨'
+  },
+  {
+    id: '6',
+    name: '黃詩涵',
+    email: 'shihan.huang@company.com',
+    department: '設計部',
+    status: 'pending',
+    submissionDate: '2024-03-19',
+    lastActivity: '2024-03-22',
+    entries: 10,
+    avatar: '👩‍🎨'
+  },
+  {
+    id: '7',
+    name: '劉建國',
+    email: 'jianguo.liu@company.com',
+    department: '生產部',
+    status: 'submitted',
+    submissionDate: '2024-03-21',
+    lastActivity: '2024-03-23',
+    entries: 7,
+    avatar: '👨‍🏭'
+  },
+  {
+    id: '8',
+    name: '楊雅琪',
+    email: 'yaqi.yang@company.com',
+    department: '品管部',
+    status: 'approved',
+    submissionDate: '2024-03-14',
+    lastActivity: '2024-03-20',
+    entries: 18,
+    avatar: '👩‍🔬'
+  }
+]
+
+export const calculateStats = (users: User[]): StatsData => {
+  return {
+    submitted: users.filter(u => u.status === 'submitted').length,
+    pending: users.filter(u => u.status === 'pending').length,
+    approved: users.filter(u => u.status === 'approved').length,
+    rejected: users.filter(u => u.status === 'rejected').length
+  }
+}
+
+export const statusColors = {
+  submitted: {
+    bg: 'bg-blue-100',
+    text: 'text-blue-800',
+    border: 'border-blue-300'
+  },
+  pending: {
+    bg: 'bg-orange-100',
+    text: 'text-orange-800',
+    border: 'border-orange-300'
+  },
+  approved: {
+    bg: 'bg-green-100',
+    text: 'text-green-800',
+    border: 'border-green-300'
+  },
+  rejected: {
+    bg: 'bg-red-100',
+    text: 'text-red-800',
+    border: 'border-red-300'
+  }
+}
+
+export const statusLabels = {
+  submitted: '已提交',
+  pending: '待審核',
+  approved: '已通過',
+  rejected: '已退回'
+}
+
+export interface EnergyCategory {
+  id: string
+  name: string
+  scope: 1 | 2 | 3
+  hasVersion?: boolean
+}
+
+export const energyCategories: EnergyCategory[] = [
+  // 範疇一
+  { id: 'wd40', name: 'WD-40', scope: 1 },
+  { id: 'acetylene', name: '乙炔', scope: 1 },
+  { id: 'refrigerant', name: '冷媒', scope: 1 },
+  { id: 'septictank', name: '化糞池', scope: 1 },
+  { id: 'natural_gas', name: '天然氣', scope: 1 },
+  { id: 'urea', name: '尿素', scope: 1 },
+  { id: 'diesel_generator', name: '柴油(發電機)', scope: 1, hasVersion: true },
+  { id: 'diesel', name: '柴油', scope: 1 },
+  { id: 'gasoline', name: '汽油', scope: 1 },
+  { id: 'lpg', name: '液化石油氣', scope: 1 },
+  { id: 'fire_extinguisher', name: '滅火器', scope: 1 },
+  { id: 'welding_rod', name: '焊條', scope: 1 },
+
+  // 範疇二
+  { id: 'electricity_bill', name: '外購電力', scope: 2 },
+
+  // 範疇三
+  { id: 'employee_commute', name: '員工通勤', scope: 3 }
+]
+
+export const scopeLabels = {
+  1: '範疇一：直接排放',
+  2: '範疇二：外購電力',
+  3: '範疇三：其他間接排放'
+}
+
+export interface UserFormData {
+  name: string
+  email: string
+  password: string
+  company: string
+  department: string
+  targetYear: number
+  energyCategories: string[]
+  dieselGeneratorVersion?: 'refuel' | 'test'
+  isActive?: boolean
+}
+
+export interface SubmissionRecord {
+  id: string
+  userId: string
+  userName: string
+  userDepartment: string
+  categoryId: string
+  categoryName: string
+  scope: 1 | 2 | 3
+  status: UserStatus
+  submissionDate: string
+  reviewDate?: string
+  amount: number
+  unit: string
+  co2Emission: number
+  reviewer?: string
+  comments?: string
+  priority: 'high' | 'medium' | 'low'
+}
+
+export const mockSubmissions: SubmissionRecord[] = [
+  {
+    id: 'sub_001',
+    userId: '1',
+    userName: '王小明',
+    userDepartment: '研發部',
+    categoryId: 'diesel',
+    categoryName: '柴油',
+    scope: 1,
+    status: 'approved',
+    submissionDate: '2024-03-15',
+    reviewDate: '2024-03-16',
+    amount: 150.5,
+    unit: '公升',
+    co2Emission: 375.25,
+    reviewer: '張主管',
+    comments: '數據正確，已核准',
+    priority: 'medium'
+  },
+  {
+    id: 'sub_002',
+    userId: '2',
+    userName: '李美華',
+    userDepartment: '行銷部',
+    categoryId: 'electricity_bill',
+    categoryName: '外購電力',
+    scope: 2,
+    status: 'pending',
+    submissionDate: '2024-03-18',
+    amount: 2850,
+    unit: '度',
+    co2Emission: 1425,
+    priority: 'high'
+  },
+  {
+    id: 'sub_003',
+    userId: '3',
+    userName: '張志豪',
+    userDepartment: '財務部',
+    categoryId: 'employee_commute',
+    categoryName: '員工通勤',
+    scope: 3,
+    status: 'submitted',
+    submissionDate: '2024-03-20',
+    amount: 45.2,
+    unit: '公里',
+    co2Emission: 12.1,
+    priority: 'low'
+  },
+  {
+    id: 'sub_004',
+    userId: '4',
+    userName: '陳雅婷',
+    userDepartment: '人資部',
+    categoryId: 'natural_gas',
+    categoryName: '天然氣',
+    scope: 1,
+    status: 'rejected',
+    submissionDate: '2024-03-10',
+    reviewDate: '2024-03-12',
+    amount: 80.3,
+    unit: '立方公尺',
+    co2Emission: 160.6,
+    reviewer: '林主管',
+    comments: '數據來源不明確，請重新提交',
+    priority: 'medium'
+  },
+  {
+    id: 'sub_005',
+    userId: '5',
+    userName: '林俊傑',
+    userDepartment: '業務部',
+    categoryId: 'gasoline',
+    categoryName: '汽油',
+    scope: 1,
+    status: 'approved',
+    submissionDate: '2024-03-12',
+    reviewDate: '2024-03-13',
+    amount: 120.8,
+    unit: '公升',
+    co2Emission: 278.84,
+    reviewer: '張主管',
+    comments: '符合標準，已核准',
+    priority: 'medium'
+  },
+  {
+    id: 'sub_006',
+    userId: '6',
+    userName: '黃詩涵',
+    userDepartment: '設計部',
+    categoryId: 'lpg',
+    categoryName: '液化石油氣',
+    scope: 1,
+    status: 'pending',
+    submissionDate: '2024-03-19',
+    amount: 25.6,
+    unit: '公斤',
+    co2Emission: 76.8,
+    priority: 'low'
+  },
+  {
+    id: 'sub_007',
+    userId: '7',
+    userName: '劉建國',
+    userDepartment: '生產部',
+    categoryId: 'diesel_generator',
+    categoryName: '柴油(發電機)',
+    scope: 1,
+    status: 'submitted',
+    submissionDate: '2024-03-21',
+    amount: 200,
+    unit: '公升',
+    co2Emission: 522,
+    priority: 'high'
+  },
+  {
+    id: 'sub_008',
+    userId: '8',
+    userName: '楊雅琪',
+    userDepartment: '品管部',
+    categoryId: 'electricity_bill',
+    categoryName: '外購電力',
+    scope: 2,
+    status: 'approved',
+    submissionDate: '2024-03-14',
+    reviewDate: '2024-03-15',
+    amount: 1850,
+    unit: '度',
+    co2Emission: 925,
+    reviewer: '陳主管',
+    priority: 'medium'
+  },
+  {
+    id: 'sub_009',
+    userId: '1',
+    userName: '王小明',
+    userDepartment: '研發部',
+    categoryId: 'acetylene',
+    categoryName: '乙炔',
+    scope: 1,
+    status: 'pending',
+    submissionDate: '2024-03-22',
+    amount: 15.2,
+    unit: '公斤',
+    co2Emission: 45.6,
+    priority: 'low'
+  },
+  {
+    id: 'sub_010',
+    userId: '2',
+    userName: '李美華',
+    userDepartment: '行銷部',
+    categoryId: 'employee_commute',
+    categoryName: '員工通勤',
+    scope: 3,
+    status: 'approved',
+    submissionDate: '2024-03-17',
+    reviewDate: '2024-03-18',
+    amount: 38.5,
+    unit: '公里',
+    co2Emission: 10.3,
+    reviewer: '林主管',
+    priority: 'low'
+  },
+  {
+    id: 'sub_011',
+    userId: '3',
+    userName: '張志豪',
+    userDepartment: '財務部',
+    categoryId: 'refrigerant',
+    categoryName: '冷媒',
+    scope: 1,
+    status: 'rejected',
+    submissionDate: '2024-03-16',
+    reviewDate: '2024-03-17',
+    amount: 2.5,
+    unit: '公斤',
+    co2Emission: 5250,
+    reviewer: '張主管',
+    comments: '冷媒類型與申報不符',
+    priority: 'high'
+  },
+  {
+    id: 'sub_012',
+    userId: '4',
+    userName: '陳雅婷',
+    userDepartment: '人資部',
+    categoryId: 'urea',
+    categoryName: '尿素',
+    scope: 1,
+    status: 'submitted',
+    submissionDate: '2024-03-23',
+    amount: 50,
+    unit: '公斤',
+    co2Emission: 82.5,
+    priority: 'low'
+  },
+  {
+    id: 'sub_013',
+    userId: '5',
+    userName: '林俊傑',
+    userDepartment: '業務部',
+    categoryId: 'electricity_bill',
+    categoryName: '外購電力',
+    scope: 2,
+    status: 'pending',
+    submissionDate: '2024-03-24',
+    amount: 3200,
+    unit: '度',
+    co2Emission: 1600,
+    priority: 'high'
+  },
+  {
+    id: 'sub_014',
+    userId: '6',
+    userName: '黃詩涵',
+    userDepartment: '設計部',
+    categoryId: 'wd40',
+    categoryName: 'WD-40',
+    scope: 1,
+    status: 'approved',
+    submissionDate: '2024-03-11',
+    reviewDate: '2024-03-12',
+    amount: 5.8,
+    unit: '公斤',
+    co2Emission: 17.4,
+    reviewer: '陳主管',
+    priority: 'low'
+  },
+  {
+    id: 'sub_015',
+    userId: '7',
+    userName: '劉建國',
+    userDepartment: '生產部',
+    categoryId: 'welding_rod',
+    categoryName: '焊條',
+    scope: 1,
+    status: 'submitted',
+    submissionDate: '2024-03-25',
+    amount: 12.5,
+    unit: '公斤',
+    co2Emission: 25,
+    priority: 'medium'
+  },
+  {
+    id: 'sub_016',
+    userId: '8',
+    userName: '楊雅琪',
+    userDepartment: '品管部',
+    categoryId: 'fire_extinguisher',
+    categoryName: '滅火器',
+    scope: 1,
+    status: 'rejected',
+    submissionDate: '2024-03-13',
+    reviewDate: '2024-03-14',
+    amount: 8.2,
+    unit: '公斤',
+    co2Emission: 16.4,
+    reviewer: '林主管',
+    comments: '設備檢查記錄不完整',
+    priority: 'medium'
+  },
+  {
+    id: 'sub_017',
+    userId: '1',
+    userName: '王小明',
+    userDepartment: '研發部',
+    categoryId: 'septictank',
+    categoryName: '化糞池',
+    scope: 1,
+    status: 'pending',
+    submissionDate: '2024-03-26',
+    amount: 1200,
+    unit: '公升',
+    co2Emission: 240,
+    priority: 'medium'
+  },
+  {
+    id: 'sub_018',
+    userId: '2',
+    userName: '李美華',
+    userDepartment: '行銷部',
+    categoryId: 'diesel',
+    categoryName: '柴油',
+    scope: 1,
+    status: 'approved',
+    submissionDate: '2024-03-09',
+    reviewDate: '2024-03-10',
+    amount: 95.3,
+    unit: '公升',
+    co2Emission: 237.75,
+    reviewer: '張主管',
+    priority: 'medium'
+  },
+  {
+    id: 'sub_019',
+    userId: '3',
+    userName: '張志豪',
+    userDepartment: '財務部',
+    categoryId: 'gasoline',
+    categoryName: '汽油',
+    scope: 1,
+    status: 'submitted',
+    submissionDate: '2024-03-27',
+    amount: 85.6,
+    unit: '公升',
+    co2Emission: 197.38,
+    priority: 'low'
+  },
+  {
+    id: 'sub_020',
+    userId: '4',
+    userName: '陳雅婷',
+    userDepartment: '人資部',
+    categoryId: 'employee_commute',
+    categoryName: '員工通勤',
+    scope: 3,
+    status: 'pending',
+    submissionDate: '2024-03-28',
+    amount: 52.8,
+    unit: '公里',
+    co2Emission: 14.16,
+    priority: 'low'
+  },
+  {
+    id: 'sub_021',
+    userId: '5',
+    userName: '林俊傑',
+    userDepartment: '業務部',
+    categoryId: 'natural_gas',
+    categoryName: '天然氣',
+    scope: 1,
+    status: 'approved',
+    submissionDate: '2024-03-08',
+    reviewDate: '2024-03-09',
+    amount: 125.4,
+    unit: '立方公尺',
+    co2Emission: 250.8,
+    reviewer: '陳主管',
+    priority: 'medium'
+  },
+  {
+    id: 'sub_022',
+    userId: '6',
+    userName: '黃詩涵',
+    userDepartment: '設計部',
+    categoryId: 'electricity_bill',
+    categoryName: '外購電力',
+    scope: 2,
+    status: 'submitted',
+    submissionDate: '2024-03-29',
+    amount: 2150,
+    unit: '度',
+    co2Emission: 1075,
+    priority: 'high'
+  }
+]
+
+export const calculateSubmissionStats = (submissions: SubmissionRecord[]) => {
+  return {
+    submitted: submissions.filter(s => s.status === 'submitted').length,
+    pending: submissions.filter(s => s.status === 'pending').length,
+    approved: submissions.filter(s => s.status === 'approved').length,
+    rejected: submissions.filter(s => s.status === 'rejected').length
+  }
+}
+
+export const priorityLabels = {
+  high: '高',
+  medium: '中',
+  low: '低'
+}
+
+export const priorityColors = {
+  high: {
+    bg: 'bg-red-100',
+    text: 'text-red-800',
+    border: 'border-red-300'
+  },
+  medium: {
+    bg: 'bg-yellow-100',
+    text: 'text-yellow-800',
+    border: 'border-yellow-300'
+  },
+  low: {
+    bg: 'bg-gray-100',
+    text: 'text-gray-800',
+    border: 'border-gray-300'
+  }
+}
