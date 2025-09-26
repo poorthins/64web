@@ -1,15 +1,22 @@
-import React, { createContext, useContext, useEffect, useState } from 'react'
+import React, { createContext, useContext, useEffect, useState, useMemo } from 'react'
 import { User } from '@supabase/supabase-js'
 import { supabase } from '../lib/supabaseClient'
+import { useRole } from '../hooks/useRole'
 
 interface AuthContextType {
   user: User | null
   loading: boolean
+  isAdmin: boolean
+  role: string | null
+  loadingRole: boolean
 }
 
 const AuthContext = createContext<AuthContextType>({
   user: null,
-  loading: true
+  loading: true,
+  isAdmin: false,
+  role: null,
+  loadingRole: true
 })
 
 export const useAuth = () => {
@@ -42,9 +49,21 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     return () => subscription.unsubscribe()
   }, [])
 
+  // 使用 useRole hook 來獲取角色資訊
+  const { role, loadingRole } = useRole()
+
+  // 計算 isAdmin
+  const isAdmin = useMemo(() => {
+    if (loadingRole) return false // 載入中時預設為 false
+    return role === 'admin'
+  }, [role, loadingRole])
+
   const value = {
     user,
-    loading
+    loading,
+    isAdmin,
+    role,
+    loadingRole
   }
 
   return (

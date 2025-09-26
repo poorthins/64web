@@ -1,17 +1,26 @@
 import React, { useState, useMemo, useEffect } from 'react';
-import { Download, X } from 'lucide-react';
+import { useSearchParams } from 'react-router-dom';
+import { Download, X, Eye } from 'lucide-react';
 import StatusIndicator from '../../components/StatusIndicator';
 import { EntryStatus } from '../../components/StatusSwitcher';
 import BottomActionBar from '../../components/BottomActionBar';
 import { useEditPermissions } from '../../hooks/useEditPermissions';
 import { useFrontendStatus } from '../../hooks/useFrontendStatus';
-import { updateEntryStatus, getEntryByPageKeyAndYear, upsertEnergyEntry } from '../../api/entries';
+import { updateEntryStatus, getEntryByPageKeyAndYear, getEntryById, upsertEnergyEntry } from '../../api/entries';
+import ReviewSection from '../../components/ReviewSection';
 import { uploadEvidenceWithEntry, EvidenceFile } from '../../api/files';
 import { designTokens } from '../../utils/designTokens';
 import EvidenceUpload, { MemoryFile } from '../../components/EvidenceUpload';
 import { DocumentHandler } from '../../services/documentHandler';
 
 export default function CommutePage() {
+  const [searchParams] = useSearchParams();
+
+  // 審核模式檢測
+  const isReviewMode = searchParams.get('mode') === 'review'
+  const reviewEntryId = searchParams.get('entryId')
+  const reviewUserId = searchParams.get('userId')
+
   const pageKey = 'employee_commute'
   const [year] = useState(new Date().getFullYear())
   const [initialStatus, setInitialStatus] = useState<EntryStatus>('submitted');
@@ -41,6 +50,9 @@ export default function CommutePage() {
   
   // 編輯權限控制
   const editPermissions = useEditPermissions(currentStatus)
+
+  // 審核模式時為唯讀
+  const isReadOnly = isReviewMode
   
   // 範例圖片 URL（需要放在 public 資料夾或使用實際 URL）
   const exampleImages = [
@@ -53,8 +65,7 @@ export default function CommutePage() {
     return employeeCount > 0 || averageDistance > 0 || excelMemoryFile !== null || mapMemoryFiles.length > 0 || excelFile.length > 0 || mapScreenshots.length > 0
   }, [employeeCount, averageDistance, excelMemoryFile, mapMemoryFiles, excelFile, mapScreenshots])
 
-  // 允許所有狀態編輯
-  const isReadOnly = false
+  // 允許所有狀態編輯 (已在上方定義為審核模式控制)
 
   // 處理鍵盤事件 (ESC 關閉範例圖片)
   useEffect(() => {
@@ -81,7 +92,15 @@ export default function CommutePage() {
         setSubmitting(true)
 
         // 檢查是否已有非草稿記錄
-        const existingEntry = await getEntryByPageKeyAndYear(pageKey, year)
+        // 載入基本資料
+        let existingEntry
+        if (isReviewMode && reviewEntryId) {
+          console.log('🔍 [CommuteePage] 審核模式 - 載入特定記錄:', reviewEntryId)
+          existingEntry = await getEntryById(reviewEntryId)
+        } else {
+          console.log('🔍 [CommuteePage] 一般模式 - 載入用戶自己的記錄')
+          existingEntry = await getEntryByPageKeyAndYear(pageKey, year)
+        }
         if (existingEntry && existingEntry.status !== 'draft') {
           setInitialStatus(existingEntry.status as EntryStatus)
           setCurrentEntryId(existingEntry.id)
@@ -111,7 +130,7 @@ export default function CommutePage() {
     }
 
     loadData()
-  }, [])
+  }, [isReviewMode, reviewEntryId, reviewUserId])
 
   const handleSubmit = async () => {
     if (employeeCount <= 0 || averageDistance <= 0) {
@@ -416,18 +435,38 @@ export default function CommutePage() {
         <div className="h-20"></div>
       </div>
 
-      {/* 底部操作欄 */}
-      <BottomActionBar
-        currentStatus={currentStatus}
-        currentEntryId={currentEntryId}
-        isUpdating={false}
-        editPermissions={editPermissions}
-        submitting={submitting}
-        onSubmit={handleSubmit}
-        onClear={handleClear}
-        hasAnyData={hasAnyData}
-        designTokens={designTokens}
-      />
+      {/* 底部操作欄 - 審核模式下隱藏 */}
+      {!isReviewMode && (
+        <BottomActionBar
+          currentStatus={currentStatus}
+          currentEntryId={currentEntryId}
+          isUpdating={false}
+          editPermissions={editPermissions}
+          submitting={submitting}
+          onSubmit={handleSubmit}
+          onClear={handleClear}
+          hasAnyData={hasAnyData}
+          designTokens={designTokens}
+        />
+      )}
+
+      {/* 審核區塊 - 只在審核模式顯示 */}
+      {isReviewMode && currentEntryId && (
+        <ReviewSection
+          entryId={reviewEntryId || currentEntryId}
+          userId={reviewUserId || "current_user"}
+          category="員工通勤"
+          userName={reviewUserId || "用戶"}
+          amount={totalMiles}
+          unit="英里"
+          onApprove={() => {
+            console.log('✅ 員工通勤填報審核通過 - 由 ReviewSection 處理')
+          }}
+          onReject={(reason) => {
+            console.log('❌ 員工通勤填報已退回 - 由 ReviewSection 處理:', reason)
+          }}
+        />
+      )}
 
 
       {/* 圖片放大 Modal - 範例圖片 */}

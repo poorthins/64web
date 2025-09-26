@@ -1,5 +1,6 @@
 import { useState, useCallback, useEffect, useRef } from 'react'
-import { Plus, Trash2, Calendar, Truck, AlertCircle, CheckCircle, Upload, Loader2 } from 'lucide-react'
+import { useSearchParams } from 'react-router-dom'
+import { Plus, Trash2, Calendar, Truck, AlertCircle, CheckCircle, Upload, Loader2, Eye } from 'lucide-react'
 import { useFrontendStatus } from '../../hooks/useFrontendStatus'
 import { useEditPermissions } from '../../hooks/useEditPermissions'
 import StatusIndicator from '../../components/StatusIndicator'
@@ -7,7 +8,8 @@ import EvidenceUpload, { MemoryFile } from '../../components/EvidenceUpload'
 import BottomActionBar from '../../components/BottomActionBar'
 import { EntryStatus } from '../../components/StatusSwitcher'
 import { listMSDSFiles, listUsageEvidenceFiles, commitEvidence, deleteEvidence, deleteEvidenceFile, EvidenceFile, uploadEvidenceWithEntry } from '../../api/files'
-import { upsertEnergyEntry, sumMonthly, UpsertEntryInput, updateEntryStatus, getEntryByPageKeyAndYear } from '../../api/entries'
+import { upsertEnergyEntry, sumMonthly, UpsertEntryInput, updateEntryStatus, getEntryByPageKeyAndYear, getEntryById } from '../../api/entries'
+import ReviewSection from '../../components/ReviewSection'
 import { getEntryFiles } from '../../api/files'
 import { designTokens } from '../../utils/designTokens'
 import { debugRLSOperation, diagnoseAuthState } from '../../utils/authDiagnostics'
@@ -31,6 +33,13 @@ interface DieselData {
 
 
 export default function DieselPage() {
+  const [searchParams] = useSearchParams()
+
+  // 審核模式檢測
+  const isReviewMode = searchParams.get('mode') === 'review'
+  const reviewEntryId = searchParams.get('entryId')
+  const reviewUserId = searchParams.get('userId')
+
   const currentYear = new Date().getFullYear()
   const [loading, setLoading] = useState(true)
   const [activeTab, setActiveTab] = useState<'usage'>('usage')
@@ -79,6 +88,9 @@ export default function DieselPage() {
   const { currentStatus, handleSubmitSuccess, handleDataChanged, isInitialLoad } = frontendStatus
   
   const editPermissions = useEditPermissions(currentStatus || 'submitted')
+
+  // 審核模式時為唯讀
+  const isReadOnly = isReviewMode
 
   const calculateTotals = useCallback((records: DieselRecord[]) => {
     const totalQuantity = records.reduce((sum, record) => sum + record.quantity, 0)
@@ -334,8 +346,15 @@ export default function DieselPage() {
         setLoading(true)
         setError(null)
 
-        // 檢查是否已有非草稿記錄
-        const existingEntry = await getEntryByPageKeyAndYear(pageKey, currentYear)
+        // 載入基本資料
+        let existingEntry
+        if (isReviewMode && reviewEntryId) {
+          console.log('🔍 [DieselPage] 審核模式 - 載入特定記錄:', reviewEntryId)
+          existingEntry = await getEntryById(reviewEntryId)
+        } else {
+          console.log('🔍 [DieselPage] 一般模式 - 載入用戶自己的記錄')
+          existingEntry = await getEntryByPageKeyAndYear(pageKey, currentYear)
+        }
         if (existingEntry && existingEntry.status !== 'draft') {
           setInitialStatus(existingEntry.status as EntryStatus)
           setCurrentEntryId(existingEntry.id)
@@ -400,7 +419,7 @@ export default function DieselPage() {
     }
 
     loadData()
-  }, [])
+  }, [isReviewMode, reviewEntryId, reviewUserId])
 
   // 監聽表單變更
   useEffect(() => {
@@ -534,7 +553,7 @@ export default function DieselPage() {
                 memoryFiles={newRecord.memoryFiles}
                 onMemoryFilesChange={(memFiles) => setNewRecord(prev => ({ ...prev, memoryFiles: memFiles }))}
                 maxFiles={1}
-                disabled={submitting || !editPermissions.canUploadFiles}
+                disabled={submitting || !editPermissions.canUploadFiles || isReadOnly}
                 kind="other"
                 mode="edit"
                 hideFileCount={true}
@@ -606,7 +625,7 @@ export default function DieselPage() {
                     memoryFiles={record.memoryFiles || []}
                     onMemoryFilesChange={(memFiles) => handleRecordMemoryFileChange(record.id, memFiles)}
                     maxFiles={1}
-                    disabled={!editPermissions.canUploadFiles}
+                    disabled={!editPermissions.canUploadFiles || isReadOnly}
                     kind="other"
                     mode="edit"
                     hideFileCount={true}
@@ -665,18 +684,38 @@ export default function DieselPage() {
         <div className="h-20"></div>
       </div>
 
-        {/* 統一底部操作欄 */}
-        <BottomActionBar
-        currentStatus={currentStatus}
-        currentEntryId={currentEntryId}
-        isUpdating={false}
-        hasSubmittedBefore={hasSubmittedBefore}
-        editPermissions={editPermissions}
-        submitting={submitting}
-        onSubmit={handleSubmit}
-        onClear={() => setShowClearConfirmModal(true)}
-        designTokens={designTokens}
-      />
+        {/* 統一底部操作欄 - 審核模式下隱藏 */}
+        {!isReviewMode && (
+          <BottomActionBar
+          currentStatus={currentStatus}
+          currentEntryId={currentEntryId}
+          isUpdating={false}
+          hasSubmittedBefore={hasSubmittedBefore}
+          editPermissions={editPermissions}
+          submitting={submitting}
+          onSubmit={handleSubmit}
+          onClear={() => setShowClearConfirmModal(true)}
+          designTokens={designTokens}
+        />
+        )}
+
+        {/* 審核區塊 - 只在審核模式顯示 */}
+        {isReviewMode && currentEntryId && (
+          <ReviewSection
+            entryId={reviewEntryId || currentEntryId}
+            userId={reviewUserId || "current_user"}
+            category="柴油"
+            userName={reviewUserId || "用戶"}
+            amount={data.totalQuantity}
+            unit="L"
+            onApprove={() => {
+              console.log('✅ 柴油填報審核通過 - 由 ReviewSection 處理')
+            }}
+            onReject={(reason) => {
+              console.log('❌ 柴油填報已退回 - 由 ReviewSection 處理:', reason)
+            }}
+          />
+        )}
 
       {/* 清除確認模態框 */}
       {showClearConfirmModal && (

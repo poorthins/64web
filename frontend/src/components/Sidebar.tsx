@@ -1,71 +1,80 @@
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useNavigation, SidebarItem } from '../contexts/NavigationContext';
-import { useRole } from '../hooks/useRole';
+import { useAuth } from '../contexts/AuthContext';
+import { useCurrentUserPermissions } from '../hooks/useCurrentUserPermissions';
+import { ENERGY_CATEGORIES_BY_SCOPE, SCOPE_LABELS } from '../utils/energyCategories';
 
 interface SidebarItemWithIcon extends SidebarItem {
   icon?: React.ReactNode;
 }
 
-const sidebarData: SidebarItemWithIcon[] = [
-  {
-    id: 'category1',
-    title: '範疇一（直接排放）',
-    icon: (
-      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 011-1h1m-1 1h1m-1 1h1" />
-      </svg>
-    ),
-    children: [
-      { id: 'wd40', title: 'WD-40' },
-      { id: 'acetylene', title: '乙炔' },
-      { id: 'refrigerant', title: '冷媒' },
-      { id: 'septictank', title: '化糞池' },
-      { id: 'natural_gas', title: '天然氣' },
-      { id: 'urea', title: '尿素' },
-      { id: 'diesel_generator', title: '柴油(發電機)' },
-      { id: 'diesel', title: '柴油' },
-      { id: 'gasoline', title: '汽油' },
-      { id: 'lpg', title: '液化石油氣' },
-      { id: 'fire_extinguisher', title: '滅火器' },
-      { id: 'welding_rod', title: '焊條' }
-    ]
-  },
-  {
-    id: 'category2',
-    title: '範疇二（間接排放）',
-    icon: (
-      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
-      </svg>
-    ),
-    children: [
-      { id: 'electricity_bill', title: '外購電力' }
-    ]
-  },
-  {
-    id: 'category3',
-    title: '範疇三（其他間接）',
-    icon: (
-      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" />
-      </svg>
-    ),
-    children: [
-      { id: 'employee_commute', title: '員工通勤' }
-    ]
-  }
-];
+// 能源類別的顯示名稱映射
+const ENERGY_CATEGORY_LABELS: Record<string, string> = {
+  wd40: 'WD-40',
+  acetylene: '乙炔',
+  refrigerant: '冷媒',
+  septic_tank: '化糞池',
+  natural_gas: '天然氣',
+  urea: '尿素',
+  diesel_generator: '柴油(發電機)',
+  diesel: '柴油',
+  gasoline: '汽油',
+  lpg: '液化石油氣',
+  fire_extinguisher: '滅火器',
+  welding_rod: '焊條',
+  electricity_bill: '外購電力',
+  employee_commute: '員工通勤'
+};
+
+// 範疇圖示配置
+const SCOPE_ICONS = {
+  scope1: (
+    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 011-1h1m-1 1h1m-1 1h1" />
+    </svg>
+  ),
+  scope2: (
+    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
+    </svg>
+  ),
+  scope3: (
+    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" />
+    </svg>
+  ),
+};
 
 export default function Sidebar() {
-  const [expandedItems, setExpandedItems] = useState<string[]>(['category1']);
+  const [expandedItems, setExpandedItems] = useState<string[]>(['scope1']);
   const { selectItem } = useNavigation();
   const navigate = useNavigate();
   const location = useLocation();
-  const { role, loadingRole } = useRole();
-  
-  // 檢查是否為管理員
-  const isAdmin = !loadingRole && role === 'admin';
+  const { isAdmin, loadingRole } = useAuth();
+  const { hasPermissionSync, getVisibleScopes, isLoading: isPermissionsLoading } = useCurrentUserPermissions();
+
+  // 根據權限動態生成 sidebar 資料
+  const sidebarData = useMemo((): SidebarItemWithIcon[] => {
+    // 載入中時返回空陣列
+    if (loadingRole || isPermissionsLoading) {
+      return [];
+    }
+
+    const visibleScopes = getVisibleScopes();
+
+    return visibleScopes.map(scope => ({
+      id: scope,
+      title: SCOPE_LABELS[scope],
+      icon: SCOPE_ICONS[scope],
+      children: ENERGY_CATEGORIES_BY_SCOPE[scope]
+        .filter(category => isAdmin || hasPermissionSync(category)) // 管理員看所有，一般用戶看有權限的
+        .map(category => ({
+          id: category,
+          title: ENERGY_CATEGORY_LABELS[category]
+        }))
+    })).filter(scope => scope.children.length > 0); // 過濾掉沒有子項目的範疇
+  }, [isAdmin, loadingRole, isPermissionsLoading, hasPermissionSync, getVisibleScopes]);
 
   const toggleExpand = (itemId: string) => {
     setExpandedItems(prev => 
@@ -91,8 +100,9 @@ export default function Sidebar() {
             if (hasChildren && level === 0) {
               toggleExpand(item.id);
             } else {
-              const parent = level > 0 ? sidebarData.find(cat => 
-                cat.children?.some(child => child.id === item.id)
+              // 尋找父範疇（動態）
+              const parent = level > 0 ? sidebarData.find(scope =>
+                scope.children?.some(child => child.id === item.id)
               ) : undefined;
               selectItem(item, parent);
               navigate(`/app/${item.id}`);
@@ -165,17 +175,94 @@ export default function Sidebar() {
       
       <nav className="mt-6 px-3">
         <div className="space-y-2">
-          {/* 所有使用者都顯示範疇一、二、三 */}
-          {sidebarData.map(item => renderSidebarItem(item))}
-          
-          {/* 管理員顯示額外提示 */}
-          {isAdmin && (
-            <div className="mt-8 text-center py-4 border-t border-brand-400/30">
+          {/* 動態顯示有權限的範疇和類別 */}
+          {loadingRole || isPermissionsLoading ? (
+            <div className="flex items-center justify-center py-8">
+              <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-white"></div>
+              <div className="ml-3 text-white/60 text-sm">載入權限中...</div>
+            </div>
+          ) : sidebarData.length > 0 ? (
+            sidebarData.map(item => renderSidebarItem(item))
+          ) : (
+            <div className="text-center py-8">
               <div className="text-white/60 text-sm">
-                管理員模式
+                暫無可用的能源類別
               </div>
-              <div className="mt-1 text-white/40 text-xs">
-                具備系統管理功能
+              <div className="text-white/40 text-xs mt-1">
+                請聯繫管理員開通權限
+              </div>
+            </div>
+          )}
+          
+          {/* 管理員顯示導航選項 */}
+          {isAdmin && (
+            <div className="mt-8 py-4 border-t border-brand-400/30">
+              <div className="text-center mb-4">
+                <div className="text-white/60 text-sm">
+                  管理員模式
+                </div>
+                <div className="mt-1 text-white/40 text-xs">
+                  具備系統管理功能
+                </div>
+              </div>
+
+              {/* 管理員導航選項 */}
+              <div className="space-y-2">
+                <button
+                  onClick={() => navigate('/app/admin')}
+                  className={`w-full text-left px-4 py-3 rounded-lg text-sm transition-all duration-200 ${
+                    location.pathname.startsWith('/app/admin')
+                      ? 'bg-brand-700 text-white font-medium'
+                      : 'text-brand-100 hover:bg-brand-700'
+                  }`}
+                >
+                  <div className="flex items-center space-x-3">
+                    <span>🛡️</span>
+                    <span>管理控制台</span>
+                  </div>
+                </button>
+
+                <button
+                  onClick={() => navigate('/app/admin/create')}
+                  className={`w-full text-left px-4 py-3 rounded-lg text-sm transition-all duration-200 ${
+                    location.pathname === '/app/admin/create'
+                      ? 'bg-brand-700 text-white font-medium'
+                      : 'text-brand-100 hover:bg-brand-700'
+                  }`}
+                >
+                  <div className="flex items-center space-x-3">
+                    <span>👤</span>
+                    <span>新增用戶</span>
+                  </div>
+                </button>
+
+                <button
+                  onClick={() => navigate('/app/admin/statistics')}
+                  className={`w-full text-left px-4 py-3 rounded-lg text-sm transition-all duration-200 ${
+                    location.pathname === '/app/admin/statistics'
+                      ? 'bg-brand-700 text-white font-medium'
+                      : 'text-brand-100 hover:bg-brand-700'
+                  }`}
+                >
+                  <div className="flex items-center space-x-3">
+                    <span>📊</span>
+                    <span>統計詳情</span>
+                  </div>
+                </button>
+
+                <button
+                  onClick={() => navigate('/app/admin/submissions')}
+                  className={`w-full text-left px-4 py-3 rounded-lg text-sm transition-all duration-200 ${
+                    location.pathname === '/app/admin/submissions'
+                      ? 'bg-brand-700 text-white font-medium'
+                      : 'text-brand-100 hover:bg-brand-700'
+                  }`}
+                >
+                  <div className="flex items-center space-x-3">
+                    <span>📝</span>
+                    <span>填報管理</span>
+                  </div>
+                </button>
               </div>
             </div>
           )}

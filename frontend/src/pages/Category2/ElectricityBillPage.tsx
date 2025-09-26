@@ -1,5 +1,6 @@
 import { useState, useEffect, useMemo, useCallback } from 'react'
-import { AlertCircle, CheckCircle, Loader2, X, Trash2, Plus } from 'lucide-react'
+import { useSearchParams } from 'react-router-dom'
+import { AlertCircle, CheckCircle, Loader2, X, Trash2, Plus, Eye } from 'lucide-react'
 import EvidenceUpload, { MemoryFile } from '../../components/EvidenceUpload'
 import { EntryStatus } from '../../components/StatusSwitcher'
 import Toast, { ToastType } from '../../components/Toast'
@@ -7,7 +8,8 @@ import BottomActionBar from '../../components/BottomActionBar'
 import { useEditPermissions } from '../../hooks/useEditPermissions'
 import { useFrontendStatus } from '../../hooks/useFrontendStatus'
 import { commitEvidence, getEntryFiles, EvidenceFile, uploadEvidenceWithEntry } from '../../api/files'
-import { upsertEnergyEntry, UpsertEntryInput, updateEntryStatus, getEntryByPageKeyAndYear } from '../../api/entries'
+import { upsertEnergyEntry, UpsertEntryInput, updateEntryStatus, getEntryByPageKeyAndYear, getEntryById } from '../../api/entries'
+import ReviewSection from '../../components/ReviewSection'
 import { designTokens } from '../../utils/designTokens'
 import { DocumentHandler } from '../../services/documentHandler'
 
@@ -24,6 +26,13 @@ interface SimpleBillData {
 
 
 const ElectricityBillPage = () => {
+  const [searchParams] = useSearchParams()
+
+  // 審核模式檢測
+  const isReviewMode = searchParams.get('mode') === 'review'
+  const reviewEntryId = searchParams.get('entryId')
+  const reviewUserId = searchParams.get('userId')
+
   // 基本狀態
   const [loading, setLoading] = useState(true)
   const [submitting, setSubmitting] = useState(false)
@@ -41,7 +50,7 @@ const ElectricityBillPage = () => {
   const [showSuccessModal, setShowSuccessModal] = useState(false)
   const [showClearModal, setShowClearModal] = useState(false)
 
-  const pageKey = 'electricity'
+  const pageKey = 'electricity_bill'
 
   // 前端狀態管理
   const frontendStatus = useFrontendStatus({
@@ -464,7 +473,16 @@ const ElectricityBillPage = () => {
       try {
         setLoading(true)
 
-        const existingEntry = await getEntryByPageKeyAndYear(pageKey, year)
+        // 載入基本資料
+        let existingEntry
+        if (isReviewMode && reviewEntryId) {
+          console.log('🔍 [ElectricityBillPage] 審核模式 - 載入特定記錄:', reviewEntryId)
+          existingEntry = await getEntryById(reviewEntryId)
+        } else {
+          console.log('🔍 [ElectricityBillPage] 一般模式 - 載入用戶自己的記錄')
+          existingEntry = await getEntryByPageKeyAndYear(pageKey, year)
+        }
+
         if (existingEntry && existingEntry.status !== 'draft') {
           setInitialStatus(existingEntry.status as EntryStatus)
           setCurrentEntryId(existingEntry.id)
@@ -507,7 +525,7 @@ const ElectricityBillPage = () => {
     }
 
     loadData()
-  }, [year, pageKey])
+  }, [isReviewMode, reviewEntryId, reviewUserId, year, pageKey])
 
   // 初始化時新增一筆空白帳單
   useEffect(() => {
@@ -527,6 +545,7 @@ const ElectricityBillPage = () => {
       </div>
     )
   }
+
 
   return (
     <div className="min-h-screen bg-green-50">
@@ -693,7 +712,7 @@ const ElectricityBillPage = () => {
                       value={bill.billingStart}
                       onChange={(e) => handleBillChange(bill.id, 'billingStart', e.target.value)}
                       className="w-32 px-3 py-1.5 border rounded focus:ring-2 focus:ring-green-500 focus:border-green-500"
-                      disabled={submitting || !editPermissions.canEdit}
+                      disabled={submitting || !editPermissions.canEdit || isReviewMode}
                     />
                     <span className="text-gray-500">~</span>
                     <input
@@ -702,7 +721,7 @@ const ElectricityBillPage = () => {
                       value={bill.billingEnd}
                       onChange={(e) => handleBillChange(bill.id, 'billingEnd', e.target.value)}
                       className="w-32 px-3 py-1.5 border rounded focus:ring-2 focus:ring-green-500 focus:border-green-500"
-                      disabled={submitting || !editPermissions.canEdit}
+                      disabled={submitting || !editPermissions.canEdit || isReviewMode}
                     />
                     {bill.billingDays > 0 && (
                       <span className="text-sm text-gray-600">({bill.billingDays}天)</span>
@@ -720,7 +739,7 @@ const ElectricityBillPage = () => {
                       value={bill.billingUnits || ''}
                       onChange={(e) => handleBillChange(bill.id, 'billingUnits', Number(e.target.value) || 0)}
                       className="w-24 px-3 py-1.5 border rounded focus:ring-2 focus:ring-green-500 focus:border-green-500"
-                      disabled={submitting || !editPermissions.canEdit}
+                      disabled={submitting || !editPermissions.canEdit || isReviewMode}
                     />
                     <span className="text-sm text-gray-500">度</span>
                   </div>
@@ -734,7 +753,7 @@ const ElectricityBillPage = () => {
                       memoryFiles={bill.memoryFiles || []}
                       onMemoryFilesChange={(memFiles) => handleBillChange(bill.id, 'memoryFiles', memFiles)}
                       maxFiles={1}
-                      disabled={submitting || !editPermissions.canUploadFiles}
+                      disabled={submitting || !editPermissions.canUploadFiles || isReviewMode}
                       kind="other"
                       mode="edit"
                     />
@@ -745,7 +764,7 @@ const ElectricityBillPage = () => {
                     <button
                       onClick={() => removeBill(bill.id)}
                       className="text-gray-400 hover:text-red-500 text-xl leading-none"
-                      disabled={submitting}
+                      disabled={submitting || isReviewMode}
                       title="刪除帳單"
                     >
                       ×
@@ -767,7 +786,7 @@ const ElectricityBillPage = () => {
           {editPermissions.canEdit && (
             <button
               onClick={addBill}
-              disabled={submitting}
+              disabled={submitting || isReviewMode}
               className="w-full py-3 border-2 border-dashed border-gray-300 rounded-lg text-gray-600 hover:border-green-500 hover:text-green-600 transition-colors"
             >
               + 新增電費單
@@ -854,19 +873,39 @@ const ElectricityBillPage = () => {
         </div>
       )}
 
-      {/* 底部操作欄 */}
-      <BottomActionBar
-        currentStatus={frontendStatus?.currentStatus || initialStatus}
-        currentEntryId={currentEntryId}
-        isUpdating={submitting}
-        hasSubmittedBefore={hasSubmittedBefore}
-        hasAnyData={bills.length > 0 && bills.some(bill => bill.billingUnits > 0)}
-        editPermissions={editPermissions}
-        submitting={submitting}
-        onSubmit={handleSubmit}
-        onClear={() => setShowClearModal(true)}
-        designTokens={designTokens}
-      />
+      {/* 底部操作欄 - 審核模式下隱藏 */}
+      {!isReviewMode && (
+        <BottomActionBar
+          currentStatus={frontendStatus?.currentStatus || initialStatus}
+          currentEntryId={currentEntryId}
+          isUpdating={submitting}
+          hasSubmittedBefore={hasSubmittedBefore}
+          hasAnyData={bills.length > 0 && bills.some(bill => bill.billingUnits > 0)}
+          editPermissions={editPermissions}
+          submitting={submitting}
+          onSubmit={handleSubmit}
+          onClear={() => setShowClearModal(true)}
+          designTokens={designTokens}
+        />
+      )}
+
+      {/* 審核區塊 - 只在審核模式顯示 */}
+      {isReviewMode && currentEntryId && (
+        <ReviewSection
+          entryId={reviewEntryId || currentEntryId}
+          userId={reviewUserId || "current_user"}
+          category="外購電力"
+          userName={reviewUserId || "用戶"}
+          amount={bills.reduce((sum, bill) => sum + bill.billingUnits, 0)}
+          unit="度"
+          onApprove={() => {
+            console.log('✅ 外購電力填報審核通過 - 由 ReviewSection 處理')
+          }}
+          onReject={(reason) => {
+            console.log('❌ 外購電力填報已退回 - 由 ReviewSection 處理:', reason)
+          }}
+        />
+      )}
 
       {/* Toast 通知 */}
       {toast && (

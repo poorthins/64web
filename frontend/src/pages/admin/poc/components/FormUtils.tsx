@@ -11,7 +11,7 @@ export interface ValidationErrors {
   dieselGeneratorVersion?: string
 }
 
-export const validateUserForm = (data: Partial<UserFormData>): ValidationErrors => {
+export const validateUserForm = (data: Partial<UserFormData>, isEditMode: boolean = false): ValidationErrors => {
   const errors: ValidationErrors = {}
 
   // 姓名驗證
@@ -28,11 +28,17 @@ export const validateUserForm = (data: Partial<UserFormData>): ValidationErrors 
     errors.email = '請輸入有效的電子郵件格式'
   }
 
-  // 密碼驗證
-  if (!data.password?.trim()) {
-    errors.password = '請輸入密碼'
-  } else if (data.password.length < 6) {
-    errors.password = '密碼至少需要6個字符'
+  // 密碼驗證 - 編輯模式下可選
+  if (isEditMode) {
+    // 編輯模式：只有提供密碼時才驗證格式
+    if (data.password && data.password.trim() === '') {
+      errors.password = '密碼不能為空白字符'
+    }
+  } else {
+    // 新增模式：密碼必填
+    if (!data.password?.trim()) {
+      errors.password = '請輸入密碼'
+    }
   }
 
   // 公司驗證
@@ -80,10 +86,11 @@ export const InputField: React.FC<{
   type?: string
   value: string
   onChange: (value: string) => void
+  onBlur?: () => void
   error?: string
   placeholder?: string
   required?: boolean
-}> = ({ label, name, type = 'text', value, onChange, error, placeholder, required = false }) => {
+}> = ({ label, name, type = 'text', value, onChange, onBlur, error, placeholder, required = false }) => {
   return (
     <div className="space-y-1">
       <label htmlFor={name} className="block text-sm font-medium text-gray-700">
@@ -96,6 +103,7 @@ export const InputField: React.FC<{
         name={name}
         value={value}
         onChange={(e) => onChange(e.target.value)}
+        onBlur={onBlur}
         placeholder={placeholder}
         className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all duration-200 ${
           error ? 'border-red-300 bg-red-50' : 'border-gray-300'

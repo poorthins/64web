@@ -12,6 +12,7 @@ import ReportsPage from '../pages/ReportsPage'
 import WD40Page from '../pages/Category1/WD40Page'
 import AcetylenePage from '../pages/Category1/AcetylenePage'
 import RefrigerantPage from '../pages/Category1/RefrigerantPage'
+import ErrorBoundary from '../components/ErrorBoundary'
 import SepticTankPage from '../pages/Category1/SepticTankPage'
 import NaturalGasPage from '../pages/Category1/NaturalGasPage'
 import UreaPage from '../pages/Category1/UreaPage'
@@ -26,7 +27,13 @@ import CommutePage from '../pages/Category3/CommuteePage'
 import PingPage from '../pages/PingPage'
 import AdminPage from '../pages/AdminPage'
 import UserDetailPage from '../pages/admin/UserDetailPage'
-import { AdminDashboardPOC, CreateUserPOC, EditUserPOC, StatisticsDetailPOC } from '../pages/admin/poc'
+import AdminDashboard from '../pages/admin/AdminDashboard'
+import CreateUser from '../pages/admin/CreateUser'
+import EditUser from '../pages/admin/EditUser'
+import StatisticsDetail from '../pages/admin/StatisticsDetail'
+import APITest from '../pages/admin/APITest'
+import EnhancedSubmissionManagement from '../pages/admin/EnhancedSubmissionManagement'
+import SubmissionManagement from '../pages/admin/SubmissionManagement'
 import AdminRoute from '../components/AdminRoute'
 import UserRoute from '../components/UserRoute'
 import TestUserCheck from '../pages/TestUserCheck'
@@ -34,6 +41,15 @@ import TestReviewAPI from '../pages/TestReviewAPI'
 import FixUserRoles from '../pages/FixUserRoles'
 import RoleBasedHomePage from '../components/RoleBasedHomePage'
 import '../utils/roleDebug' // 載入診斷工具
+import {
+  StatusFlowTest,
+  StatusSyncTest,
+  AdminDashboardPOC,
+  CreateUserPOC,
+  EditUserPOC,
+  StatisticsDetailPOC
+} from '../pages/admin/poc'
+import ReviewPage from '../pages/admin/poc/ReviewPage'
 
 function AppRouter() {
   return (
@@ -51,7 +67,7 @@ function AppRouter() {
               {/* 管理員專用頁面 */}
               <Route path="admin" element={
                 <AdminRoute fallback={<DashboardPage />}>
-                  <AdminPage />
+                  <AdminDashboard />
                 </AdminRoute>
               } />
               <Route path="admin/users/:userId" element={
@@ -59,6 +75,43 @@ function AppRouter() {
                   <UserDetailPage />
                 </AdminRoute>
               } />
+              <Route path="admin/create" element={
+                <AdminRoute fallback={<DashboardPage />}>
+                  <CreateUser />
+                </AdminRoute>
+              } />
+              <Route path="admin/edit/:userId" element={
+                <AdminRoute fallback={<DashboardPage />}>
+                  <EditUser />
+                </AdminRoute>
+              } />
+              <Route path="admin/statistics" element={
+                <AdminRoute fallback={<DashboardPage />}>
+                  <StatisticsDetail />
+                </AdminRoute>
+              } />
+              <Route path="admin/api-test" element={
+                <AdminRoute fallback={<DashboardPage />}>
+                  <APITest />
+                </AdminRoute>
+              } />
+              <Route path="admin/submissions" element={
+                <AdminRoute fallback={<DashboardPage />}>
+                  <SubmissionManagement />
+                </AdminRoute>
+              } />
+              <Route path="admin/status-flow-test" element={
+                <AdminRoute fallback={<DashboardPage />}>
+                  <StatusFlowTest />
+                </AdminRoute>
+              } />
+              <Route path="admin/status-sync-test" element={
+                <AdminRoute fallback={<DashboardPage />}>
+                  <StatusSyncTest />
+                </AdminRoute>
+              } />
+
+              {/* POC 管理員頁面 */}
               <Route path="admin/poc" element={
                 <AdminRoute fallback={<DashboardPage />}>
                   <AdminDashboardPOC />
@@ -69,9 +122,14 @@ function AppRouter() {
                   <CreateUserPOC />
                 </AdminRoute>
               } />
-              <Route path="admin/poc/edit/:userId" element={
+              <Route path="admin/poc/users/:userId" element={
                 <AdminRoute fallback={<DashboardPage />}>
                   <EditUserPOC />
+                </AdminRoute>
+              } />
+              <Route path="admin/poc/users/:userId/review/:category" element={
+                <AdminRoute fallback={<DashboardPage />}>
+                  <ReviewPage />
                 </AdminRoute>
               } />
               <Route path="admin/poc/statistics" element={
@@ -79,7 +137,7 @@ function AppRouter() {
                   <StatisticsDetailPOC />
                 </AdminRoute>
               } />
-              
+
               {/* 只有一般用戶可以訪問的頁面 */}
               <Route path="my/entries" element={
                 <UserRoute>
@@ -107,68 +165,80 @@ function AppRouter() {
                 </UserRoute>
               } />
               <Route path="wd40" element={
-                <UserRoute>
+                <UserRoute energyCategory="wd40">
                   <WD40Page />
                 </UserRoute>
               } />
               <Route path="acetylene" element={
-                <UserRoute>
+                <UserRoute energyCategory="acetylene">
                   <AcetylenePage />
                 </UserRoute>
               } />
               <Route path="electricity_bill" element={
-                <UserRoute>
+                <UserRoute energyCategory="electricity_bill">
                   <ElectricityBillPage />
                 </UserRoute>
               } />
               <Route path="employee_commute" element={
-                <UserRoute>
+                <UserRoute energyCategory="employee_commute">
                   <CommutePage />
                 </UserRoute>
               } />
               <Route path="refrigerant" element={
-                <UserRoute>
-                  <RefrigerantPage />
+                <UserRoute energyCategory="refrigerant">
+                  <ErrorBoundary>
+                    <RefrigerantPage />
+                  </ErrorBoundary>
                 </UserRoute>
               } />
               <Route path="septictank" element={
-                <UserRoute>
+                <UserRoute energyCategory="septictank">
+                  <SepticTankPage />
+                </UserRoute>
+              } />
+              {/* 添加重定向路由支援底線版本 */}
+              <Route path="septic_tank" element={
+                <UserRoute energyCategory="septictank">
                   <SepticTankPage />
                 </UserRoute>
               } />
               <Route path="natural_gas" element={
-                <UserRoute>
+                <UserRoute energyCategory="natural_gas">
                   <NaturalGasPage />
                 </UserRoute>
               } />
               <Route path="urea" element={
-                <UserRoute>
+                <UserRoute energyCategory="urea">
                   <UreaPage />
                 </UserRoute>
               } />
               <Route path="gasoline" element={
-                <UserRoute>
+                <UserRoute energyCategory="gasoline">
                   <GasolinePage />
                 </UserRoute>
               } />
               <Route path="diesel" element={
-                <UserRoute>
+                <UserRoute energyCategory="diesel">
                   <DieselPage />
                 </UserRoute>
               } />
               <Route path="diesel_generator" element={
-                <UserRoute>
+                <UserRoute energyCategory="diesel_generator">
                   <DieselGeneratorPage />
                 </UserRoute>
               } />
-              <Route path="lpg" element={<LPGPage />} />
+              <Route path="lpg" element={
+                <UserRoute energyCategory="lpg">
+                  <LPGPage />
+                </UserRoute>
+              } />
               <Route path="welding_rod" element={
-                <UserRoute>
+                <UserRoute energyCategory="welding_rod">
                   <WeldingRodPage />
                 </UserRoute>
               } />
               <Route path="fire_extinguisher" element={
-                <UserRoute>
+                <UserRoute energyCategory="fire_extinguisher">
                   <FireExtinguisherPage />
                 </UserRoute>
               } />

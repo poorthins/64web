@@ -16,6 +16,8 @@ export interface Submission {
     id: string
     display_name: string
     email?: string
+    company?: string
+    job_title?: string
   } | null
   review_history: ReviewStatus[]
 }
@@ -23,13 +25,10 @@ export interface Submission {
 export interface ReviewStatus {
   id: string
   entry_id: string
-  status: 'pending' | 'approved' | 'needs_fix'
-  note: string
-  reviewed_by: string
+  old_status?: 'pending' | 'approved' | 'needs_fix'
+  new_status: 'pending' | 'approved' | 'needs_fix'
+  review_notes: string
   created_at: string
-  reviewer_profiles: {
-    display_name: string
-  }
 }
 
 export interface UserWithSubmissions {
@@ -78,7 +77,9 @@ export async function getAllUsersWithSubmissions(): Promise<UserWithSubmissions[
         owner_id,
         created_at,
         review_history (
-          status
+          old_status,
+          new_status,
+          review_notes
         )
       `)
 
@@ -116,7 +117,7 @@ export async function getAllUsersWithSubmissions(): Promise<UserWithSubmissions[
       if (submission.review_history && submission.review_history.length > 0) {
         // 取最新的審核狀態
         const latestReview = submission.review_history[submission.review_history.length - 1]
-        switch (latestReview.status) {
+        switch (latestReview.new_status) {
           case 'approved':
             existing.approved++
             break
@@ -167,6 +168,59 @@ export async function getAllUsersWithSubmissions(): Promise<UserWithSubmissions[
 }
 
 /**
+ * 取得所有填報記錄（用於管理員審核頁面）
+ */
+export async function getAllSubmissions(): Promise<Submission[]> {
+  try {
+    const authResult = await validateAuth()
+    if (authResult.error) throw authResult.error
+
+    const { data, error } = await supabase
+      .from('energy_entries')
+      .select(`
+        id,
+        period_start,
+        period_end,
+        category,
+        unit,
+        amount,
+        notes,
+        created_at,
+        updated_at,
+        owner_id,
+        profiles:owner_id (
+          id,
+          display_name,
+          email,
+          company,
+          job_title
+        ),
+        review_history (
+          id,
+          entry_id,
+          old_status,
+          new_status,
+          review_notes,
+          created_at
+        )
+      `)
+      .order('created_at', { ascending: false })
+
+    if (error) {
+      throw handleAPIError(error, '無法取得所有填報記錄')
+    }
+
+    return (data || []) as unknown as Submission[]
+  } catch (error) {
+    console.error('Error in getAllSubmissions:', error)
+    if (error instanceof Error) {
+      throw error
+    }
+    throw new Error('取得所有填報記錄時發生未知錯誤')
+  }
+}
+
+/**
  * 取得特定用戶的所有填報記錄
  */
 export async function getUserSubmissions(userId: string): Promise<Submission[]> {
@@ -195,13 +249,10 @@ export async function getUserSubmissions(userId: string): Promise<Submission[]> 
         review_history (
           id,
           entry_id,
-          status,
-          note,
-          reviewed_by,
-          created_at,
-          reviewer_profiles:profiles!review_history_reviewed_by_fkey (
-            display_name
-          )
+          old_status,
+          new_status,
+          review_notes,
+          created_at
         )
       `)
       .eq('owner_id', userId)
@@ -237,9 +288,8 @@ export async function reviewSubmission(
       .from('review_history')
       .insert({
         entry_id: entryId,
-        status,
-        note,
-        reviewed_by: authResult.user?.id
+        new_status: status,
+        review_notes: note
       })
 
     if (reviewError) {
@@ -285,7 +335,9 @@ export async function getSubmissionStats(): Promise<SubmissionStats> {
         id,
         owner_id,
         review_history (
-          status
+          old_status,
+          new_status,
+          review_notes
         )
       `)
 
@@ -307,7 +359,7 @@ export async function getSubmissionStats(): Promise<SubmissionStats> {
 
       if (submission.review_history && submission.review_history.length > 0) {
         const latestReview = submission.review_history[submission.review_history.length - 1]
-        switch (latestReview.status) {
+        switch (latestReview.new_status) {
           case 'approved':
             approvedReviews++
             break
@@ -352,9 +404,8 @@ export async function bulkReviewSubmissions(
 
     const reviewRecords = entryIds.map(entryId => ({
       entry_id: entryId,
-      status,
-      note,
-      reviewed_by: authResult.user?.id
+      new_status: status,
+      review_notes: note
     }))
 
     const { error } = await supabase
@@ -473,7 +524,9 @@ export async function completeUserReview(
       .select(`
         id,
         review_history (
-          status,
+          old_status,
+          new_status,
+          review_notes,
           created_at
         )
       `)
@@ -493,11 +546,11 @@ export async function completeUserReview(
         }
 
         // 取得最新審核狀態
-        const latestReview = entry.review_history.sort((a, b) => 
+        const latestReview = entry.review_history.sort((a, b) =>
           new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
         )[0]
 
-        if (latestReview.status !== 'approved') {
+        if (latestReview.new_status !== 'approved') {
           allApproved = false
           break
         }
@@ -548,13 +601,10 @@ export async function getSubmissionDetail(entryId: string): Promise<Submission &
         review_history (
           id,
           entry_id,
-          status,
-          note,
-          reviewed_by,
-          created_at,
-          reviewer_profiles:profiles!review_history_reviewed_by_fkey (
-            display_name
-          )
+          old_status,
+          new_status,
+          review_notes,
+          created_at
         )
       `)
       .eq('id', entryId)

@@ -8,6 +8,7 @@ import { useEditPermissions } from '../../hooks/useEditPermissions';
 import { useFrontendStatus } from '../../hooks/useFrontendStatus';
 import { updateEntryStatus, getEntryByPageKeyAndYear, upsertEnergyEntry } from '../../api/entries';
 import { getEntryFiles, EvidenceFile, uploadEvidenceWithEntry, updateFileEntryAssociation } from '../../api/files';
+import { supabase } from '../../lib/supabaseClient';
 import { designTokens } from '../../utils/designTokens';
 import { DocumentHandler } from '../../services/documentHandler';
 
@@ -48,6 +49,7 @@ const withExampleFirst = (rows: RefrigerantData[]) => {
 };
 
 export default function RefrigerantPage() {
+  console.log('🔄 RefrigerantPage: Component started rendering')
   const pageKey = 'refrigerant'
   const [year] = useState(new Date().getFullYear())
   const [initialStatus, setInitialStatus] = useState<EntryStatus>('submitted')
@@ -72,6 +74,63 @@ export default function RefrigerantPage() {
     return imageExtensions.some(ext => fileName.toLowerCase().endsWith(ext))
   }
 
+  // 安全創建對象URL
+  const safeCreateObjectURL = (file: File | undefined) => {
+    try {
+      if (file && file instanceof File) {
+        return URL.createObjectURL(file)
+      }
+      return ''
+    } catch (error) {
+      console.error('❌ Failed to create object URL:', error)
+      return ''
+    }
+  }
+
+  // 獲取檔案預覽URL（統一處理 memoryFiles 和 evidenceFiles）
+  const getFilePreviewUrl = (memoryFile?: MemoryFile, evidenceFile?: EvidenceFile): string => {
+    try {
+      // 優先使用 evidenceFile（已上傳的檔案）
+      if (evidenceFile?.file_path) {
+        const { data } = supabase.storage
+          .from('evidence')
+          .getPublicUrl(evidenceFile.file_path)
+        return data.publicUrl || ''
+      }
+
+      // 其次使用 memoryFile（新上傳的檔案）
+      if (memoryFile?.file && memoryFile.file instanceof File) {
+        return URL.createObjectURL(memoryFile.file)
+      }
+
+      return ''
+    } catch (error) {
+      console.error('❌ Failed to get file preview URL:', error)
+      return ''
+    }
+  }
+
+  // 獲取檔案資訊（統一處理兩種檔案類型）
+  const getFileInfo = (memoryFile?: MemoryFile, evidenceFile?: EvidenceFile) => {
+    if (evidenceFile) {
+      return {
+        name: evidenceFile.file_name,
+        size: evidenceFile.file_size,
+        type: evidenceFile.mime_type
+      }
+    }
+
+    if (memoryFile) {
+      return {
+        name: memoryFile.file_name,
+        size: memoryFile.file?.size || 0,
+        type: memoryFile.file?.type || ''
+      }
+    }
+
+    return null
+  }
+
   const [refrigerantData, setRefrigerantData] = useState<RefrigerantData[]>(
     withExampleFirst([
       {
@@ -89,16 +148,22 @@ export default function RefrigerantPage() {
   );
 
   // 前端狀態管理 Hook
+  console.log('🔄 RefrigerantPage: About to initialize useFrontendStatus')
   const frontendStatus = useFrontendStatus({
     initialStatus,
     entryId: currentEntryId,
     onStatusChange: () => {},
-    onError: (error) => console.error('Status error:', error),
+    onError: (error) => {
+      console.error('❌ RefrigerantPage: Status error:', error)
+    },
     onSuccess: () => {}
   })
+  console.log('✅ RefrigerantPage: useFrontendStatus initialized:', frontendStatus)
 
   const { currentStatus, handleDataChanged, handleSubmitSuccess, isInitialLoad } = frontendStatus
+  console.log('🔄 RefrigerantPage: About to initialize useEditPermissions, currentStatus:', currentStatus)
   const editPermissions = useEditPermissions(currentStatus)
+  console.log('✅ RefrigerantPage: useEditPermissions initialized:', editPermissions)
 
   // 只看「非範例」列是否有資料
   const hasAnyData = useMemo(() => {
@@ -117,10 +182,14 @@ export default function RefrigerantPage() {
 
   // 載入現有記錄
   useEffect(() => {
+    console.log('🔄 RefrigerantPage: useEffect loadData started')
     const loadData = async () => {
       try {
+        console.log('🔄 RefrigerantPage: loadData executing, pageKey:', pageKey, 'year:', year)
         setSubmitting(true)
+        console.log('🔄 RefrigerantPage: About to call getEntryByPageKeyAndYear')
         const existingEntry = await getEntryByPageKeyAndYear(pageKey, year)
+        console.log('✅ RefrigerantPage: getEntryByPageKeyAndYear completed:', existingEntry)
 
         if (existingEntry) {
           setInitialStatus(existingEntry.status as EntryStatus)
@@ -146,9 +215,11 @@ export default function RefrigerantPage() {
             if (existingEntry.id) {
               try {
                 const files = await getEntryFiles(existingEntry.id)
+                console.log('🔄 RefrigerantPage: Filtering files for refrigerant, total files:', files.length)
                 const refrigerantFiles = files.filter(f =>
-                  f.file_type === 'usage_evidence' && f.page_key === pageKey
+                  f.file_type === 'other' && f.page_key === pageKey
                 )
+                console.log('✅ RefrigerantPage: Found refrigerant files:', refrigerantFiles.length)
 
                 updated = updated.map((item: any, index: number) => {
                   const itemFiles = refrigerantFiles.filter(f => {
@@ -159,7 +230,13 @@ export default function RefrigerantPage() {
                   return { ...item, evidenceFiles: itemFiles, proofFile: null }
                 })
               } catch (e) {
-                console.error('Failed to load files:', e)
+                console.error('❌ RefrigerantPage: Failed to load files:', e)
+                // 載入檔案失敗時，確保資料結構完整
+                updated = updated.map((item: any) => ({
+                  ...item,
+                  evidenceFiles: [],
+                  proofFile: null
+                }))
               }
             }
 
@@ -172,7 +249,22 @@ export default function RefrigerantPage() {
 
         isInitialLoad.current = false
       } catch (error) {
-        console.error('載入資料失敗:', error)
+        console.error('❌ RefrigerantPage: 載入資料失敗:', error)
+        // 即使載入失敗也要設置基礎狀態，避免無限載入
+        setSubmitting(false)
+        // 確保有基本的空白資料
+        const emptyData = withExampleFirst([{
+          id: 1,
+          brandName: '',
+          modelNumber: '',
+          equipmentLocation: '',
+          refrigerantType: '',
+          fillAmount: 0,
+          unit: 'kg',
+          proofFile: null,
+          memoryFiles: []
+        }])
+        setRefrigerantData(emptyData)
       } finally {
         setSubmitting(false)
       }
@@ -272,7 +364,7 @@ export default function RefrigerantPage() {
                 entryId: entry_id,
                 pageKey: pageKey,
                 year: year,
-                category: 'usage_evidence'
+                category: 'nameplate_evidence'
               })
               uploadedFiles.push(uploadedFile)
             } catch (uploadError) {
@@ -490,65 +582,97 @@ export default function RefrigerantPage() {
                         </select>
                       </td>
                       <td className="px-3 py-4 text-center">
-                        {data.memoryFiles && data.memoryFiles.length > 0 ? (
-                          // 已上傳：顯示預覽框
-                          <div className="rounded overflow-hidden w-36 mx-auto border border-gray-200">
-                            {/* 上層：顯示縮圖或檔案圖標 */}
-                            <div className="p-2">
-                              {/* 根據檔案類型顯示不同內容 */}
-                              {data.memoryFiles && data.memoryFiles[0] && (data.memoryFiles[0].file.type.startsWith('image/') || isImageFile(data.memoryFiles[0].file_name)) ? (
-                                // 圖片檔案：顯示縮圖
-                                <img
-                                  src={URL.createObjectURL(data.memoryFiles[0].file)}
-                                  alt={data.memoryFiles[0].file_name}
-                                  className="w-full h-16 object-cover rounded cursor-pointer hover:opacity-80 transition-opacity"
-                                  onClick={() => data.memoryFiles && data.memoryFiles[0] && setLightboxSrc(URL.createObjectURL(data.memoryFiles[0].file))}
-                                />
-                              ) : (
-                                // 非圖片檔案：顯示檔案圖標
-                                <div className="w-full h-16 bg-blue-100 rounded flex items-center justify-center">
-                                  <svg className="w-8 h-8 text-blue-500" fill="currentColor" viewBox="0 0 20 20">
-                                    <path d="M9 2a2 2 0 00-2 2v8a2 2 0 002 2h6a2 2 0 002-2V6.414A2 2 0 0016.414 5L14 2.586A2 2 0 0012.586 2H9z"/>
-                                  </svg>
-                                </div>
-                              )}
+                        {(() => {
+                          // 統一檔案處理邏輯
+                          const evidenceFile = data.evidenceFiles?.[0]
+                          const memoryFile = data.memoryFiles?.[0]
+                          const hasFile = evidenceFile || memoryFile
 
-                              {/* 檔名和大小 */}
-                              <div className="mt-1">
-                                <div className="text-xs text-blue-600 truncate" title={data.memoryFiles?.[0]?.file_name}>
-                                  {data.memoryFiles?.[0]?.file_name}
+                          if (hasFile) {
+                            const fileInfo = getFileInfo(memoryFile, evidenceFile)
+                            const previewUrl = getFilePreviewUrl(memoryFile, evidenceFile)
+                            const isImage = fileInfo?.type?.startsWith('image/') || (fileInfo?.name && isImageFile(fileInfo.name))
+
+                            return (
+                              // 已上傳：顯示預覽框
+                              <div className="rounded overflow-hidden w-36 mx-auto border border-gray-200">
+                                {/* 上層：顯示縮圖或檔案圖標 */}
+                                <div className="p-2">
+                                  {isImage && previewUrl ? (
+                                    // 圖片檔案：顯示縮圖
+                                    <img
+                                      src={previewUrl}
+                                      alt={fileInfo?.name || '檔案預覽'}
+                                      className="w-full h-16 object-cover rounded cursor-pointer hover:opacity-80 transition-opacity"
+                                      onClick={() => {
+                                        if (previewUrl) setLightboxSrc(previewUrl)
+                                      }}
+                                      onError={(e) => {
+                                        console.error('❌ Image load failed:', fileInfo?.name)
+                                        // 圖片載入失敗時隱藏圖片，顯示檔案圖標
+                                        e.currentTarget.style.display = 'none'
+                                      }}
+                                    />
+                                  ) : (
+                                    // 非圖片檔案：顯示檔案圖標
+                                    <div className="w-full h-16 bg-blue-100 rounded flex items-center justify-center">
+                                      <svg className="w-8 h-8 text-blue-500" fill="currentColor" viewBox="0 0 20 20">
+                                        <path d="M9 2a2 2 0 00-2 2v8a2 2 0 002 2h6a2 2 0 002-2V6.414A2 2 0 0016.414 5L14 2.586A2 2 0 0012.586 2H9z"/>
+                                      </svg>
+                                    </div>
+                                  )}
+
+                                  {/* 檔名和大小 */}
+                                  {fileInfo && (
+                                    <div className="mt-1">
+                                      <div className="text-xs text-blue-600 truncate" title={fileInfo.name}>
+                                        {fileInfo.name}
+                                      </div>
+                                      <div className="text-xs text-blue-500">
+                                        {Math.round(fileInfo.size / 1024)} KB
+                                      </div>
+                                    </div>
+                                  )}
                                 </div>
-                                <div className="text-xs text-blue-500">
-                                  {data.memoryFiles?.[0] ? Math.round(data.memoryFiles[0].file.size / 1024) : 0} KB
-                                </div>
+
+                                {/* 下層：移除按鈕 */}
+                                <button
+                                  className="w-full py-1 text-xs text-red-600 hover:bg-red-50 border-t border-gray-200 flex items-center justify-center"
+                                  onClick={() => {
+                                    // 如果是 memoryFile，清除 memoryFiles
+                                    if (memoryFile) {
+                                      updateEntry(data.id, 'memoryFiles', [])
+                                    }
+                                    // 如果是 evidenceFile，清除 evidenceFiles（已上傳的檔案需要後端處理）
+                                    if (evidenceFile) {
+                                      updateEntry(data.id, 'evidenceFiles', [])
+                                    }
+                                  }}
+                                >
+                                  <Trash2 className="h-3 w-3" />
+                                </button>
                               </div>
-                            </div>
+                            )
+                          }
 
-                            {/* 下層：移除按鈕 */}
-                            <button
-                              className="w-full py-1 text-xs text-red-600 hover:bg-red-50 border-t border-gray-200 flex items-center justify-center"
-                              onClick={() => updateEntry(data.id, 'memoryFiles', [])}
-                            >
-                              <Trash2 className="h-3 w-3" />
-                            </button>
-                          </div>
-                        ) : (
                           // 未上傳：顯示上傳區域
-                          <div className="w-36 mx-auto">
+                          return (
+                            <div className="w-36 mx-auto">
                             <EvidenceUpload
                               key={`upload-${data.id}`}  // 加上穩定的 key
                               pageKey={pageKey}
-                              files={EMPTY_FILES}  // 使用穩定的空陣列
-                              onFilesChange={NOOP}  // 使用穩定的空函數
+                              files={data.evidenceFiles || EMPTY_FILES}  // 傳入 evidenceFiles
+                              onFilesChange={(files) => updateEntry(data.id, 'evidenceFiles', files)}  // 處理 evidenceFiles 變更
                               memoryFiles={data.memoryFiles || []}
                               onMemoryFilesChange={handleMemoryFilesChange(data.id)}
                               maxFiles={1}
-                              kind="usage_evidence"
+                              kind="other"
                               disabled={submitting}
                               mode="edit"
                             />
-                          </div>
-                        )}
+                            </div>
+                          )
+                        })()}
                       </td>
                       <td className="px-3 py-4">
                         <div className="flex justify-center">

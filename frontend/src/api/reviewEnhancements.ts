@@ -237,45 +237,89 @@ export async function getReviewedEntries(filters: ReviewFilters = {}): Promise<R
 
 /**
  * 執行批閱操作
- * 將項目狀態從 'submitted' 改為 'approved' 或 'rejected'
+ * 支援自由轉換項目狀態: submitted, approved, rejected
  */
 export async function reviewEntry(
-  entryId: string, 
-  action: 'approve' | 'reject', 
+  entryId: string,
+  action: 'approve' | 'reject' | 'reset',
   notes?: string
 ): Promise<void> {
+  console.group('📡 reviewEntry 執行診斷');
+  console.log('輸入參數:', { entryId, action, notes });
+
   try {
-    const authResult = await validateAuth()
-    if (authResult.error) throw authResult.error
+    // 1. 認證檢查
+    const authResult = await validateAuth();
+    console.log('認證狀態:', authResult.error ? '❌失敗' : '✅成功');
+    if (authResult.error) throw authResult.error;
 
-    const status = action === 'approve' ? 'approved' : 'rejected'
-    const updateData: any = {
-      status,
-      reviewer_id: authResult.user?.id,
-      review_notes: notes || '',
-      reviewed_at: new Date().toISOString()
+    // 2. 決定新狀態
+    let newStatus: string;
+    switch(action) {
+      case 'approve': newStatus = 'approved'; break;
+      case 'reject': newStatus = 'rejected'; break;
+      case 'reset': newStatus = 'submitted'; break;
+      default: throw new Error('無效的操作');
     }
+    console.log('狀態轉換:', '? → ' + newStatus);
 
-    // 如果是通過，則鎖定該項目
+    // 3. 先查詢當前狀態（診斷用）
+    const { data: currentData, error: queryError } = await supabase
+      .from('energy_entries')
+      .select('id, status')
+      .eq('id', entryId)
+      .single();
+
+    console.log('當前狀態:', currentData?.status || '查詢失敗');
+
+    // 4. 執行更新（不限制原始狀態）
+    const updateData: any = {
+      status: newStatus,
+      review_notes: notes || '',
+      reviewed_at: action === 'reset' ? null : new Date().toISOString(),
+      reviewer_id: action === 'reset' ? null : authResult.user?.id
+    }
+    console.log('更新資料:', updateData);
+
+    // 如果是通過，則鎖定該項目；如果是重置，則解鎖
     if (action === 'approve') {
       updateData.is_locked = true
+    } else if (action === 'reset') {
+      updateData.is_locked = false
     }
 
-    const { error } = await supabase
+    console.log('5. 執行更新（不限制原始狀態）');
+
+    const { data, error, count } = await supabase
       .from('energy_entries')
       .update(updateData)
-      .eq('id', entryId)
-      .eq('status', 'submitted') // 只能審核 submitted 狀態的項目
+      .eq('id', entryId)  // 只根據 ID 更新，不檢查狀態
+      .select();
+
+    console.log('更新結果:', {
+      success: !error,
+      data: data,
+      error: error,
+      count: count
+    });
 
     if (error) {
-      throw handleAPIError(error, '無法執行批閱操作')
+      console.error('❌ Supabase 錯誤:', error);
+      throw error;
     }
+
+    if (!data || data.length === 0) {
+      console.error('❌ 沒有更新任何記錄');
+      throw new Error('沒有找到或更新指定的記錄');
+    }
+
+    console.log('✅ 更新成功');
+
   } catch (error) {
-    console.error('Error in reviewEntry:', error)
-    if (error instanceof Error) {
-      throw error
-    }
-    throw new Error('執行批閱操作時發生未知錯誤')
+    console.error('❌ reviewEntry 失敗:', error);
+    throw error;
+  } finally {
+    console.groupEnd();
   }
 }
 
@@ -419,5 +463,92 @@ export async function resubmitEntry(entryId: string): Promise<void> {
       throw error
     }
     throw new Error('重新提交項目時發生未知錯誤')
+  }
+}
+
+/**
+ * 獲取三狀態統計資料
+ * 直接從 energy_entries 表統計各狀態的項目數量
+ */
+export interface SubmissionStatistics {
+  submitted: number  // 已提交
+  approved: number   // 已通過
+  rejected: number   // 已退回
+  total: number      // 總計
+  lastUpdated: string // 最後更新時間
+}
+
+export async function getSubmissionStatistics(): Promise<SubmissionStatistics> {
+  console.group('📊 getSubmissionStatistics - 獲取三狀態統計');
+
+  try {
+    const authResult = await validateAuth();
+    if (authResult.error) throw authResult.error;
+
+    console.log('1. 查詢所有項目狀態...');
+
+    const { data, error } = await supabase
+      .from('energy_entries')
+      .select('status')
+      .order('created_at', { ascending: false });
+
+    if (error) {
+      console.error('❌ 查詢失敗:', error);
+      throw handleAPIError(error, '無法取得統計資料');
+    }
+
+    console.log('2. 原始資料:', {
+      總項目數: data?.length || 0,
+      項目狀態分布: data?.reduce((acc: any, item) => {
+        acc[item.status] = (acc[item.status] || 0) + 1;
+        return acc;
+      }, {})
+    });
+
+    // 統計各狀態數量
+    let submitted = 0;
+    let approved = 0;
+    let rejected = 0;
+
+    data?.forEach(entry => {
+      switch (entry.status) {
+        case 'submitted':
+          submitted++;
+          break;
+        case 'approved':
+          approved++;
+          break;
+        case 'rejected':
+          rejected++;
+          break;
+        default:
+          console.warn('⚠️ 發現未知狀態:', entry.status);
+          // 預設將未知狀態歸類為已提交
+          submitted++;
+      }
+    });
+
+    const total = submitted + approved + rejected;
+    const statistics: SubmissionStatistics = {
+      submitted,
+      approved,
+      rejected,
+      total,
+      lastUpdated: new Date().toISOString()
+    };
+
+    console.log('3. 統計結果:', statistics);
+    console.log('✅ 統計完成');
+
+    return statistics;
+
+  } catch (error) {
+    console.error('❌ getSubmissionStatistics 失敗:', error);
+    if (error instanceof Error) {
+      throw error;
+    }
+    throw new Error('取得統計資料時發生未知錯誤');
+  } finally {
+    console.groupEnd();
   }
 }

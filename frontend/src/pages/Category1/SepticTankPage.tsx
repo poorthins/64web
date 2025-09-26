@@ -1,13 +1,16 @@
 import { useState, useMemo, useEffect, useRef } from 'react';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { Upload, Trash2, Loader2, AlertCircle, CheckCircle } from 'lucide-react';
 import EvidenceUpload from '../../components/EvidenceUpload';
 import { MemoryFile } from '../../components/EvidenceUpload';
 import StatusIndicator from '../../components/StatusIndicator';
 import BottomActionBar from '../../components/BottomActionBar';
 import { EntryStatus } from '../../components/StatusSwitcher';
+import ReviewSection from '../../components/ReviewSection';
+import Toast, { ToastType } from '../../components/Toast';
 import { useEditPermissions } from '../../hooks/useEditPermissions';
 import { useFrontendStatus } from '../../hooks/useFrontendStatus';
-import { updateEntryStatus, getEntryByPageKeyAndYear, upsertEnergyEntry, UpsertEntryInput } from '../../api/entries';
+import { updateEntryStatus, getEntryByPageKeyAndYear, getEntryById, upsertEnergyEntry, UpsertEntryInput } from '../../api/entries';
 import { listUsageEvidenceFiles, commitEvidence, getEntryFiles, updateFileEntryAssociation, EvidenceFile, uploadEvidenceWithEntry } from '../../api/files';
 import { designTokens } from '../../utils/designTokens';
 import { debugRLSOperation, diagnoseAuthState } from '../../utils/authDiagnostics';
@@ -28,8 +31,16 @@ interface AnnualEvidence {
 const monthLabels = ["1月","2月","3月","4月","5月","6月","7月","8月","9月","10月","11月","12月"];
 
 export default function SepticTankPage() {
+  const navigate = useNavigate()
   const pageKey = 'septic_tank'
   const currentYear = new Date().getFullYear()
+  const [searchParams] = useSearchParams()
+
+  // 審核模式檢測
+  const isReviewMode = searchParams.get('mode') === 'review'
+  const reviewEntryId = searchParams.get('entryId')
+  const reviewUserId = searchParams.get('userId')
+
   const [loading, setLoading] = useState(true)
   const [initialStatus, setInitialStatus] = useState<EntryStatus>('submitted')
   const [currentEntryId, setCurrentEntryId] = useState<string | null>(null)
@@ -38,6 +49,8 @@ export default function SepticTankPage() {
   const [hasChanges, setHasChanges] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [success, setSuccess] = useState<string | null>(null)
+  const [toast, setToast] = useState<{ message: string; type: ToastType } | null>(null)
+  const [showSuccessModal, setShowSuccessModal] = useState(false)
   const [monthlyData, setMonthlyData] = useState<MonthData[]>(
     Array.from({ length: 12 }, (_, i) => ({
       month: i + 1,
@@ -54,7 +67,10 @@ export default function SepticTankPage() {
       console.log('Status changed to:', newStatus)
     },
     onError: (error) => setError(error),
-    onSuccess: (message) => setSuccess(message)
+    onSuccess: (message) => {
+      setToast({ message, type: 'success' })
+      setSuccess(message)
+    }
   })
 
   const { currentStatus, handleDataChanged, handleSubmitSuccess, isInitialLoad } = frontendStatus
@@ -86,10 +102,15 @@ export default function SepticTankPage() {
         setLoading(true)
         setError(null)
 
-        // 並行載入基本資料
-        const [existingEntry] = await Promise.all([
-          getEntryByPageKeyAndYear(pageKey, currentYear)
-        ])
+        // 載入基本資料
+        let existingEntry
+        if (isReviewMode && reviewEntryId) {
+          console.log('🔍 [SepticTank] 審核模式 - 載入特定記錄:', reviewEntryId)
+          existingEntry = await getEntryById(reviewEntryId)
+        } else {
+          console.log('🔍 [SepticTank] 一般模式 - 載入用戶自己的記錄')
+          existingEntry = await getEntryByPageKeyAndYear(pageKey, currentYear)
+        }
 
         console.log('🔍 [SepticTank] Loading entry:', {
           existingEntry: existingEntry ? {
@@ -129,9 +150,9 @@ export default function SepticTankPage() {
                 }))
               })
 
-              // 所有檔案都歸類為年度佐證資料（化糞池使用 usage_evidence 類別）
+              // 所有檔案都歸類為年度佐證資料（化糞池使用 other 類別）
               const annualFiles = entryFiles.filter(f =>
-                f.file_type === 'usage_evidence' && f.page_key === pageKey
+                f.file_type === 'other' && f.page_key === pageKey
               )
 
               console.log('📋 [SepticTank] Annual evidence files:', {
@@ -169,7 +190,7 @@ export default function SepticTankPage() {
             try {
               const entryFiles = await getEntryFiles(existingEntry.id)
               const annualFiles = entryFiles.filter(f =>
-                f.file_type === 'usage_evidence' && f.page_key === pageKey
+                f.file_type === 'other' && f.page_key === pageKey
               )
 
               // 補全12個月的數據
@@ -197,15 +218,8 @@ export default function SepticTankPage() {
             }
           }
         } else {
-          // 新記錄處理
-          // 載入年度佐證暫存檔案
-          try {
-            const annualFiles = await listUsageEvidenceFiles(pageKey, 0)
-            setAnnualEvidence({ files: annualFiles, memoryFiles: [] })
-          } catch (error) {
-            console.error('Failed to load annual evidence files:', error)
-            setAnnualEvidence({ files: [], memoryFiles: [] })
-          }
+          // 新記錄：設為空狀態，不載入任何檔案（因為還沒有記錄）
+          setAnnualEvidence({ files: [], memoryFiles: [] })
         }
 
         isInitialLoad.current = false
@@ -218,7 +232,7 @@ export default function SepticTankPage() {
     }
 
     loadData()
-  }, [])
+  }, [isReviewMode, reviewEntryId, reviewUserId])
 
   // 監聽表單變更
   useEffect(() => {
@@ -327,7 +341,7 @@ export default function SepticTankPage() {
               entryId: entry_id,
               pageKey,
               year: currentYear,
-              category: 'usage_evidence'
+              category: 'other'
             })
             uploadedFiles.push(uploadedFile)
             console.log(`✅ [SepticTank] Annual evidence file uploaded: ${uploadedFile.file_name}`)
@@ -413,8 +427,15 @@ export default function SepticTankPage() {
       setHasChanges(false)
       setHasSubmittedBefore(true)
 
-      setSuccess(`化糞池工時數據已提交，總計 ${yearlyTotal.toFixed(1)} 小時`)
-      
+      const successMessage = `化糞池工時數據已提交，總計 ${yearlyTotal.toFixed(1)} 小時`
+      setSuccess(successMessage)
+
+      // 直接觸發 Toast 通知
+      setToast({ message: successMessage, type: 'success' })
+
+      // 顯示成功模態框
+      setShowSuccessModal(true)
+
       console.log('=== ✅ 化糞池工時提交成功完成 ===')
 
     } catch (error) {
@@ -580,7 +601,7 @@ export default function SepticTankPage() {
           </div>
           <p className="text-sm text-gray-600 mt-3">
             請上傳年度相關的佐證文件（如 MSDS 文件、使用紀錄、Excel統計表等），支援多檔案上傳。<br/>
-            支援格式：圖片 (JPG, PNG)、PDF、Excel (XLSX, XLS)
+            支援所有檔案類型，最大 10MB
           </p>
         </div>
 
@@ -671,6 +692,86 @@ export default function SepticTankPage() {
         <div className="h-20"></div>
       </div>
 
+      {/* 成功提交模態框 */}
+      {showSuccessModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50 p-4">
+          <div
+            className="bg-white rounded-lg shadow-lg max-w-md w-full"
+            style={{ borderRadius: designTokens.borderRadius?.lg || '0.5rem' }}
+          >
+            <div className="p-6">
+              <div className="flex items-start space-x-3 mb-4">
+                <div
+                  className="w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0"
+                  style={{ backgroundColor: `${designTokens.colors.success}15` }}
+                >
+                  <CheckCircle
+                    className="h-5 w-5"
+                    style={{ color: designTokens.colors.success }}
+                  />
+                </div>
+                <div className="flex-1">
+                  <h3
+                    className="text-xl font-semibold mb-2"
+                    style={{ color: designTokens.colors.textPrimary }}
+                  >
+                    提交成功！
+                  </h3>
+                  <p
+                    className="mb-4"
+                    style={{ color: designTokens.colors.textSecondary }}
+                  >
+                    {success}
+                  </p>
+                  <div
+                    className="rounded-lg p-4 mb-4 text-left"
+                    style={{ backgroundColor: '#f8f9fa' }}
+                  >
+                    <p
+                      className="text-base mb-2 font-medium"
+                      style={{ color: designTokens.colors.textPrimary }}
+                    >
+                      接下來您可以：
+                    </p>
+                    <ul
+                      className="space-y-1 text-sm"
+                      style={{ color: designTokens.colors.textSecondary }}
+                    >
+                      <li>• 前往首頁查看提交狀態</li>
+                      <li>• 繼續填報其他能源類別</li>
+                      <li>• 等待審核結果通知</li>
+                    </ul>
+                  </div>
+                </div>
+              </div>
+              <div className="flex flex-col sm:flex-row space-y-2 sm:space-y-0 sm:space-x-3">
+                <button
+                  onClick={() => {
+                    setShowSuccessModal(false)
+                    navigate('/app')
+                  }}
+                  className="flex-1 px-4 py-2 rounded-lg font-medium text-white transition-colors"
+                  style={{ backgroundColor: designTokens.colors.primary }}
+                >
+                  前往首頁
+                </button>
+                <button
+                  onClick={() => setShowSuccessModal(false)}
+                  className="flex-1 px-4 py-2 rounded-lg font-medium transition-colors border"
+                  style={{
+                    color: designTokens.colors.textPrimary,
+                    borderColor: designTokens.colors.border,
+                    backgroundColor: 'white'
+                  }}
+                >
+                  繼續填報
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* 錯誤訊息模態框 */}
       {error && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50 p-4">
@@ -736,19 +837,48 @@ export default function SepticTankPage() {
         </div>
       )}
 
-      {/* 統一底部操作欄 */}
-      <BottomActionBar
-        currentStatus={currentStatus}
-        currentEntryId={currentEntryId}
-        isUpdating={false}
-        hasSubmittedBefore={hasSubmittedBefore}
-        hasAnyData={hasAnyData}
-        editPermissions={editPermissions}
-        submitting={submitting}
-        onSubmit={handleSubmit}
-        onClear={handleClear}
-        designTokens={designTokens}
-      />
+      {/* 審核區塊 - 只在審核模式顯示 */}
+      {isReviewMode && currentEntryId && (
+        <ReviewSection
+          entryId={reviewEntryId || currentEntryId}
+          userId={reviewUserId || "current_user"}
+          category="化糞池"
+          userName={reviewUserId || "用戶"}
+          amount={monthlyData.reduce((sum, data) => sum + data.hours, 0)}
+          unit="人"
+          onApprove={() => {
+            console.log('✅ 化糞池填報審核通過 - 由 ReviewSection 處理')
+          }}
+          onReject={(reason) => {
+            console.log('❌ 化糞池填報已退回 - 由 ReviewSection 處理:', reason)
+          }}
+        />
+      )}
+
+      {/* 統一底部操作欄 - 審核模式下隱藏 */}
+      {!isReviewMode && (
+        <BottomActionBar
+          currentStatus={currentStatus}
+          currentEntryId={currentEntryId}
+          isUpdating={false}
+          hasSubmittedBefore={hasSubmittedBefore}
+          hasAnyData={hasAnyData}
+          editPermissions={editPermissions}
+          submitting={submitting}
+          onSubmit={handleSubmit}
+          onClear={handleClear}
+          designTokens={designTokens}
+        />
+      )}
+
+      {/* Toast 通知 */}
+      {toast && (
+        <Toast
+          message={toast.message}
+          type={toast.type}
+          onClose={() => setToast(null)}
+        />
+      )}
     </div>
   );
 }

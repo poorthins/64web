@@ -112,16 +112,25 @@ const LPGPage = () => {
 
         // 草稿功能已移除
 
-        // 載入重量佐證檔案
-        const weightProofFilesList = await listMSDSFiles(pageKey)
-        setWeightProofFiles(weightProofFilesList)
-
         // 檢查是否已有非草稿記錄
         const existingEntry = await getEntryByPageKeyAndYear(pageKey, year)
+
         if (existingEntry && existingEntry.status !== 'draft') {
           setInitialStatus(existingEntry.status as EntryStatus)
           setCurrentEntryId(existingEntry.id)
           setHasSubmittedBefore(true)
+
+          // 載入該記錄的所有檔案（支援審核模式）
+          try {
+            const allFiles = await getEntryFiles(existingEntry.id)
+            const weightProofFilesFromEntry = allFiles.filter(f =>
+              f.file_type === 'msds' && f.page_key === pageKey
+            )
+            setWeightProofFiles(weightProofFilesFromEntry)
+          } catch (fileError) {
+            console.error('Failed to load files for existing entry:', fileError)
+            setWeightProofFiles([])
+          }
           
           // 載入已提交的記錄數據供編輯
           if (existingEntry.payload?.monthly) {
@@ -130,8 +139,10 @@ const LPGPage = () => {
             
             if (entryUnitWeight) setUnitWeight(parseFloat(entryUnitWeight))
           }
+        } else {
+          // 新記錄：設為空狀態，不載入任何檔案（因為還沒有記錄）
+          setWeightProofFiles([])
         }
-        // 如果是草稿記錄或無記錄，保持表單空白狀態
 
         // 載入各月份的使用證明檔案
         let updatedMonthlyData = Array.from({ length: 12 }, (_, i) => {

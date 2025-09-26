@@ -112,16 +112,24 @@ const WeldingRodPage = () => {
         setLoading(true)
         setError(null)
 
-        // 讀取「檢驗報告（原 MSDS）」檔案清單
-        const msdsFilesList = await loadMSDSFiles(pageKey)
-        setMsdsFiles(msdsFilesList)
-
         // 檢查是否已有非草稿記錄
         const existingEntry = await loadExistingEntry(pageKey, year)
         if (existingEntry && existingEntry.status !== 'draft') {
           setInitialStatus(existingEntry.status as EntryStatus)
           setCurrentEntryId(existingEntry.id)
           setHasSubmittedBefore(true)
+
+          // 載入該記錄的所有檔案（支援審核模式）
+          try {
+            const allFiles = await getEntryFiles(existingEntry.id)
+            const msdsFilesFromEntry = allFiles.filter(f =>
+              f.file_type === 'msds' && f.page_key === pageKey
+            )
+            setMsdsFiles(msdsFilesFromEntry)
+          } catch (fileError) {
+            console.error('Failed to load MSDS files for existing entry:', fileError)
+            setMsdsFiles([])
+          }
 
           // 載入已提交記錄的表單數據
           if (existingEntry.payload?.monthly) {
@@ -131,6 +139,9 @@ const WeldingRodPage = () => {
             if (entryUnitWeight) setUnitWeight(parseFloat(entryUnitWeight))
             if (entryCarbonContent) setCarbonContent(parseFloat(entryCarbonContent))
           }
+        } else {
+          // 新記錄：設為空狀態，不載入任何檔案（因為還沒有記錄）
+          setMsdsFiles([])
         }
 
         // 載入各月份使用證明檔案

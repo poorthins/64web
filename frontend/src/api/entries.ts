@@ -57,7 +57,8 @@ export function getCategoryFromPageKey(pageKey: string): string {
     'wd40': 'WD-40',
     'acetylene': '乙炔',
     'refrigerant': '冷媒',
-    'septictank': '化糞池',
+    'septic_tank': '化糞池',
+    'septictank': '化糞池', // 向後相容
     'natural_gas': '天然氣',
     'urea': '尿素',
     'diesel_generator': '柴油(發電機)',
@@ -70,7 +71,7 @@ export function getCategoryFromPageKey(pageKey: string): string {
     'employee_commute': '員工通勤'
   }
 
-  const result = categoryMap[pageKey] || pageKey.toUpperCase()
+  const result = categoryMap[pageKey] || String(pageKey || '').toUpperCase()
   console.log('🔍 [6] 對應結果:', pageKey, '->', result)
   console.log('🔍 [7] categoryMap 是否包含 urea:', 'urea' in categoryMap)
 
@@ -324,6 +325,49 @@ export async function updateEntryStatus(entryId: string, status: 'draft' | 'subm
       throw error
     }
     throw new Error('更新狀態時發生未知錯誤')
+  }
+}
+
+/**
+ * 根據 ID 取得能源填報記錄（管理員功能）
+ * @param entryId - 記錄 ID
+ * @returns Promise<EnergyEntry | null>
+ */
+export async function getEntryById(entryId: string): Promise<EnergyEntry | null> {
+  try {
+    const authResult = await validateAuth()
+    if (authResult.error || !authResult.user) {
+      throw authResult.error || new Error('使用者未登入')
+    }
+
+    console.log('🔍 [getEntryById] Fetching entry:', entryId)
+
+    const { data, error } = await supabase
+      .from('energy_entries')
+      .select('*')
+      .eq('id', entryId)
+      .maybeSingle()
+
+    if (error) {
+      console.error('Error getting entry by ID:', error)
+      throw handleAPIError(error, '取得填報記錄失敗')
+    }
+
+    console.log('✅ [getEntryById] Entry retrieved:', {
+      id: data?.id,
+      owner_id: data?.owner_id,
+      page_key: data?.page_key,
+      status: data?.status,
+      hasPayload: !!data?.payload
+    })
+
+    return data
+  } catch (error) {
+    console.error('Error in getEntryById:', error)
+    if (error instanceof Error) {
+      throw error
+    }
+    throw new Error('取得填報記錄時發生未知錯誤')
   }
 }
 

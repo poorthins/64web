@@ -1,6 +1,19 @@
 import { supabase } from '../lib/supabaseClient'
 import { validateAuth, handleAPIError } from '../utils/authHelpers'
 
+// 資料庫 key 轉前端 key 的映射
+const DB_TO_FRONTEND_MAP: Record<string, string> = {
+  'septic_tank': 'septictank',
+  'electricity': 'electricity_bill'
+}
+
+/**
+ * 將資料庫格式的能源類別轉換為前端格式
+ */
+function convertDbKeysToFrontend(categories: string[]): string[] {
+  return categories.map(key => DB_TO_FRONTEND_MAP[key] || key);
+}
+
 export interface ReportingProgressSummary {
   total: number
   completed: number
@@ -164,6 +177,14 @@ export async function getRejectedEntries(): Promise<RejectedEntry[]> {
     const user = authResult.user
     const currentYear = new Date().getFullYear()
 
+    // 取得使用者權限配置
+    const { data: profile } = await supabase
+      .from('profiles')
+      .select('filling_config')
+      .eq('id', user.id)
+      .single()
+
+    // 取得退回記錄
     const { data: entries, error } = await supabase
       .from('energy_entries')
       .select('id, page_key, category, updated_at, review_notes')
@@ -176,14 +197,35 @@ export async function getRejectedEntries(): Promise<RejectedEntry[]> {
       throw handleAPIError(error, '取得退回記錄失敗')
     }
 
-    return entries?.map(entry => ({
+    if (!entries) {
+      return []
+    }
+
+    // 加入權限過濾邏輯
+    let filteredEntries = entries
+
+    // 如果不是管理員，需要進行權限過濾
+    if (profile?.filling_config?.energy_categories) {
+      // 1. 取得使用者的 filling_config.energy_categories (資料庫格式)
+      const userDbCategories = profile.filling_config.energy_categories || []
+
+      // 2. 轉換資料庫 key 到前端 key
+      const userFrontendCategories = convertDbKeysToFrontend(userDbCategories)
+
+      // 3. 過濾掉沒權限的項目
+      filteredEntries = entries.filter(entry =>
+        userFrontendCategories.includes(entry.page_key)
+      )
+    }
+
+    return filteredEntries.map(entry => ({
       id: entry.id,
       pageKey: entry.page_key,
       title: titleMap[entry.page_key] || entry.page_key,
       category: entry.category,
       reviewNotes: entry.review_notes || '無退回原因說明',
       updatedAt: entry.updated_at
-    })) || []
+    }))
   } catch (error) {
     console.error('Error in getRejectedEntries:', error)
     if (error instanceof Error) {

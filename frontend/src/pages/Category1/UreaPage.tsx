@@ -16,6 +16,7 @@ import { getCategoryInfo } from '../../utils/categoryConstants'
 import { MemoryFile } from '../../components/EvidenceUpload'
 import { supabase } from '../../lib/supabaseClient'
 import { DocumentHandler } from '../../services/documentHandler'
+import { generateRecordId } from '../../utils/idGenerator'
 
 
 // 尿素日期使用量資料結構
@@ -57,7 +58,7 @@ const UreaPage = () => {
   const [msdsMemoryFiles, setMsdsMemoryFiles] = useState<MemoryFile[]>([])
   const [usageRecords, setUsageRecords] = useState<UsageRecord[]>([
     {
-      id: crypto.randomUUID(),
+      id: generateRecordId(),
       date: '',
       quantity: 0,
       files: [],
@@ -89,23 +90,35 @@ const UreaPage = () => {
 
         // 草稿功能已移除
 
-        // 載入 MSDS 檔案
-        const msdsFilesList = await listMSDSFiles(pageKey)
-        setMsdsFiles(msdsFilesList)
-
         // 檢查是否已有非草稿記錄
         const existingEntry = await getEntryByPageKeyAndYear(pageKey, year)
+
         if (existingEntry && existingEntry.status !== 'draft') {
           setInitialStatus(existingEntry.status as EntryStatus)
           setCurrentEntryId(existingEntry.id)
           setHasSubmittedBefore(true)
-          
+
+          // 載入該記錄的所有檔案（支援審核模式）
+          try {
+            const allFiles = await getEntryFiles(existingEntry.id)
+
+            // 分類檔案：MSDS 檔案
+            const msdsFilesFromEntry = allFiles.filter(f =>
+              f.file_type === 'msds' && f.page_key === pageKey
+            )
+            setMsdsFiles(msdsFilesFromEntry)
+
+          } catch (fileError) {
+            console.error('Failed to load files for existing entry:', fileError)
+            setMsdsFiles([]) // 設為空陣列避免錯誤
+          }
+
           // 載入已提交的記錄數據供編輯
           // 優先從 extraPayload 讀取
           if (existingEntry.extraPayload?.usageRecords) {
             // 載入相關檔案
             let updatedRecords = existingEntry.extraPayload.usageRecords
-            
+
             if (existingEntry.id) {
               try {
                 const files = await getEntryFiles(existingEntry.id)
@@ -160,8 +173,10 @@ const UreaPage = () => {
             // 向後相容：從 monthly 推算使用記錄
             console.log('Loading from legacy monthly format - data migration may be needed')
           }
+        } else {
+          // 新記錄：設為空狀態，不載入任何檔案（因為還沒有記錄）
+          setMsdsFiles([])
         }
-        // 如果是草稿記錄或無記錄，保持表單空白狀態
 
         isInitialLoad.current = false
       } catch (error) {
@@ -179,7 +194,7 @@ const UreaPage = () => {
 
   const addUsageRecord = () => {
     setUsageRecords(prev => [...prev, {
-      id: crypto.randomUUID(),
+      id: generateRecordId(),
       date: '',
       quantity: 0,
       files: [],
@@ -385,7 +400,7 @@ const UreaPage = () => {
 
           // 原有的清除邏輯保持不變
           setUsageRecords([{
-            id: crypto.randomUUID(),
+            id: generateRecordId(),
             date: '',
             quantity: 0,
             files: [],

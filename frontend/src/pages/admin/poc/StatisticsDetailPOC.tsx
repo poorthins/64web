@@ -1,7 +1,14 @@
-import React, { useState, useMemo } from 'react'
+import React, { useState, useMemo, useEffect } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import StatsCard from './components/StatsCard'
 import Modal from './components/Modal'
+import RejectModal from './components/RejectModal'
+import { DashboardSkeleton, LoadingSpinner } from './components/LoadingSkeleton'
+import { PageHeader } from './components/PageHeader'
+import { handleAPIError, showErrorToast, withRetry } from './utils/errorHandler'
+import { useKeyboardShortcuts, createCommonShortcuts } from './hooks/useKeyboardShortcuts'
+import { useAdvancedNavigation } from './hooks/useAdvancedNavigation'
+import { useStatusManager } from './hooks/useStatusManager'
 import {
   mockSubmissions,
   mockUsers,
@@ -23,6 +30,16 @@ const StatisticsDetailPOC: React.FC = () => {
   const [searchParams] = useSearchParams()
   const initialStatus = searchParams.get('status') as UserStatus | null
 
+  // 使用統一的狀態管理器
+  const {
+    submissions,
+    stats,
+    loading,
+    error: statusError,
+    changeStatus,
+    refresh
+  } = useStatusManager(false) // 不自動刷新
+
   const [selectedStatuses, setSelectedStatuses] = useState<UserStatus[]>(
     initialStatus ? [initialStatus] : []
   )
@@ -33,12 +50,14 @@ const StatisticsDetailPOC: React.FC = () => {
   const [currentPage, setCurrentPage] = useState(1)
   const [selectedSubmission, setSelectedSubmission] = useState<SubmissionRecord | null>(null)
   const [isModalOpen, setIsModalOpen] = useState(false)
+  const [isRejectModalOpen, setIsRejectModalOpen] = useState(false)
+  const [isProcessing, setIsProcessing] = useState(false)
   const itemsPerPage = 10
 
-  const stats = useMemo(() => calculateSubmissionStats(mockSubmissions), [])
+  // 資料由 useStatusManager 管理，無需額外載入邏輯
 
   const filteredSubmissions = useMemo(() => {
-    let filtered = mockSubmissions.filter(submission => {
+    let filtered = submissions.filter(submission => {
       const matchesStatus = selectedStatuses.length === 0 ||
         selectedStatuses.includes(submission.status)
       const matchesUser = !selectedUser || submission.userId === selectedUser
@@ -68,7 +87,7 @@ const StatisticsDetailPOC: React.FC = () => {
     })
 
     return filtered
-  }, [selectedStatuses, selectedUser, selectedCategory, sortField, sortOrder])
+  }, [submissions, selectedStatuses, selectedUser, selectedCategory, sortField, sortOrder])
 
   // 分頁計算
   const totalPages = Math.ceil(filteredSubmissions.length / itemsPerPage)
@@ -113,6 +132,94 @@ const StatisticsDetailPOC: React.FC = () => {
     setSelectedSubmission(null)
   }
 
+  const handleApprove = async (submission: SubmissionRecord) => {
+    console.group('🔄 審核通過流程追蹤')
+    console.log('1. 開始審核通過操作')
+    console.log('   - 項目ID:', submission.id)
+    console.log('   - 用戶:', submission.userName)
+    console.log('   - 類別:', submission.categoryName)
+    console.log('   - 當前狀態:', submission.status)
+
+    const confirmed = window.confirm(`確定要通過 ${submission.userName} 的 ${submission.categoryName} 申請嗎？`)
+    if (!confirmed) {
+      console.log('2. 用戶取消操作')
+      console.groupEnd()
+      return
+    }
+
+    setIsProcessing(true)
+    try {
+      console.log('2. 使用 statusManager 變更狀態...')
+      const result = await changeStatus(submission.id, 'approved', '管理員審核通過')
+
+      console.log('3. 狀態變更結果:', result)
+
+      if (result.success) {
+        console.log('✅ 審核通過成功')
+        // statusManager 會自動更新並通知所有監聽者
+      } else {
+        console.error('❌ 審核通過失敗:', result.message)
+        alert(`❌ 操作失敗：${result.message}`)
+      }
+    } catch (err) {
+      console.error('4. 審核通過異常:', err)
+      const apiError = handleAPIError(err)
+      showErrorToast(apiError)
+    } finally {
+      setIsProcessing(false)
+      console.groupEnd()
+    }
+  }
+
+  const handleReject = (submission: SubmissionRecord) => {
+    setSelectedSubmission(submission)
+    setIsRejectModalOpen(true)
+  }
+
+  const handleRejectConfirm = async (reason: string) => {
+    if (!selectedSubmission) return
+
+    console.group('🔄 審核退回流程追蹤')
+    console.log('1. 開始審核退回操作')
+    console.log('   - 項目ID:', selectedSubmission.id)
+    console.log('   - 用戶:', selectedSubmission.userName)
+    console.log('   - 類別:', selectedSubmission.categoryName)
+    console.log('   - 當前狀態:', selectedSubmission.status)
+    console.log('   - 退回原因:', reason)
+
+    setIsProcessing(true)
+    try {
+      console.log('2. 使用 statusManager 變更狀態...')
+      const result = await changeStatus(selectedSubmission.id, 'rejected', reason)
+
+      console.log('3. 狀態變更結果:', result)
+
+      if (result.success) {
+        console.log('✅ 審核退回成功')
+        // 關閉模態框
+        setIsRejectModalOpen(false)
+        setSelectedSubmission(null)
+        // statusManager 會自動更新並通知所有監聽者
+      } else {
+        console.error('❌ 審核退回失敗:', result.message)
+        alert(`❌ 操作失敗：${result.message}`)
+      }
+    } catch (error) {
+      console.error('4. 審核退回異常:', error)
+      alert('❌ 退回操作失敗，請稍後再試')
+    } finally {
+      setIsProcessing(false)
+      console.groupEnd()
+    }
+  }
+
+  const closeRejectModal = () => {
+    if (!isProcessing) {
+      setIsRejectModalOpen(false)
+      setSelectedSubmission(null)
+    }
+  }
+
   const clearAllFilters = () => {
     setSelectedStatuses([])
     setSelectedUser('')
@@ -120,30 +227,57 @@ const StatisticsDetailPOC: React.FC = () => {
     setCurrentPage(1)
   }
 
+  // 鍵盤快捷鍵
+  const shortcuts = createCommonShortcuts({
+    back: () => navigate('/app/admin/poc'),
+    refresh: () => refresh()
+  })
+
+  useKeyboardShortcuts({ shortcuts })
+
+  // Advanced navigation shortcuts
+  const { showHelp } = useAdvancedNavigation({
+    currentPage: 'statistics',
+    enabled: !loading
+  })
+
   const SortIcon: React.FC<{ field: SortField }> = ({ field }) => {
     if (sortField !== field) return <span className="text-gray-400">↕️</span>
     return sortOrder === 'asc' ? <span className="text-blue-600">↑</span> : <span className="text-blue-600">↓</span>
   }
 
+  if (loading) {
+    return <DashboardSkeleton />
+  }
+
+  if (statusError) {
+    return (
+      <div className="min-h-screen bg-gray-50 p-6 flex items-center justify-center">
+        <div className="max-w-md w-full bg-white rounded-lg shadow-lg p-6 text-center">
+          <div className="text-red-500 text-5xl mb-4">📊⚠️</div>
+          <h3 className="text-lg font-medium text-gray-900 mb-2">載入統計資料失敗</h3>
+          <p className="text-gray-600 mb-4">{statusError}</p>
+          <button
+            onClick={() => refresh()}
+            className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 transition-colors"
+          >
+            重新載入
+          </button>
+        </div>
+      </div>
+    )
+  }
+
   return (
     <div className="min-h-screen bg-gray-50 p-6">
       <div className="max-w-7xl mx-auto">
-        <div className="mb-6">
-          <button
-            onClick={() => navigate('/app/admin/poc')}
-            className="flex items-center text-blue-600 hover:text-blue-800 mb-4"
-          >
-            <span className="mr-2">←</span>
-            返回主控台
-          </button>
-
-          <h1 className="text-3xl font-bold text-gray-900 mb-2">
-            填報記錄管理 📊
-          </h1>
-          <p className="text-gray-600">
-            查看和管理所有用戶的能源填報記錄
-          </p>
-        </div>
+        <PageHeader
+          title="填報記錄管理 📊"
+          subtitle="查看和管理所有用戶的能源填報記錄"
+          currentPage="statistics"
+          backPath="/app/admin/poc"
+          showBackButton={true}
+        />
 
         {/* 統計卡片 */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
@@ -153,13 +287,6 @@ const StatisticsDetailPOC: React.FC = () => {
             icon="📝"
             bgColor="bg-blue-100"
             onClick={() => handleStatsCardClick('submitted')}
-          />
-          <StatsCard
-            title="待審核"
-            count={stats.pending}
-            icon="⏳"
-            bgColor="bg-orange-100"
-            onClick={() => handleStatsCardClick('pending')}
           />
           <StatsCard
             title="已通過"
@@ -265,7 +392,7 @@ const StatisticsDetailPOC: React.FC = () => {
 
             <div className="flex items-center justify-between mt-4">
               <div className="text-sm text-gray-600">
-                顯示 {filteredSubmissions.length} 筆記錄 (共 {mockSubmissions.length} 筆)
+                顯示 {filteredSubmissions.length} 筆記錄 (共 {submissions.length} 筆)
               </div>
 
               {(selectedStatuses.length > 0 || selectedUser || selectedCategory) && (
@@ -332,11 +459,11 @@ const StatisticsDetailPOC: React.FC = () => {
                   const priorityColor = priorityColors[submission.priority]
 
                   return (
-                    <div
-                      key={submission.id}
-                      onClick={() => handleSubmissionClick(submission)}
-                      className="lg:grid lg:grid-cols-9 gap-4 p-4 border-b border-gray-100 hover:bg-gray-50 cursor-pointer transition-colors lg:rounded-none rounded-lg lg:border-0 border lg:shadow-none shadow-sm lg:bg-transparent bg-white"
-                    >
+                    <div key={submission.id} className="space-y-0">
+                      <div
+                        onClick={() => handleSubmissionClick(submission)}
+                        className="lg:grid lg:grid-cols-9 gap-4 p-4 border-b border-gray-100 hover:bg-gray-50 cursor-pointer transition-colors lg:rounded-none rounded-lg lg:border-0 border lg:shadow-none shadow-sm lg:bg-transparent bg-white"
+                      >
                       {/* 響應式佈局 */}
                       <div className="lg:flex lg:items-center">
                         <div className="lg:hidden text-xs text-gray-500 mb-1">用戶</div>
@@ -396,16 +523,72 @@ const StatisticsDetailPOC: React.FC = () => {
 
                       <div className="lg:flex lg:items-center">
                         <div className="lg:hidden text-xs text-gray-500 mb-1">操作</div>
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation()
-                            handleSubmissionClick(submission)
-                          }}
-                          className="text-blue-600 hover:text-blue-800 text-sm underline"
-                        >
-                          查看詳情
-                        </button>
+                        <div className="flex items-center gap-2">
+                          {/* 待審核狀態顯示審核按鈕 */}
+                          {submission.status === 'submitted' && (
+                            <>
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation()
+                                  handleApprove(submission)
+                                }}
+                                disabled={isProcessing}
+                                className="px-3 py-1 bg-green-600 text-white text-xs rounded hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center"
+                              >
+                                {isProcessing ? (
+                                  <LoadingSpinner size="sm" className="mr-1" />
+                                ) : (
+                                  <span className="mr-1">✅</span>
+                                )}
+                                通過
+                              </button>
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation()
+                                  handleReject(submission)
+                                }}
+                                disabled={isProcessing}
+                                className="px-3 py-1 bg-red-600 text-white text-xs rounded hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center"
+                              >
+                                <span className="mr-1">❌</span>
+                                退回
+                              </button>
+                            </>
+                          )}
+
+                          {/* 其他狀態顯示查看詳情按鈕 */}
+                          {submission.status !== 'submitted' && (
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation()
+                                handleSubmissionClick(submission)
+                              }}
+                              className="text-blue-600 hover:text-blue-800 text-sm underline"
+                            >
+                              查看詳情
+                            </button>
+                          )}
+                        </div>
+                        </div>
                       </div>
+
+                      {/* 已退回記錄顯示退回原因 */}
+                      {submission.status === 'rejected' && submission.reviewNotes && (
+                        <div className="lg:ml-4 mt-3 p-3 bg-red-50 border-l-4 border-red-300 rounded-r">
+                          <div className="flex items-start">
+                            <span className="mr-2 text-red-600">📝</span>
+                            <div className="flex-1">
+                              <div className="text-sm font-medium text-red-800 mb-1">退回原因：</div>
+                              <div className="text-sm text-red-700 leading-relaxed">{submission.reviewNotes}</div>
+                              {submission.reviewedAt && (
+                                <div className="text-xs text-red-600 mt-2">
+                                  退回時間：{submission.reviewedAt}
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      )}
                     </div>
                   )
                 })}
@@ -465,7 +648,7 @@ const StatisticsDetailPOC: React.FC = () => {
           <div className="mt-6 text-center">
             <p className="text-sm text-gray-500 flex items-center justify-center">
               <span className="mr-2">💡</span>
-              提示：點擊記錄可查看詳情（POC 版本僅展示資訊）
+              提示：點擊記錄可查看詳情，待審核記錄可進行審核操作
             </p>
           </div>
         </div>
@@ -604,6 +787,19 @@ const StatisticsDetailPOC: React.FC = () => {
             </div>
           </div>
         </Modal>
+
+        {/* 退回原因模態框 */}
+        <RejectModal
+          isOpen={isRejectModalOpen}
+          onClose={closeRejectModal}
+          onConfirm={handleRejectConfirm}
+          submissionInfo={selectedSubmission ? {
+            userName: selectedSubmission.userName,
+            categoryName: selectedSubmission.categoryName,
+            amount: selectedSubmission.amount,
+            unit: selectedSubmission.unit
+          } : undefined}
+        />
       </div>
     </div>
   )

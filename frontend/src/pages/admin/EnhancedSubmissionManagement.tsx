@@ -1,12 +1,13 @@
 import { useState, useEffect } from 'react'
-import { 
-  Users, FileText, CheckCircle, XCircle, AlertTriangle, Eye, ChevronRight, 
-  Clock, Calendar, Filter, Search, RefreshCw, Download, FileCheck, 
-  MessageSquare, User, Calendar as CalendarIcon
+import { useSearchParams, useNavigate, useLocation } from 'react-router-dom'
+import {
+  Users, FileText, CheckCircle, XCircle, AlertTriangle, Eye, ChevronRight,
+  Clock, Calendar, Filter, Search, RefreshCw, Download, FileCheck,
+  MessageSquare, User, Calendar as CalendarIcon, ArrowLeft
 } from 'lucide-react'
-import { 
-  getPendingReviewEntries, 
-  getReviewedEntries, 
+import {
+  getPendingReviewEntries,
+  getReviewedEntries,
   getUsersWithPendingEntries,
   reviewEntry,
   bulkReviewEntries,
@@ -14,6 +15,7 @@ import {
   ReviewedEntry,
   ReviewFilters
 } from '../../api/reviewEnhancements'
+import RejectModal from './components/RejectModal'
 
 interface EnhancedSubmissionManagementProps {
   onViewUserSubmissions?: (userId: string, userName: string) => void
@@ -21,11 +23,33 @@ interface EnhancedSubmissionManagementProps {
 
 type ViewMode = 'overview' | 'pending' | 'reviewed'
 
-const EnhancedSubmissionManagement: React.FC<EnhancedSubmissionManagementProps> = ({ 
-  onViewUserSubmissions 
+const EnhancedSubmissionManagement: React.FC<EnhancedSubmissionManagementProps> = ({
+  onViewUserSubmissions
 }) => {
+  // URL 參數讀取和導航
+  const [searchParams] = useSearchParams()
+  const navigate = useNavigate()
+  const location = useLocation()
+
+  // 從 URL 參數初始化狀態
+  const getInitialViewMode = (): ViewMode => {
+    const view = searchParams.get('view')
+    if (view === 'pending' || view === 'reviewed' || view === 'overview') {
+      return view
+    }
+    return 'overview'
+  }
+
+  const getInitialStatusFilter = (): 'all' | 'approved' | 'rejected' => {
+    const status = searchParams.get('status')
+    if (status === 'approved' || status === 'rejected') {
+      return status
+    }
+    return 'all'
+  }
+
   // 狀態管理
-  const [viewMode, setViewMode] = useState<ViewMode>('overview')
+  const [viewMode, setViewMode] = useState<ViewMode>(getInitialViewMode())
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   
@@ -42,7 +66,7 @@ const EnhancedSubmissionManagement: React.FC<EnhancedSubmissionManagementProps> 
   // 篩選狀態
   const [searchTerm, setSearchTerm] = useState('')
   const [selectedUserId, setSelectedUserId] = useState<string>('')
-  const [statusFilter, setStatusFilter] = useState<'all' | 'approved' | 'rejected'>('all')
+  const [statusFilter, setStatusFilter] = useState<'all' | 'approved' | 'rejected'>(getInitialStatusFilter())
   const [categoryFilter, setCategoryFilter] = useState<string>('')
   
   // 審核狀態
@@ -52,42 +76,141 @@ const EnhancedSubmissionManagement: React.FC<EnhancedSubmissionManagementProps> 
   const [showBulkReviewModal, setShowBulkReviewModal] = useState(false)
   const [bulkAction, setBulkAction] = useState<'approve' | 'reject'>('approve')
 
-  // 載入數據
+  // 單個退回模態框
+  const [showRejectModal, setShowRejectModal] = useState(false)
+  const [selectedEntry, setSelectedEntry] = useState<PendingReviewEntry | null>(null)
+
+  // 載入數據 - 每次進入頁面或 URL 參數變化時重新載入
   useEffect(() => {
     fetchData()
-  }, [])
+  }, [location.search]) // 當 URL 參數變化時重新載入
+
+  // 監聽 URL 參數變化
+  useEffect(() => {
+    const newViewMode = getInitialViewMode()
+    const newStatusFilter = getInitialStatusFilter()
+
+    if (newViewMode !== viewMode) {
+      setViewMode(newViewMode)
+    }
+
+    if (newStatusFilter !== statusFilter) {
+      setStatusFilter(newStatusFilter)
+    }
+  }, [searchParams])
 
   const fetchData = async () => {
     try {
       setLoading(true)
       setError(null)
-      
+
+      console.log('🔄 [EnhancedSubmissionManagement] Reloading data...', {
+        currentUrl: location.pathname + location.search,
+        timestamp: new Date().toISOString()
+      })
+
       const [pending, reviewed, users] = await Promise.all([
         getPendingReviewEntries(),
         getReviewedEntries(),
         getUsersWithPendingEntries()
       ])
-      
+
       setPendingEntries(pending)
       setReviewedEntries(reviewed)
       setUsersWithPending(users)
+
+      console.log('✅ [EnhancedSubmissionManagement] Data reloaded successfully:', {
+        pendingCount: pending.length,
+        reviewedCount: reviewed.length,
+        usersCount: users.length
+      })
     } catch (error) {
-      console.error('Error fetching data:', error)
+      console.error('❌ [EnhancedSubmissionManagement] Error fetching data:', error)
       setError(error instanceof Error ? error.message : '載入資料失敗')
     } finally {
       setLoading(false)
     }
   }
 
-  // 單個審核操作
-  const handleReviewEntry = async (entryId: string, action: 'approve' | 'reject', notes?: string) => {
+  // 頁面映射 - 根據類別決定填報頁面路徑
+  const pageMap: Record<string, string> = {
+    'WD-40': '/app/wd40',
+    '柴油': '/app/diesel',
+    '柴油(發電機)': '/app/diesel_generator',
+    '汽油': '/app/gasoline',
+    '天然氣': '/app/natural_gas',
+    '液化石油氣': '/app/lpg',
+    '乙炔': '/app/acetylene',
+    '冷媒': '/app/refrigerant',
+    '化糞池': '/app/septictank',
+    '尿素': '/app/urea',
+    '焊條': '/app/welding_rod',
+    '滅火器': '/app/fire_extinguisher',
+    '外購電力': '/app/electricity_bill',
+    '員工通勤': '/app/employee_commute'
+  }
+
+  // 查看填報詳情 - 導航到審核模式
+  const handleViewSubmission = (entry: PendingReviewEntry | ReviewedEntry) => {
+    console.log('🔍 準備導航到:', entry)
+    console.log('📊 填報類別:', entry.category)
+
+    const pagePath = pageMap[entry.category]
+    console.log('🗺️ 頁面路徑映射:', pagePath)
+
+    if (!pagePath) {
+      console.error('❌ Unknown category:', entry.category)
+      console.log('🗂️ 可用的類別映射:', Object.keys(pageMap))
+      setError(`未知的填報類別: ${entry.category}`)
+      return
+    }
+
+    // 修正 userId 欄位名稱
+    const userId = entry.owner_id || entry.userId || entry.owner?.id
+    const reviewUrl = `${pagePath}?mode=review&entryId=${entry.id}&userId=${userId}`
+
+    console.log('🚀 導航 URL:', reviewUrl)
+    console.log('👤 用戶 ID:', userId)
+
+    try {
+      navigate(reviewUrl)
+      console.log('✅ 導航指令已發送')
+    } catch (error) {
+      console.error('❌ 導航失敗:', error)
+      setError('導航失敗，請稍後重試')
+    }
+  }
+
+  // 根據 URL 參數生成動態標題
+  const getCurrentTitle = () => {
+    const view = searchParams.get('view')
+    const status = searchParams.get('status')
+
+    if (view === 'pending') {
+      return '待審核填報'
+    } else if (view === 'reviewed') {
+      switch (status) {
+        case 'approved':
+          return '已通過填報'
+        case 'rejected':
+          return '已退回填報'
+        default:
+          return '已審核填報'
+      }
+    } else {
+      return '填報管理'
+    }
+  }
+
+  // 通過操作
+  const handleApprove = async (entryId: string) => {
     try {
       setReviewingEntries(prev => new Set([...prev, entryId]))
-      await reviewEntry(entryId, action, notes)
+      await reviewEntry(entryId, 'approve')
       await fetchData() // 重新載入數據
     } catch (error) {
-      console.error('Review failed:', error)
-      setError(error instanceof Error ? error.message : '審核操作失敗')
+      console.error('Approve failed:', error)
+      setError(error instanceof Error ? error.message : '通過審核失敗')
     } finally {
       setReviewingEntries(prev => {
         const newSet = new Set(prev)
@@ -95,6 +218,40 @@ const EnhancedSubmissionManagement: React.FC<EnhancedSubmissionManagementProps> 
         return newSet
       })
     }
+  }
+
+  // 開啟退回模態框
+  const handleRejectClick = (entry: PendingReviewEntry) => {
+    setSelectedEntry(entry)
+    setShowRejectModal(true)
+  }
+
+  // 確認退回操作
+  const handleRejectConfirm = async (reason: string) => {
+    if (!selectedEntry) return
+
+    try {
+      setReviewingEntries(prev => new Set([...prev, selectedEntry.id]))
+      await reviewEntry(selectedEntry.id, 'reject', reason)
+      await fetchData() // 重新載入數據
+      setShowRejectModal(false)
+      setSelectedEntry(null)
+    } catch (error) {
+      console.error('Reject failed:', error)
+      setError(error instanceof Error ? error.message : '退回審核失敗')
+    } finally {
+      setReviewingEntries(prev => {
+        const newSet = new Set(prev)
+        newSet.delete(selectedEntry.id)
+        return newSet
+      })
+    }
+  }
+
+  // 關閉退回模態框
+  const handleRejectClose = () => {
+    setShowRejectModal(false)
+    setSelectedEntry(null)
   }
 
   // 批量審核操作
@@ -165,6 +322,37 @@ const EnhancedSubmissionManagement: React.FC<EnhancedSubmissionManagementProps> 
 
   return (
     <div className="space-y-6">
+      {/* 頂部標題區 */}
+      <div className="mb-6 flex items-center gap-4">
+        <button
+          onClick={() => navigate('/app/admin')}
+          className="p-2 hover:bg-gray-100 rounded-lg transition-colors duration-200 flex items-center justify-center"
+          title="返回管理控制台"
+        >
+          <ArrowLeft className="w-5 h-5 text-gray-600" />
+        </button>
+        <div className="flex-1">
+          <h1 className="text-2xl font-bold text-gray-900">
+            {getCurrentTitle()}
+          </h1>
+          <p className="text-sm text-gray-500 mt-1">
+            {viewMode === 'pending' && '管理待審核的填報項目'}
+            {viewMode === 'reviewed' && '查看已完成審核的項目'}
+            {viewMode === 'overview' && '填報項目統計概覽'}
+          </p>
+        </div>
+        <div className="flex items-center space-x-2">
+          <button
+            onClick={fetchData}
+            disabled={loading}
+            className="px-3 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 transition-colors duration-200 flex items-center space-x-1"
+          >
+            <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
+            <span className="text-sm">重新整理</span>
+          </button>
+        </div>
+      </div>
+
       {/* 統計卡片 */}
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
         <div className="bg-yellow-50 rounded-lg p-4">
@@ -382,13 +570,18 @@ const EnhancedSubmissionManagement: React.FC<EnhancedSubmissionManagementProps> 
               {/* 待審核項目列表 */}
               <div className="space-y-3">
                 {getFilteredPendingEntries().map(entry => (
-                  <div key={entry.id} className="border rounded-lg p-4">
+                  <div
+                    key={entry.id}
+                    className="border rounded-lg p-4 cursor-pointer hover:bg-gray-50 hover:border-blue-300 transition-all duration-200"
+                    onClick={() => handleViewSubmission(entry)}
+                  >
                     <div className="flex items-start justify-between">
                       <div className="flex items-start space-x-3">
                         <input
                           type="checkbox"
                           checked={selectedEntries.has(entry.id)}
                           onChange={(e) => {
+                            e.stopPropagation() // 防止觸發卡片點擊
                             const newSelected = new Set(selectedEntries)
                             if (e.target.checked) {
                               newSelected.add(entry.id)
@@ -422,18 +615,34 @@ const EnhancedSubmissionManagement: React.FC<EnhancedSubmissionManagementProps> 
                       
                       <div className="flex space-x-2">
                         <button
-                          onClick={() => handleReviewEntry(entry.id, 'approve')}
+                          onClick={(e) => {
+                            e.stopPropagation() // 防止觸發卡片點擊
+                            handleApprove(entry.id)
+                          }}
                           disabled={reviewingEntries.has(entry.id)}
                           className="px-3 py-1 bg-green-600 text-white text-sm rounded hover:bg-green-700 disabled:opacity-50"
                         >
                           {reviewingEntries.has(entry.id) ? '處理中...' : '通過'}
                         </button>
                         <button
-                          onClick={() => handleReviewEntry(entry.id, 'reject')}
+                          onClick={(e) => {
+                            e.stopPropagation() // 防止觸發卡片點擊
+                            handleRejectClick(entry)
+                          }}
                           disabled={reviewingEntries.has(entry.id)}
                           className="px-3 py-1 bg-red-600 text-white text-sm rounded hover:bg-red-700 disabled:opacity-50"
                         >
                           {reviewingEntries.has(entry.id) ? '處理中...' : '退回'}
+                        </button>
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation() // 防止觸發卡片點擊
+                            handleViewSubmission(entry)
+                          }}
+                          className="px-3 py-1 bg-blue-600 text-white text-sm rounded hover:bg-blue-700 flex items-center space-x-1"
+                        >
+                          <Eye className="w-4 h-4" />
+                          <span>查看詳情</span>
                         </button>
                       </div>
                     </div>
@@ -493,7 +702,11 @@ const EnhancedSubmissionManagement: React.FC<EnhancedSubmissionManagementProps> 
               {/* 已審核項目列表 */}
               <div className="space-y-3">
                 {getFilteredReviewedEntries().map(entry => (
-                  <div key={entry.id} className="border rounded-lg p-4">
+                  <div
+                    key={entry.id}
+                    className="border rounded-lg p-4 cursor-pointer hover:bg-gray-50 hover:border-blue-300 transition-all duration-200"
+                    onClick={() => handleViewSubmission(entry)}
+                  >
                     <div className="flex items-start justify-between">
                       <div className="flex-1">
                         <div className="flex items-center space-x-2">
@@ -522,6 +735,20 @@ const EnhancedSubmissionManagement: React.FC<EnhancedSubmissionManagementProps> 
                             {entry.review_notes}
                           </div>
                         )}
+                      </div>
+
+                      {/* 查看詳情按鈕 */}
+                      <div className="flex space-x-2">
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation() // 防止觸發卡片點擊
+                            handleViewSubmission(entry)
+                          }}
+                          className="px-3 py-1 bg-blue-600 text-white text-sm rounded hover:bg-blue-700 flex items-center space-x-1"
+                        >
+                          <Eye className="w-4 h-4" />
+                          <span>查看詳情</span>
+                        </button>
                       </div>
                     </div>
                   </div>
@@ -602,6 +829,19 @@ const EnhancedSubmissionManagement: React.FC<EnhancedSubmissionManagementProps> 
           </div>
         </div>
       )}
+
+      {/* 退回原因模態框 */}
+      <RejectModal
+        isOpen={showRejectModal}
+        onClose={handleRejectClose}
+        onConfirm={handleRejectConfirm}
+        submissionInfo={selectedEntry ? {
+          userName: selectedEntry.owner.display_name,
+          categoryName: selectedEntry.category,
+          amount: selectedEntry.amount,
+          unit: selectedEntry.unit
+        } : undefined}
+      />
     </div>
   )
 }

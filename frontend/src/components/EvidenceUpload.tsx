@@ -214,6 +214,7 @@ const EvidenceUpload: React.FC<EvidenceUploadProps> = ({
         const category = kind === 'msds' ? 'msds' :
                         kind === 'heat_value_evidence' ? 'heat_value_evidence' :
                         kind === 'annual_evidence' ? 'annual_evidence' :
+                        kind === 'nameplate_evidence' ? 'other' :
                         kind === 'other' ? 'other' : 'usage_evidence'
         return await uploadEvidence(file, {
           pageKey,
@@ -506,8 +507,26 @@ const EvidenceUpload: React.FC<EvidenceUploadProps> = ({
   const isAtMaxCapacity = totalFiles >= maxFiles
   const isUploadDisabled = disabled || uploading || isAtMaxCapacity || isStatusUploadDisabled
 
+  // 檢測審核模式
+  const searchParams = new URLSearchParams(window.location.search)
+  const isReviewMode = searchParams.get('mode') === 'review'
+  const reviewUserId = searchParams.get('userId')
+
   return (
     <div className={`relative space-y-3 ${className}`}>
+      {/* 審核模式提示 */}
+      {isReviewMode && mode === 'view' && (
+        <div className="bg-amber-50 border border-amber-200 rounded-lg p-3">
+          <div className="flex items-center space-x-2">
+            <AlertCircle className="h-4 w-4 text-amber-600" />
+            <span className="text-sm text-amber-800 font-medium">審核模式</span>
+          </div>
+          <p className="text-xs text-amber-700 mt-1">
+            您正在以管理員身份檢視其他用戶的檔案。如果無法預覽圖片，可能是權限限制。
+          </p>
+        </div>
+      )}
+
       {/* 上傳區域 */}
       <div
         className={`
@@ -537,7 +556,6 @@ const EvidenceUpload: React.FC<EvidenceUploadProps> = ({
           ref={fileInputRef}
           type="file"
           multiple
-          accept="image/*,application/pdf,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel"
           onChange={(e) => {
             // 事件處理器中再次檢查狀態
             if (!uploading && e.target.files) {
@@ -574,7 +592,7 @@ const EvidenceUpload: React.FC<EvidenceUploadProps> = ({
                 <p className={`text-xs mt-1 transition-colors ${
                   isDragging ? 'text-blue-600' : 'text-gray-500'
                 }`}>
-                  支援 JPG、PNG、WebP、HEIC、PDF、Excel 檔案，最大 10MB
+                  支援所有檔案類型，最大 10MB
                 </p>
               )}
             </div>

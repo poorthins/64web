@@ -392,44 +392,40 @@ export default function FireExtinguisherPage() {
         setLoading(true)
         setError(null)
 
-        // 載入檢修表檔案
-        const msdsFilesList = await listMSDSFiles(pageKey)
-        setEvidenceFiles(msdsFilesList)
-
         // 檢查是否已有非草稿記錄
         const existingEntry = await getEntryByPageKeyAndYear(pageKey, currentYear)
+
         if (existingEntry && existingEntry.status !== 'draft') {
           setInitialStatus(existingEntry.status as EntryStatus)
           setCurrentEntryId(existingEntry.id)
           setHasSubmittedBefore(true)
+
+          // 載入該記錄的所有檔案（支援審核模式）
+          try {
+            const allFiles = await getEntryFiles(existingEntry.id)
+            const evidenceFilesFromEntry = allFiles.filter(f =>
+              f.file_type === 'msds' && f.page_key === pageKey
+            )
+            setEvidenceFiles(evidenceFilesFromEntry)
+          } catch (fileError) {
+            console.error('Failed to load files for existing entry:', fileError)
+            setEvidenceFiles([])
+          }
           
           // 載入已提交的記錄數據供編輯
           if (existingEntry.payload?.fireExtinguisherData) {
             const fireExtinguisherData = existingEntry.payload.fireExtinguisherData
             
             // 載入相關檔案
-            if (existingEntry.id) {
-              try {
-                const files = await getEntryFiles(existingEntry.id)
-                
-                // 分類檔案到對應的記錄
-                const msdsFiles = files.filter(f => f.page_key === pageKey)
-                
-                setEvidenceFiles(msdsFiles)
-                setData(fireExtinguisherData)
-              } catch (fileError) {
-                console.error('Failed to load files for fire extinguisher records:', fileError)
-                setData(fireExtinguisherData)
-              }
-            } else {
-              setData(fireExtinguisherData)
-            }
+            setData(fireExtinguisherData)
             
             // 處理狀態變更
             handleDataChanged()
           }
+        } else {
+          // 新記錄：設為空狀態，不載入任何檔案（因為還沒有記錄）
+          setEvidenceFiles([])
         }
-        // 如果是草稿記錄或無記錄，保持表單空白狀態
 
         isInitialLoad.current = false
       } catch (error) {

@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import { Upload, AlertCircle, CheckCircle, Loader2, X, Trash2, Edit, Eye } from 'lucide-react'
 import { DocumentHandler } from '../../services/documentHandler'
 import EnergyFileManager from '../../components/EnergyFileManager'
@@ -10,6 +10,7 @@ import BottomActionBar from '../../components/BottomActionBar'
 import EvidenceUpload from '../../components/EvidenceUpload'
 import { useEditPermissions } from '../../hooks/useEditPermissions'
 import { useFrontendStatus } from '../../hooks/useFrontendStatus'
+import { useApprovalStatus } from '../../hooks/useApprovalStatus'
 import {
   commitEvidence,
   debugDatabaseContent,
@@ -22,8 +23,10 @@ import {
   uploadEvidenceWithEntry
 } from '../../api/files'
 import { MemoryFile } from '../../components/EvidenceUpload'
+import ReviewSection from '../../components/ReviewSection'
+import { useSubmissions } from '../admin/hooks/useSubmissions'
 
-import { upsertEnergyEntry, sumMonthly, UpsertEntryInput, updateEntryStatus, getEntryByPageKeyAndYear } from '../../api/entries'
+import { upsertEnergyEntry, sumMonthly, UpsertEntryInput, updateEntryStatus, getEntryByPageKeyAndYear, getEntryById } from '../../api/entries'
 import { supabase } from '../../lib/supabaseClient'
 import { designTokens } from '../../utils/designTokens'
 import { debugRLSOperation, diagnoseAuthState } from '../../utils/authDiagnostics'
@@ -88,6 +91,13 @@ interface MonthData {
 
 const WD40Page = () => {
   const navigate = useNavigate()
+  const [searchParams] = useSearchParams()
+
+  // 審核模式檢測
+  const isReviewMode = searchParams.get('mode') === 'review'
+  const reviewEntryId = searchParams.get('entryId')
+  const reviewUserId = searchParams.get('userId')
+
   const [loading, setLoading] = useState(true)
   const [clearLoading, setClearLoading] = useState(false)
   const [submitting, setSubmitting] = useState(false)
@@ -120,9 +130,16 @@ const WD40Page = () => {
   })
 
   const { currentStatus, handleDataChanged, handleSubmitSuccess, isInitialLoad } = frontendStatus
-  
+
+  // 審核 API hook
+  const { reviewSubmission } = useSubmissions()
+
   // 表單資料
   const [year] = useState(new Date().getFullYear())
+  const pageKey = 'wd40'
+
+  // 審核狀態檢查 Hook
+  const approvalStatus = useApprovalStatus(pageKey, year)
   const [unitCapacity, setUnitCapacity] = useState<number>(0)
   const [carbonRate, setCarbonRate] = useState<number>(0)
   const [monthlyData, setMonthlyData] = useState<MonthData[]>(
@@ -147,8 +164,6 @@ const WD40Page = () => {
     Array.from({ length: 12 }, () => [])
   )
 
-  const pageKey = 'wd40'
-  
   // 編輯權限控制
   const editPermissions = useEditPermissions(currentStatus || 'draft')
   
@@ -194,6 +209,14 @@ const WD40Page = () => {
         setLoading(true)
         setError(null)
 
+        // 審核模式除錯
+        console.log('🔍 [WD40Page] 審核模式除錯:', {
+          isReviewMode,
+          reviewEntryId,
+          reviewUserId,
+          currentUrl: window.location.href
+        })
+
         // 清理所有舊狀態，避免重複顯示
         console.log('🧹 [WD40Page] Clearing previous state')
         setMsdsFiles([])
@@ -207,7 +230,14 @@ const WD40Page = () => {
         })))
 
         // 載入基本資料
-        const existingEntry = await getEntryByPageKeyAndYear(pageKey, year)
+        let existingEntry
+        if (isReviewMode && reviewEntryId) {
+          console.log('🔍 [WD40Page] 審核模式 - 載入特定記錄:', reviewEntryId)
+          existingEntry = await getEntryById(reviewEntryId)
+        } else {
+          console.log('🔍 [WD40Page] 一般模式 - 載入用戶自己的記錄')
+          existingEntry = await getEntryByPageKeyAndYear(pageKey, year)
+        }
 
         console.log('🚀 [WD40Page] Starting file loading process:', {
           pageKey,
@@ -331,6 +361,55 @@ const WD40Page = () => {
                 }))
               })
 
+              // 新增詳細的路徑診斷
+              console.log('📋 從資料庫載入的檔案路徑分析:', allEntryFiles.map(f => ({
+                id: f.id,
+                file_path: f.file_path,
+                file_name: f.file_name,
+                路徑是否為空: !f.file_path,
+                路徑長度: f.file_path?.length,
+                路徑格式: {
+                  包含evidence: f.file_path?.includes('evidence'),
+                  包含用戶ID: f.file_path?.includes('/'),
+                  開頭: f.file_path?.substring(0, 30),
+                  結尾: f.file_path?.substring(f.file_path.length - 30)
+                },
+                檔案大小: f.file_size,
+                MIME類型: f.mime_type,
+                建立時間: f.created_at
+              })))
+
+              // 檢查是否有路徑異常的檔案
+              const invalidPaths = allEntryFiles.filter(f =>
+                !f.file_path ||
+                f.file_path === 'null' ||
+                f.file_path === 'undefined' ||
+                f.file_path.length === 0
+              )
+
+              if (invalidPaths.length > 0) {
+                console.error('❌ [WD40Page] 發現無效的檔案路徑:', invalidPaths.map(f => ({
+                  id: f.id,
+                  file_name: f.file_name,
+                  file_path: f.file_path,
+                  問題: '路徑無效或為空'
+                })))
+              }
+
+              // 分析路徑模式
+              const pathPatterns = allEntryFiles.map(f => f.file_path).filter(Boolean)
+              const uniquePatterns = [...new Set(pathPatterns.map(path => {
+                const parts = path.split('/')
+                return parts.length > 1 ? `${parts[0]}/.../...` : path
+              }))]
+
+              console.log('📊 [WD40Page] 檔案路徑模式分析:', {
+                總檔案數: allEntryFiles.length,
+                有效路徑數: pathPatterns.length,
+                路徑模式: uniquePatterns,
+                示例路徑: pathPatterns.slice(0, 3)
+              })
+
               // 分類檔案
               const msdsFilesFromEntry = allEntryFiles.filter(f =>
                 f.file_type === 'msds' && f.page_key === pageKey
@@ -412,6 +491,26 @@ const WD40Page = () => {
         }
 
         isInitialLoad.current = false
+
+        // 審核模式載入完成除錯
+        if (isReviewMode) {
+          console.log('🔍 [WD40Page] 審核模式載入完成:', {
+            entryExists: !!existingEntry,
+            entryId: existingEntry?.id,
+            entryOwnerId: existingEntry?.owner_id,
+            reviewEntryId,
+            reviewUserId,
+            msdsFilesCount: msdsFiles.length,
+            monthlyDataFiles: monthlyData.map((data, i) => ({
+              month: i + 1,
+              quantity: data.quantity,
+              filesCount: data.files.length,
+              fileIds: data.files.map(f => f.id)
+            })),
+            totalFiles: msdsFiles.length + monthlyData.reduce((sum, data) => sum + data.files.length, 0)
+          })
+        }
+
       } catch (error) {
         console.error('載入資料失敗:', error)
         setError(error instanceof Error ? error.message : '載入失敗')
@@ -421,7 +520,7 @@ const WD40Page = () => {
     }
 
     loadData()
-  }, [])
+  }, [isReviewMode, reviewEntryId, reviewUserId])
 
   // 計算總使用量
   useEffect(() => {
@@ -965,20 +1064,86 @@ const WD40Page = () => {
     >
       {/* 主要內容區域 - 簡化結構，移除多層嵌套 */}
       <div className="max-w-4xl mx-auto px-6 py-8 space-y-6">
-        
+
+        {/* 審核狀態通知 */}
+        {!isReviewMode && approvalStatus.isApproved && (
+          <div className="bg-green-100 border-l-4 border-green-500 text-green-700 p-4 mb-6 rounded-r-lg">
+            <div className="flex items-center">
+              <div className="text-2xl mr-3">🎉</div>
+              <div>
+                <p className="font-bold text-lg">恭喜您已審核通過！</p>
+                <p className="text-sm mt-1">此填報已完成審核，資料已鎖定無法修改。</p>
+                {approvalStatus.reviewedAt && (
+                  <p className="text-xs mt-2 opacity-75">
+                    審核完成時間：{new Date(approvalStatus.reviewedAt).toLocaleString()}
+                  </p>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {!isReviewMode && approvalStatus.isRejected && (
+          <div className="bg-red-100 border-l-4 border-red-500 text-red-700 p-4 mb-6 rounded-r-lg">
+            <div className="flex items-center">
+              <div className="text-2xl mr-3">⚠️</div>
+              <div className="flex-1">
+                <p className="font-bold text-lg">填報已被退回</p>
+                <p className="text-sm mt-1 font-medium">退回原因：{approvalStatus.rejectionReason}</p>
+                <p className="text-xs mt-2">請根據上述原因修正後重新提交。修正完成後，資料將重新進入審核流程。</p>
+                {approvalStatus.reviewedAt && (
+                  <p className="text-xs mt-2 opacity-75">
+                    退回時間：{new Date(approvalStatus.reviewedAt).toLocaleString()}
+                  </p>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {!isReviewMode && approvalStatus.isPending && (
+          <div className="bg-yellow-100 border-l-4 border-yellow-500 text-yellow-700 p-4 mb-6 rounded-r-lg">
+            <div className="flex items-center">
+              <div className="text-2xl mr-3">⏳</div>
+              <div>
+                <p className="font-bold text-lg">填報審核中</p>
+                <p className="text-sm mt-1">您的填報已提交，正在等待管理員審核。審核期間無法修改資料。</p>
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* 頁面標題 - 無背景框 */}
         <div className="text-center mb-8">
-          <h1 
-            className="text-4xl font-semibold mb-3" 
+          {/* 審核模式指示器 */}
+          {isReviewMode && (
+            <div className="mb-4 p-3 bg-orange-100 border-2 border-orange-300 rounded-lg">
+              <div className="flex items-center justify-center">
+                <Eye className="w-5 h-5 text-orange-600 mr-2" />
+                <span className="text-orange-800 font-medium">
+                  📋 審核模式 - 查看填報內容
+                </span>
+              </div>
+              <p className="text-sm text-orange-600 mt-1">
+                所有輸入欄位已鎖定，僅供審核查看
+              </p>
+            </div>
+          )}
+
+          <h1
+            className="text-4xl font-semibold mb-3"
             style={{ color: designTokens.colors.textPrimary }}
           >
             WD-40 使用數量填報
           </h1>
-          <p 
-            className="text-lg" 
+          <p
+            className="text-lg"
             style={{ color: designTokens.colors.textSecondary }}
           >
-            請上傳 MSDS 文件並填入各月份使用數據進行碳排放計算
+            {isReviewMode
+              ? '管理員審核模式 - 檢視填報內容和相關檔案'
+              : '請上傳 MSDS 文件並填入各月份使用數據進行碳排放計算'
+            }
           </p>
         </div>
 
@@ -1045,8 +1210,8 @@ const WD40Page = () => {
                 onFilesChange={setMsdsFiles}
                 maxFiles={3}
                 kind="msds"
-                disabled={submitting}
-                mode="edit"
+                disabled={submitting || isReviewMode || approvalStatus.isApproved || approvalStatus.isPending}
+                mode={isReviewMode || approvalStatus.isApproved || approvalStatus.isPending ? "view" : "edit"}
                 memoryFiles={msdsMemoryFiles}
                 onMemoryFilesChange={handleMsdsMemoryFilesChange}
               />
@@ -1071,7 +1236,7 @@ const WD40Page = () => {
                     const numValue = inputValue === '' ? 0 : parseFloat(inputValue)
                     setUnitCapacity(isNaN(numValue) ? 0 : numValue)
                   }}
-                  disabled={isReadOnly}
+                  disabled={isReadOnly || isReviewMode || approvalStatus.isApproved || approvalStatus.isPending}
                   className={`w-full px-4 py-3 border rounded-lg focus:outline-none focus:ring-2 focus:border-transparent transition-all ${
                     isReadOnly ? 'bg-gray-100 cursor-not-allowed' : ''
                   }`}
@@ -1112,7 +1277,7 @@ const WD40Page = () => {
                     const numValue = inputValue === '' ? 0 : parseFloat(inputValue)
                     setCarbonRate(isNaN(numValue) ? 0 : numValue)
                   }}
-                  disabled={isReadOnly}
+                  disabled={isReadOnly || isReviewMode || approvalStatus.isApproved || approvalStatus.isPending}
                   className={`w-full px-4 py-3 border rounded-lg focus:outline-none focus:ring-2 focus:border-transparent transition-all ${
                     isReadOnly ? 'bg-gray-100 cursor-not-allowed' : ''
                   }`}
@@ -1203,7 +1368,7 @@ const WD40Page = () => {
                         const numValue = inputValue === '' ? 0 : parseFloat(inputValue)
                         updateMonthData(index, 'quantity', isNaN(numValue) ? 0 : numValue)
                       }}
-                      disabled={isReadOnly}
+                      disabled={isReadOnly || isReviewMode || approvalStatus.isApproved || approvalStatus.isPending}
                       className={`w-full px-3 py-2 border rounded-md focus:outline-none focus:ring-2 focus:border-transparent transition-all ${
                         isReadOnly ? 'bg-gray-100 cursor-not-allowed' : ''
                       }`}
@@ -1239,8 +1404,8 @@ const WD40Page = () => {
                       onFilesChange={(files) => handleMonthFilesChange(data.month, files)}
                       maxFiles={3}
                       kind="usage_evidence"
-                      disabled={submitting}
-                      mode="edit"
+                      disabled={submitting || isReviewMode || approvalStatus.isApproved || approvalStatus.isPending}
+                      mode={isReviewMode || approvalStatus.isApproved || approvalStatus.isPending ? "view" : "edit"}
                       memoryFiles={monthlyMemoryFiles[data.month - 1] || []}
                       onMemoryFilesChange={(files) => handleMonthMemoryFilesChange(data.month, files)}
                     />
@@ -1484,8 +1649,9 @@ const WD40Page = () => {
         </div>
       )}
 
-      {/* 底部操作欄 */}
-      <BottomActionBar
+      {/* 底部操作欄 - 審核模式下隱藏，審核通過或待審核時也隱藏 */}
+      {!isReviewMode && !approvalStatus.isApproved && !approvalStatus.isPending && (
+        <BottomActionBar
         currentStatus={currentStatus}
         currentEntryId={currentEntryId}
         isUpdating={false}
@@ -1497,6 +1663,29 @@ const WD40Page = () => {
         onClear={() => setShowClearConfirmModal(true)}
         designTokens={designTokens}
       />
+      )}
+
+      {/* 審核區塊 - 只在審核模式顯示 */}
+      {isReviewMode && (
+        <ReviewSection
+          entryId={reviewEntryId || currentEntryId || `wd40_${year}`}
+          userId={reviewUserId || "current_user"}
+          category="WD-40"
+          userName="填報用戶" // 可以從用戶資料獲取
+          amount={monthlyData.reduce((sum, data) => sum + data.quantity, 0)}
+          unit="瓶"
+          onApprove={() => {
+            // ReviewSection 會處理 API 呼叫和導航
+            // 這裡可以加入額外的本地狀態處理（如果需要）
+            console.log('✅ WD-40 填報審核通過 - 由 ReviewSection 處理')
+          }}
+          onReject={(reason) => {
+            // ReviewSection 會處理 API 呼叫和導航
+            // 這裡可以加入額外的本地狀態處理（如果需要）
+            console.log('❌ WD-40 填報已退回 - 由 ReviewSection 處理:', reason)
+          }}
+        />
+      )}
 
       {/* Toast 通知 */}
       {toast && (

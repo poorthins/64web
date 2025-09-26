@@ -1,7 +1,8 @@
 import { useState, useEffect } from 'react'
-import { ArrowLeft, FileText, CheckCircle, XCircle, AlertTriangle, Download, Eye, MessageSquare, Calendar, User, Building, Save, X, Loader2, Lock, Unlock } from 'lucide-react'
+import { ArrowLeft, FileText, CheckCircle, XCircle, AlertTriangle, Download, Eye, MessageSquare, Calendar, User, Building, Save, X, Loader2, Lock, Unlock, RotateCcw } from 'lucide-react'
 import { getUserSubmissions, reviewSubmission, Submission, ReviewStatus } from '../../api/adminSubmissions'
 import { getUserDetails, UserProfile } from '../../api/adminUsers'
+import { reviewEntry } from '../../api/reviewEnhancements'
 
 interface UserSubmissionDetailProps {
   userId: string
@@ -32,9 +33,10 @@ const UserSubmissionDetail: React.FC<UserSubmissionDetailProps> = ({
   // 審核相關狀態
   const [selectedSubmissions, setSelectedSubmissions] = useState<Set<string>>(new Set())
   const [reviewingId, setReviewingId] = useState<string | null>(null)
-  const [reviewAction, setReviewAction] = useState<'approved' | 'needs_fix' | ''>('')
+  const [reviewAction, setReviewAction] = useState<'approve' | 'reject' | 'reset' | ''>('')
   const [reviewNote, setReviewNote] = useState('')
   const [isReviewing, setIsReviewing] = useState(false)
+  const [rejectModalOpen, setRejectModalOpen] = useState(false)
   
   // 檢視詳情
   const [viewingSubmission, setViewingSubmission] = useState<SubmissionWithFiles | null>(null)
@@ -75,57 +77,52 @@ const UserSubmissionDetail: React.FC<UserSubmissionDetailProps> = ({
   }
 
   const getLatestReviewStatus = (submission: Submission) => {
-    if (!submission.review_history || submission.review_history.length === 0) {
-      return {
-        status: 'pending',
+    // 假設 submission 有 status 欄位，對應新的三狀態系統
+    const currentStatus = (submission as any).status || 'submitted'
+
+    const statusConfig = {
+      submitted: {
+        status: 'submitted',
         note: '',
         icon: <AlertTriangle className="h-4 w-4 text-yellow-500" />,
         color: 'bg-yellow-100 text-yellow-800',
-        text: '待審核',
+        text: '已提交',
         canEdit: true
-      }
-    }
-
-    const latest = submission.review_history.sort((a, b) => 
-      new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
-    )[0]
-
-    const statusConfig = {
+      },
       approved: {
         status: 'approved',
-        note: latest.note,
+        note: (submission as any).review_notes || '',
         icon: <CheckCircle className="h-4 w-4 text-green-500" />,
         color: 'bg-green-100 text-green-800',
         text: '已通過',
-        canEdit: false // 已通過的項目不能再編輯
+        canEdit: true // 現在已通過的項目也可以操作
       },
-      needs_fix: {
-        status: 'needs_fix',
-        note: latest.note,
+      rejected: {
+        status: 'rejected',
+        note: (submission as any).review_notes || '',
         icon: <XCircle className="h-4 w-4 text-red-500" />,
         color: 'bg-red-100 text-red-800',
-        text: '需修正',
-        canEdit: true
-      },
-      pending: {
-        status: 'pending',
-        note: '',
-        icon: <AlertTriangle className="h-4 w-4 text-yellow-500" />,
-        color: 'bg-yellow-100 text-yellow-800',
-        text: '待審核',
+        text: '已退回',
         canEdit: true
       }
     }
 
-    return statusConfig[latest.status as keyof typeof statusConfig] || statusConfig.pending
+    return statusConfig[currentStatus as keyof typeof statusConfig] || statusConfig.submitted
   }
 
   const filteredSubmissions = submissions.filter(submission => {
     const reviewStatus = getLatestReviewStatus(submission)
-    
-    const matchesStatus = statusFilter === 'all' || reviewStatus.status === statusFilter
+
+    // 狀態映射：舊篩選器 -> 新狀態
+    const statusMapping = {
+      'pending': 'submitted',
+      'approved': 'approved',
+      'needs_fix': 'rejected'
+    };
+
+    const matchesStatus = statusFilter === 'all' || reviewStatus.status === (statusMapping[statusFilter as keyof typeof statusMapping] || statusFilter)
     const matchesCategory = categoryFilter === 'all' || submission.category === categoryFilter
-    
+
     return matchesStatus && matchesCategory
   })
 
@@ -147,59 +144,76 @@ const UserSubmissionDetail: React.FC<UserSubmissionDetailProps> = ({
     }
   }
 
-  const handleReview = async () => {
-    if (!reviewAction || !reviewingId) {
-      alert('請選擇審核結果')
-      return
-    }
+  const handleStatusChange = async (entryId: string, action: 'approve' | 'reject' | 'reset', reason?: string) => {
+    console.group('🔄 項目詳情頁面狀態變更');
+    console.log('操作參數:', { entryId, action, reason });
 
     try {
-      setIsReviewing(true)
-      await reviewSubmission(reviewingId, reviewAction, reviewNote)
-      
+      setIsReviewing(true);
+
+      // 呼叫增強版 API
+      await reviewEntry(entryId, action, reason);
+
       // 重新載入資料
-      await fetchData()
-      
-      // 重置審核狀態
-      setReviewingId(null)
-      setReviewAction('')
-      setReviewNote('')
-      
-      alert(`審核完成！${reviewAction === 'approved' ? '已通過' : '已退件'}`)
+      await fetchData();
+
+      // 重置狀態
+      setReviewingId(null);
+      setReviewAction('');
+      setReviewNote('');
+      setRejectModalOpen(false);
+
+      const actionText = {
+        approve: '通過',
+        reject: '退回',
+        reset: '重置'
+      }[action];
+
+      alert(`✅ ${actionText}操作完成！`);
+      console.log('✅ 狀態變更成功');
     } catch (error) {
-      console.error('Error reviewing submission:', error)
-      alert('審核時發生錯誤')
+      console.error('❌ 狀態變更失敗:', error);
+      alert('操作時發生錯誤: ' + (error instanceof Error ? error.message : '未知錯誤'));
     } finally {
-      setIsReviewing(false)
+      setIsReviewing(false);
+      console.groupEnd();
     }
-  }
+  };
 
-  const handleBatchReview = async (action: 'approved' | 'needs_fix') => {
+  const handleRejectWithReason = (entryId: string) => {
+    const reason = prompt('請輸入退回原因:');
+    if (reason !== null) {
+      handleStatusChange(entryId, 'reject', reason);
+    }
+  };
+
+  const handleBatchReview = async (action: 'approve' | 'reject') => {
     if (selectedSubmissions.size === 0) {
-      alert('請選擇要審核的項目')
-      return
+      alert('請選擇要審核的項目');
+      return;
     }
 
-    const note = prompt(`請輸入${action === 'approved' ? '通過' : '退件'}原因（選填）:`) || ''
+    const actionText = action === 'approve' ? '通過' : '退回';
+    const note = prompt(`請輸入${actionText}原因（選填）:`) || '';
 
     try {
-      setIsReviewing(true)
-      
+      setIsReviewing(true);
+
       // 逐一審核選中的項目
       for (const submissionId of selectedSubmissions) {
-        await reviewSubmission(submissionId, action, note)
+        await reviewEntry(submissionId, action, note);
       }
-      
-      await fetchData()
-      setSelectedSubmissions(new Set())
-      alert(`批次審核完成！${action === 'approved' ? '已通過' : '已退件'} ${selectedSubmissions.size} 個項目`)
+
+      await fetchData();
+      setSelectedSubmissions(new Set());
+      alert(`✅ 批次${actionText}完成！處理了 ${selectedSubmissions.size} 個項目`);
     } catch (error) {
-      console.error('Error batch reviewing:', error)
-      alert('批次審核時發生錯誤')
+      console.error('Error batch reviewing:', error);
+      alert('批次審核時發生錯誤');
     } finally {
-      setIsReviewing(false)
+      setIsReviewing(false);
     }
-  }
+  };
 
   const exportToCSV = () => {
     if (submissions.length === 0) return
@@ -236,10 +250,10 @@ const UserSubmissionDetail: React.FC<UserSubmissionDetailProps> = ({
 
   const getStatistics = () => {
     const total = submissions.length
-    const pending = submissions.filter(s => getLatestReviewStatus(s).status === 'pending').length
+    const pending = submissions.filter(s => getLatestReviewStatus(s).status === 'submitted').length
     const approved = submissions.filter(s => getLatestReviewStatus(s).status === 'approved').length
-    const needsFix = submissions.filter(s => getLatestReviewStatus(s).status === 'needs_fix').length
-    
+    const needsFix = submissions.filter(s => getLatestReviewStatus(s).status === 'rejected').length
+
     return { total, pending, approved, needsFix }
   }
 
@@ -314,7 +328,7 @@ const UserSubmissionDetail: React.FC<UserSubmissionDetailProps> = ({
           {selectedSubmissions.size > 0 && (
             <>
               <button
-                onClick={() => handleBatchReview('approved')}
+                onClick={() => handleBatchReview('approve')}
                 disabled={isReviewing}
                 className="flex items-center gap-2 px-3 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50"
               >
@@ -322,7 +336,7 @@ const UserSubmissionDetail: React.FC<UserSubmissionDetailProps> = ({
                 批量通過 ({selectedSubmissions.size})
               </button>
               <button
-                onClick={() => handleBatchReview('needs_fix')}
+                onClick={() => handleBatchReview('reject')}
                 disabled={isReviewing}
                 className="flex items-center gap-2 px-3 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 disabled:opacity-50"
               >
@@ -394,9 +408,9 @@ const UserSubmissionDetail: React.FC<UserSubmissionDetailProps> = ({
               className="border border-gray-300 rounded-md px-3 py-2 focus:ring-2 focus:ring-blue-500"
             >
               <option value="all">全部狀態</option>
-              <option value="pending">待審核</option>
+              <option value="pending">已提交</option>
               <option value="approved">已通過</option>
-              <option value="needs_fix">需修正</option>
+              <option value="needs_fix">已退回</option>
             </select>
           </div>
           
@@ -509,15 +523,69 @@ const UserSubmissionDetail: React.FC<UserSubmissionDetailProps> = ({
                         >
                           <Eye className="h-4 w-4" />
                         </button>
-                        
-                        {reviewStatus.canEdit && (
-                          <button
-                            onClick={() => setReviewingId(submission.id)}
-                            className="text-green-600 hover:text-green-900"
-                            title="審核"
-                          >
-                            <MessageSquare className="h-4 w-4" />
-                          </button>
+
+                        {/* 智能操作按鈕 */}
+                        {reviewStatus.status === 'submitted' && (
+                          <>
+                            <button
+                              onClick={() => handleStatusChange(submission.id, 'approve')}
+                              className="text-green-600 hover:text-green-900"
+                              title="通過審核"
+                              disabled={isReviewing}
+                            >
+                              <CheckCircle className="h-4 w-4" />
+                            </button>
+                            <button
+                              onClick={() => handleRejectWithReason(submission.id)}
+                              className="text-red-600 hover:text-red-900"
+                              title="退回修正"
+                              disabled={isReviewing}
+                            >
+                              <XCircle className="h-4 w-4" />
+                            </button>
+                          </>
+                        )}
+
+                        {reviewStatus.status === 'approved' && (
+                          <>
+                            <button
+                              onClick={() => handleRejectWithReason(submission.id)}
+                              className="text-red-600 hover:text-red-900"
+                              title="退回修正"
+                              disabled={isReviewing}
+                            >
+                              <XCircle className="h-4 w-4" />
+                            </button>
+                            <button
+                              onClick={() => handleStatusChange(submission.id, 'reset')}
+                              className="text-gray-600 hover:text-gray-900"
+                              title="重置狀態"
+                              disabled={isReviewing}
+                            >
+                              <RotateCcw className="h-4 w-4" />
+                            </button>
+                          </>
+                        )}
+
+                        {reviewStatus.status === 'rejected' && (
+                          <>
+                            <button
+                              onClick={() => handleStatusChange(submission.id, 'approve')}
+                              className="text-green-600 hover:text-green-900"
+                              title="通過審核"
+                              disabled={isReviewing}
+                            >
+                              <CheckCircle className="h-4 w-4" />
+                            </button>
+                            <button
+                              onClick={() => handleStatusChange(submission.id, 'reset')}
+                              className="text-gray-600 hover:text-gray-900"
+                              title="重置狀態"
+                              disabled={isReviewing}
+                            >
+                              <RotateCcw className="h-4 w-4" />
+                            </button>
+                          </>
                         )}
                       </div>
                     </td>
@@ -542,83 +610,6 @@ const UserSubmissionDetail: React.FC<UserSubmissionDetailProps> = ({
         </div>
       )}
 
-      {/* 審核模態框 */}
-      {reviewingId && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div className="bg-white rounded-lg p-6 w-full max-w-md">
-            <h3 className="text-lg font-medium text-gray-900 mb-4">填報審核</h3>
-            
-            <div className="space-y-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  審核結果 *
-                </label>
-                <div className="space-y-2">
-                  <label className="flex items-center">
-                    <input
-                      type="radio"
-                      name="reviewAction"
-                      value="approved"
-                      checked={reviewAction === 'approved'}
-                      onChange={(e) => setReviewAction(e.target.value as 'approved')}
-                      className="mr-2"
-                    />
-                    <CheckCircle className="h-4 w-4 text-green-500 mr-1" />
-                    通過 (此項目將被鎖定)
-                  </label>
-                  <label className="flex items-center">
-                    <input
-                      type="radio"
-                      name="reviewAction"
-                      value="needs_fix"
-                      checked={reviewAction === 'needs_fix'}
-                      onChange={(e) => setReviewAction(e.target.value as 'needs_fix')}
-                      className="mr-2"
-                    />
-                    <XCircle className="h-4 w-4 text-red-500 mr-1" />
-                    退件 (需要修正)
-                  </label>
-                </div>
-              </div>
-              
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  審核說明
-                </label>
-                <textarea
-                  value={reviewNote}
-                  onChange={(e) => setReviewNote(e.target.value)}
-                  rows={3}
-                  className="w-full border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  placeholder={reviewAction === 'approved' ? '通過原因（選填）' : '請說明需要修正的地方'}
-                />
-              </div>
-            </div>
-            
-            <div className="flex justify-end gap-3 mt-6">
-              <button
-                onClick={() => {
-                  setReviewingId(null)
-                  setReviewAction('')
-                  setReviewNote('')
-                }}
-                disabled={isReviewing}
-                className="px-4 py-2 text-gray-700 bg-gray-200 rounded-lg hover:bg-gray-300 disabled:opacity-50"
-              >
-                取消
-              </button>
-              <button
-                onClick={handleReview}
-                disabled={isReviewing || !reviewAction}
-                className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 flex items-center gap-2"
-              >
-                {isReviewing && <Loader2 className="h-4 w-4 animate-spin" />}
-                確認審核
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
 
       {/* 詳情檢視模態框 */}
       {viewingSubmission && (
@@ -728,17 +719,100 @@ const UserSubmissionDetail: React.FC<UserSubmissionDetailProps> = ({
             </div>
             
             <div className="flex justify-end gap-3 mt-6">
-              {getLatestReviewStatus(viewingSubmission).canEdit && (
-                <button
-                  onClick={() => {
-                    setViewingSubmission(null)
-                    setReviewingId(viewingSubmission.id)
-                  }}
-                  className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
-                >
-                  審核此項目
-                </button>
-              )}
+              {/* 智能審核按鈕 */}
+              {(() => {
+                const status = getLatestReviewStatus(viewingSubmission).status;
+
+                if (status === 'submitted') {
+                  return (
+                    <>
+                      <button
+                        onClick={() => {
+                          setViewingSubmission(null);
+                          handleStatusChange(viewingSubmission.id, 'approve');
+                        }}
+                        disabled={isReviewing}
+                        className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50"
+                      >
+                        <CheckCircle className="h-4 w-4" />
+                        通過審核
+                      </button>
+                      <button
+                        onClick={() => {
+                          setViewingSubmission(null);
+                          handleRejectWithReason(viewingSubmission.id);
+                        }}
+                        disabled={isReviewing}
+                        className="flex items-center gap-2 px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 disabled:opacity-50"
+                      >
+                        <XCircle className="h-4 w-4" />
+                        退回修正
+                      </button>
+                    </>
+                  );
+                }
+
+                if (status === 'approved') {
+                  return (
+                    <>
+                      <button
+                        onClick={() => {
+                          setViewingSubmission(null);
+                          handleRejectWithReason(viewingSubmission.id);
+                        }}
+                        disabled={isReviewing}
+                        className="flex items-center gap-2 px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 disabled:opacity-50"
+                      >
+                        <XCircle className="h-4 w-4" />
+                        退回修正
+                      </button>
+                      <button
+                        onClick={() => {
+                          setViewingSubmission(null);
+                          handleStatusChange(viewingSubmission.id, 'reset');
+                        }}
+                        disabled={isReviewing}
+                        className="flex items-center gap-2 px-4 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700 disabled:opacity-50"
+                      >
+                        <RotateCcw className="h-4 w-4" />
+                        重置狀態
+                      </button>
+                    </>
+                  );
+                }
+
+                if (status === 'rejected') {
+                  return (
+                    <>
+                      <button
+                        onClick={() => {
+                          setViewingSubmission(null);
+                          handleStatusChange(viewingSubmission.id, 'approve');
+                        }}
+                        disabled={isReviewing}
+                        className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50"
+                      >
+                        <CheckCircle className="h-4 w-4" />
+                        通過審核
+                      </button>
+                      <button
+                        onClick={() => {
+                          setViewingSubmission(null);
+                          handleStatusChange(viewingSubmission.id, 'reset');
+                        }}
+                        disabled={isReviewing}
+                        className="flex items-center gap-2 px-4 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700 disabled:opacity-50"
+                      >
+                        <RotateCcw className="h-4 w-4" />
+                        重置狀態
+                      </button>
+                    </>
+                  );
+                }
+
+                return null;
+              })()}
+
               <button
                 onClick={() => setViewingSubmission(null)}
                 className="px-4 py-2 text-gray-700 bg-gray-200 rounded-lg hover:bg-gray-300"

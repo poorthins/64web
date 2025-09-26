@@ -132,7 +132,18 @@
       "Bash(node:*)",
       "Bash(awk:*)",
       "Bash(timeout 10 npm run dev)",
-      "Bash(taskkill:*)"
+      "Bash(taskkill:*)",
+      "Bash(timeout 5 curl -s -o /dev/null -w \"%{http_code}\" http://localhost:5176/app/admin)",
+      "Bash(timeout 5 curl -s -o /dev/null -w \"%{http_code}\" http://localhost:5176/app/admin/create)",
+      "Bash(timeout 5 curl -s -o /dev/null -w \"%{http_code}\" http://localhost:5176/app/admin/statistics)",
+      "Bash(timeout 5 curl -s -o /dev/null -w \"%{http_code}\" http://localhost:5174/app/admin)",
+      "Bash(timeout 5 curl -s -o /dev/null -w \"%{http_code}\" http://localhost:5174/app/admin/create)",
+      "Bash(timeout 5 curl -s -o /dev/null -w \"%{http_code}\" http://localhost:5174/app/admin/poc)",
+      "Bash(timeout:*)",
+      "Bash(npx vitest:*)",
+      "Bash(npm test)",
+      "Bash(npm test:*)",
+      "Bash(pkill:*)"
     ],
     "deny": [],
     "ask": []

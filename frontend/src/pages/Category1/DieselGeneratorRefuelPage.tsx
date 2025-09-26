@@ -1,156 +1,421 @@
-import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
-import { useNavigate } from 'react-router-dom'
-import { AlertCircle, CheckCircle, Loader2, X, Trash2, Plus } from 'lucide-react'
-import EvidenceUpload, { MemoryFile } from '../../components/EvidenceUpload'
-import { EntryStatus } from '../../components/StatusSwitcher'
-import StatusIndicator from '../../components/StatusIndicator'
-import Toast, { ToastType } from '../../components/Toast'
-import BottomActionBar from '../../components/BottomActionBar'
-import { useEditPermissions } from '../../hooks/useEditPermissions'
+import { useState, useCallback, useEffect, useRef } from 'react'
+import { useSearchParams } from 'react-router-dom'
+import { Plus, Trash2, Calendar, Truck, AlertCircle, CheckCircle, Upload, Loader2, Eye } from 'lucide-react'
 import { useFrontendStatus } from '../../hooks/useFrontendStatus'
-import { commitEvidence, getEntryFiles, EvidenceFile, uploadEvidenceWithEntry } from '../../api/files'
-import { upsertEnergyEntry, UpsertEntryInput, getEntryByPageKeyAndYear } from '../../api/entries'
+import { useEditPermissions } from '../../hooks/useEditPermissions'
+import StatusIndicator from '../../components/StatusIndicator'
+import EvidenceUpload, { MemoryFile } from '../../components/EvidenceUpload'
+import BottomActionBar from '../../components/BottomActionBar'
+import { EntryStatus } from '../../components/StatusSwitcher'
+import { listMSDSFiles, listUsageEvidenceFiles, commitEvidence, deleteEvidence, deleteEvidenceFile, EvidenceFile, uploadEvidenceWithEntry } from '../../api/files'
+import { upsertEnergyEntry, sumMonthly, UpsertEntryInput, updateEntryStatus, getEntryByPageKeyAndYear, getEntryById } from '../../api/entries'
+import ReviewSection from '../../components/ReviewSection'
+import { getEntryFiles } from '../../api/files'
 import { designTokens } from '../../utils/designTokens'
-import { getCategoryInfo } from '../../utils/categoryConstants'
+import { debugRLSOperation, diagnoseAuthState } from '../../utils/authDiagnostics'
+import { logDetailedAuthStatus } from '../../utils/authHelpers'
 import { DocumentHandler } from '../../services/documentHandler'
 
-// 柴油發電機測試記錄資料結構
-interface TestRecord {
+interface RefuelRecord {
   id: string
-  annualTestFrequency: number // 年度測試頻率(次)
-  testDuration: number       // 測試時間(分)
-  generatorLocation: string  // 發電機位置
-  powerRating: number        // 發電功率(kW)
-  files: EvidenceFile[]      // 佐證檔案
-  memoryFiles?: MemoryFile[] // 記憶體暫存檔案
+  date: string           // 加油日期
+  quantity: number       // 加油量 (L)
+  files: EvidenceFile[]  // 佐證檔案
+  memoryFiles: MemoryFile[]  // 新增記憶檔案
+  recordKey?: string     // 用於檔案關聯的唯一識別碼
 }
 
-const DieselGeneratorPage = () => {
-  const navigate = useNavigate()
+interface DieselGeneratorRefuelData {
+  year: number
+  records: RefuelRecord[]
+  totalQuantity: number  // 總加油量
+}
+
+
+export default function DieselGeneratorRefuelPage() {
+  const [searchParams] = useSearchParams()
+
+  // 審核模式檢測
+  const isReviewMode = searchParams.get('mode') === 'review'
+  const reviewEntryId = searchParams.get('entryId')
+  const reviewUserId = searchParams.get('userId')
+
+  const currentYear = new Date().getFullYear()
   const [loading, setLoading] = useState(true)
-  const [submitting, setSubmitting] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-  const [success, setSuccess] = useState<string | null>(null)
+  const [activeTab, setActiveTab] = useState<'usage'>('usage')
+
+  // 狀態管理
   const [hasSubmittedBefore, setHasSubmittedBefore] = useState(false)
-  const [showSuccessModal, setShowSuccessModal] = useState(false)
-  const [showClearConfirmModal, setShowClearConfirmModal] = useState(false)
   const [currentEntryId, setCurrentEntryId] = useState<string | null>(null)
   const [initialStatus, setInitialStatus] = useState<EntryStatus>('submitted')
-  const [toast, setToast] = useState<{ message: string; type: ToastType } | null>(null)
+  const [hasChanges, setHasChanges] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [success, setSuccess] = useState<string | null>(null)
 
-  // 狀態管理 Hook
-  const frontendStatus = useFrontendStatus({
-    initialStatus,
-    entryId: currentEntryId
+  const [data, setData] = useState<DieselGeneratorRefuelData>({
+    year: currentYear,
+    records: [],
+    totalQuantity: 0
   })
 
-  const { currentStatus: frontendCurrentStatus, handleSubmitSuccess, handleDataChanged, isInitialLoad } = frontendStatus
-  const currentStatus = frontendCurrentStatus || initialStatus
-  const isUpdating = false
+  const [newRecord, setNewRecord] = useState<Omit<RefuelRecord, 'id'>>({
+    date: '',
+    quantity: 0,
+    files: [],
+    memoryFiles: []
+  })
 
-  // 表單資料
-  const [year] = useState(new Date().getFullYear())
-  const [testRecords, setTestRecords] = useState<TestRecord[]>([
-    {
-      id: crypto.randomUUID(),
-      annualTestFrequency: 0,
-      testDuration: 0,
-      generatorLocation: '',
-      powerRating: 0,
-      files: [],
-      memoryFiles: []
-    }
-  ])
+  const [showSuccess, setShowSuccess] = useState(false)
+  const [showError, setShowError] = useState(false)
+  const [errorMessage, setErrorMessage] = useState('')
+  const [submitting, setSubmitting] = useState(false)
+  const [showClearConfirmModal, setShowClearConfirmModal] = useState(false)
+  const [clearLoading, setClearLoading] = useState(false)
 
   const pageKey = 'diesel_generator'
 
-  // 編輯權限控制
-  const editPermissions = useEditPermissions(currentStatus)
+  // 前端狀態管理 Hook
+  const frontendStatus = useFrontendStatus({
+    initialStatus,
+    entryId: currentEntryId,
+    onStatusChange: (newStatus) => {
+      console.log('Status changed to:', newStatus)
+    },
+    onError: (error) => setError(error),
+    onSuccess: (message) => setSuccess(message)
+  })
 
-  // 判斷是否有資料
-  const hasAnyData = useMemo(() => {
-    const hasTestRecords = testRecords.some(r =>
-      r.annualTestFrequency > 0 ||
-      r.testDuration > 0 ||
-      r.generatorLocation !== '' ||
-      r.powerRating > 0 ||
-      r.files.length > 0 ||
-      (r.memoryFiles && r.memoryFiles.length > 0)
-    )
-    return hasTestRecords
-  }, [testRecords])
+  const { currentStatus, handleSubmitSuccess, handleDataChanged, isInitialLoad } = frontendStatus
 
-  // 唯讀模式判斷
-  const isReadOnly = false
+  const editPermissions = useEditPermissions(currentStatus || 'submitted')
 
-  // 載入草稿和檔案
+  // 審核模式時為唯讀
+  const isReadOnly = isReviewMode
+
+  const calculateTotals = useCallback((records: RefuelRecord[]) => {
+    const totalQuantity = records.reduce((sum, record) => sum + record.quantity, 0)
+    return { totalQuantity }
+  }, [])
+
+  const addRecord = useCallback(() => {
+    if (!newRecord.date || newRecord.quantity <= 0) {
+      setErrorMessage('請填寫完整的加油記錄資訊')
+      setShowError(true)
+      return
+    }
+
+    const record: RefuelRecord = {
+      id: `diesel_generator_${Date.now()}`,
+      recordKey: `diesel_generator_record_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+      ...newRecord,
+      memoryFiles: newRecord.memoryFiles || []
+    }
+
+    setData(prevData => {
+      const newRecords = [...prevData.records, record].sort((a, b) => a.date.localeCompare(b.date))
+      const totals = calculateTotals(newRecords)
+
+      return {
+        ...prevData,
+        records: newRecords,
+        ...totals
+      }
+    })
+
+    setNewRecord({
+      date: '',
+      quantity: 0,
+      files: [],
+      memoryFiles: []
+    })
+  }, [newRecord, calculateTotals])
+
+  const removeRecord = useCallback((recordId: string) => {
+    setData(prevData => {
+      const newRecords = prevData.records.filter(record => record.id !== recordId)
+      const totals = calculateTotals(newRecords)
+
+      return {
+        ...prevData,
+        records: newRecords,
+        ...totals
+      }
+    })
+  }, [calculateTotals])
+
+  const handleRecordFileChange = useCallback((recordId: string, files: EvidenceFile[]) => {
+    setData(prevData => {
+      const newRecords = prevData.records.map(record => {
+        if (record.id === recordId) {
+          // 確保檔案具有正確的關聯標識
+          const updatedFiles = files.map(file => ({
+            ...file,
+            // 檔案已經通過 EvidenceUpload 組件正確關聯到 entry_id
+            // 這裡主要確保檔案與記錄的本地關聯
+          }))
+          return { ...record, files: updatedFiles }
+        }
+        return record
+      })
+
+      return {
+        ...prevData,
+        records: newRecords
+      }
+    })
+  }, [])
+
+  const handleRecordMemoryFileChange = useCallback((recordId: string, memFiles: MemoryFile[]) => {
+    setData(prevData => ({
+      ...prevData,
+      records: prevData.records.map(record =>
+        record.id === recordId ? { ...record, memoryFiles: memFiles } : record
+      )
+    }))
+  }, [])
+
+  const handleSubmit = useCallback(async () => {
+    console.log('=== 柴油發電機提交除錯開始 ===')
+
+    setSubmitting(true)
+    setError(null)
+    setSuccess(null)
+
+    try {
+      // 步驟1：詳細認證狀態診斷
+      console.log('🔍 執行詳細認證診斷...')
+      await logDetailedAuthStatus()
+
+      const authDiagnosis = await diagnoseAuthState()
+      if (!authDiagnosis.isAuthenticated) {
+        console.error('❌ 認證診斷失敗:', authDiagnosis)
+        throw new Error(`認證失效: ${authDiagnosis.userError?.message || authDiagnosis.sessionError?.message || '未知原因'}`)
+      }
+
+      // 步驟2：準備柴油發電機數據（轉換為月份格式以符合 API）
+      const monthly: Record<string, number> = {
+        '1': data.totalQuantity || 0 // 總加油量記錄在1月
+      }
+
+      // 步驟3：建立填報輸入資料
+      const notesText = `柴油發電機加油記錄，總加油量：${data.totalQuantity?.toFixed(2) || 0} L，共 ${data.records.length} 筆記錄`
+      const entryInput: UpsertEntryInput = {
+        page_key: pageKey,
+        period_year: currentYear,
+        unit: 'L',
+        monthly: monthly,
+        notes: notesText,
+        extraPayload: {
+          mode: 'refuel',  // 重要：標記為加油模式
+          refuelData: {    // 改名避免混淆
+            year: currentYear,
+            records: data.records,
+            totalQuantity: data.totalQuantity
+          },
+          notes: `柴油發電機加油記錄，總加油量：${data.totalQuantity} L`
+        }
+      }
+
+      // 步驟4：使用診斷包裝執行關鍵操作
+      const { entry_id } = await debugRLSOperation(
+        '新增或更新能源填報記錄',
+        async () => await upsertEnergyEntry(entryInput, true)
+      )
+
+      // 步驟5：設置 entryId（如果是新建的記錄）
+      if (!currentEntryId) {
+        setCurrentEntryId(entry_id)
+      }
+
+      // 步驟6：上傳所有記錄的檔案
+      for (const record of data.records) {
+        if (record.memoryFiles && record.memoryFiles.length > 0) {
+          for (const memFile of record.memoryFiles) {
+            await uploadEvidenceWithEntry(memFile.file, {
+              entryId: entry_id,
+              pageKey: pageKey,
+              year: currentYear,
+              category: 'other'
+            })
+          }
+        }
+      }
+
+      // 清空 memory files
+      setData(prevData => ({
+        ...prevData,
+        records: prevData.records.map(record => ({ ...record, memoryFiles: [] }))
+      }))
+
+      // 步驟7：提交所有檔案
+      await debugRLSOperation(
+        '提交證明檔案',
+        async () => await commitEvidence({
+          entryId: entry_id,
+          pageKey: pageKey
+        })
+      )
+
+      // 步驟8：處理狀態轉換
+      await handleSubmitSuccess()
+
+      setHasChanges(false)
+      setHasSubmittedBefore(true)
+
+      setSuccess(`柴油發電機數據已提交，總加油量 ${data.totalQuantity?.toFixed(2) || 0} L`)
+      setShowSuccess(true)
+      setTimeout(() => setShowSuccess(false), 3000)
+
+      console.log('=== ✅ 柴油發電機提交成功完成 ===')
+
+    } catch (error) {
+      console.error('=== ❌ 柴油發電機提交失敗 ===')
+      console.error('錯誤訊息:', error instanceof Error ? error.message : String(error))
+      setError(error instanceof Error ? error.message : '提交失敗')
+      setErrorMessage(error instanceof Error ? error.message : '提交失敗，請稍後重試')
+      setShowError(true)
+    } finally {
+      setSubmitting(false)
+    }
+  }, [data, currentYear, currentEntryId, handleSubmitSuccess, pageKey])
+
+  const handleClearAll = async () => {
+    console.log('🗑️ [DieselGeneratorRefuelPage] ===== CLEAR BUTTON CLICKED =====')
+
+    const clearSuccess = DocumentHandler.handleClear({
+      currentStatus: currentStatus,
+      title: '柴油發電機資料清除',
+      message: '確定要清除所有柴油發電機加油資料嗎？此操作無法復原。',
+      onClear: () => {
+        setClearLoading(true)
+        try {
+          console.log('🗑️ [DieselGeneratorRefuelPage] Starting complete clear operation...')
+
+          // 清理記憶體檔案
+          data.records.forEach(record => {
+            DocumentHandler.clearAllMemoryFiles(record.memoryFiles)
+          })
+          DocumentHandler.clearAllMemoryFiles(newRecord.memoryFiles)
+
+          // 原有的清除邏輯保持不變
+          setData({
+            year: currentYear,
+            records: [],
+            totalQuantity: 0
+          })
+          setNewRecord({
+            date: '',
+            quantity: 0,
+            files: [],
+            memoryFiles: []
+          })
+          setHasChanges(false)
+          setError(null)
+          setSuccess(null)
+          setShowClearConfirmModal(false)
+
+          setSuccess('資料已清除')
+
+        } catch (error) {
+          console.error('❌ [DieselGeneratorRefuelPage] Clear operation failed:', error)
+          setError('清除操作失敗，請重試')
+          setShowClearConfirmModal(false)
+        } finally {
+          console.log('🗑️ [DieselGeneratorRefuelPage] Clear operation finished, resetting loading state')
+          setClearLoading(false)
+        }
+      }
+    })
+
+    if (!clearSuccess && currentStatus === 'approved') {
+      setError('已通過的資料無法清除')
+    }
+  }
+
+  const handleStatusChange = async (newStatus: EntryStatus) => {
+    try {
+      if (currentEntryId) {
+        await updateEntryStatus(currentEntryId, newStatus)
+      }
+      frontendStatus.setFrontendStatus(newStatus)
+    } catch (error) {
+      setError(error instanceof Error ? error.message : '狀態更新失敗')
+    }
+  }
+
+  // 載入資料
   useEffect(() => {
     const loadData = async () => {
       try {
         setLoading(true)
         setError(null)
 
-        // 檢查是否已有非草稿記錄
-        const existingEntry = await getEntryByPageKeyAndYear(pageKey, year)
+        // 載入基本資料
+        let existingEntry
+        if (isReviewMode && reviewEntryId) {
+          console.log('🔍 [DieselGeneratorRefuelPage] 審核模式 - 載入特定記錄:', reviewEntryId)
+          existingEntry = await getEntryById(reviewEntryId)
+        } else {
+          console.log('🔍 [DieselGeneratorRefuelPage] 一般模式 - 載入用戶自己的記錄')
+          existingEntry = await getEntryByPageKeyAndYear(pageKey, currentYear)
+        }
         if (existingEntry && existingEntry.status !== 'draft') {
           setInitialStatus(existingEntry.status as EntryStatus)
           setCurrentEntryId(existingEntry.id)
           setHasSubmittedBefore(true)
 
-          // 載入已提交的記錄數據供編輯
-          // 優先從 extraPayload 讀取
-          if (existingEntry.extraPayload?.testRecords && existingEntry.extraPayload?.mode === 'refuel') {
-            // 載入相關檔案
-            let updatedRecords = existingEntry.extraPayload.testRecords
+          // 載入時檢查模式
+          if (existingEntry.extraPayload?.mode === 'test') {
+            // 如果是測試模式資料，顯示提示
+            setError('此頁面為加油記錄模式，請切換至測試記錄頁面查看測試資料')
+            return
+          }
 
-            if (existingEntry.id) {
-              try {
-                const files = await getEntryFiles(existingEntry.id)
+          if (existingEntry.extraPayload?.mode === 'refuel' || !existingEntry.extraPayload?.mode) {
+            // 載入加油資料
+            const refuelData = existingEntry.extraPayload?.refuelData
 
-                // 更新測試記錄中的檔案
-                updatedRecords = existingEntry.extraPayload.testRecords.map((record: any) => {
-                  const associatedFiles = files.filter(f =>
-                    f.file_type === 'usage_evidence' &&
-                    f.page_key === pageKey
-                  )
-
-                  return {
-                    ...record,
-                    files: associatedFiles
-                  }
-                })
-              } catch (fileError) {
-                console.error('Failed to load files:', fileError)
-              }
-            }
-
-            setTestRecords(updatedRecords)
-            handleDataChanged()
-          } else if (existingEntry.extraPayload?.mode === 'test') {
-            // 如果是測試模式的資料，不載入到refuel頁面
-            console.warn('Found test mode data, skipping load in refuel mode page')
-          } else if (!existingEntry.extraPayload?.mode) {
-            // 處理無模式標記的舊資料，預設為加油模式
-            console.log('Loading legacy data without mode, assuming refuel mode')
-            if (existingEntry.extraPayload?.testRecords) {
-              let updatedRecords = existingEntry.extraPayload.testRecords
-
+            if (refuelData) {
+              // 載入相關檔案
               if (existingEntry.id) {
                 try {
                   const files = await getEntryFiles(existingEntry.id)
-                  updatedRecords = existingEntry.extraPayload.testRecords.map((record: any) => {
-                    const associatedFiles = files.filter(f =>
-                      f.file_type === 'usage_evidence' &&
-                      f.page_key === pageKey
-                    )
-                    return { ...record, files: associatedFiles }
-                  })
+
+                  // 分類檔案：檢查 file_type === 'other' 或 'usage_evidence'，且 page_key 匹配
+                  const dieselGeneratorFiles = files.filter(f =>
+                    (f.file_type === 'other' || f.file_type === 'usage_evidence') &&
+                    f.page_key === pageKey
+                  )
+
+                  // 更新記錄的檔案 - 使用時間戳或檔案名稱規則進行關聯
+                  if (refuelData.records) {
+                    refuelData.records.forEach((record: any) => {
+                      // 根據記錄的 recordKey 或時間範圍關聯檔案
+                      const recordFiles = dieselGeneratorFiles.filter(f => {
+                        // 優先使用 recordKey 關聯
+                        if (record.recordKey && f.file_name.includes(record.recordKey)) {
+                          return true
+                        }
+                        // 備選：根據時間相近性關聯（檔案創建時間接近記錄日期）
+                        const recordDate = new Date(record.date)
+                        const fileDate = new Date(f.created_at)
+                        const timeDiff = Math.abs(fileDate.getTime() - recordDate.getTime())
+                        return timeDiff < 24 * 60 * 60 * 1000 // 24小時內
+                      })
+                      record.files = recordFiles || []
+                    })
+                  }
+
+                  setData(refuelData)
                 } catch (fileError) {
-                  console.error('Failed to load files:', fileError)
+                  console.error('Failed to load files for diesel generator records:', fileError)
+                  setData(refuelData)
                 }
+              } else {
+                setData(refuelData)
               }
 
-              setTestRecords(updatedRecords)
+              // 處理狀態變更
               handleDataChanged()
             }
           }
@@ -167,230 +432,14 @@ const DieselGeneratorPage = () => {
     }
 
     loadData()
-  }, [])
+  }, [isReviewMode, reviewEntryId, reviewUserId])
 
-  const addTestRecord = () => {
-    setTestRecords(prev => [...prev, {
-      id: crypto.randomUUID(),
-      annualTestFrequency: 0,
-      testDuration: 0,
-      generatorLocation: '',
-      powerRating: 0,
-      files: [],
-      memoryFiles: []
-    }])
-  }
-
-  const removeTestRecord = (id: string) => {
-    if (testRecords.length > 1) {
-      setTestRecords(prev => prev.filter(record => record.id !== id))
+  // 監聽表單變更
+  useEffect(() => {
+    if (!isInitialLoad.current && hasSubmittedBefore) {
+      setHasChanges(true)
     }
-  }
-
-  const updateTestRecord = (id: string, field: keyof TestRecord, value: any) => {
-    setTestRecords(prev => prev.map(record =>
-      record.id === id ? { ...record, [field]: value } : record
-    ))
-  }
-
-  const handleTestFilesChange = (recordId: string, files: EvidenceFile[]) => {
-    updateTestRecord(recordId, 'files', files)
-  }
-
-  const handleMemoryFilesChange = (recordId: string, files: MemoryFile[]) => {
-    console.log('📁 [DieselGeneratorPage] Memory files changed for record:', recordId, files.length)
-    updateTestRecord(recordId, 'memoryFiles', files)
-  }
-
-  const getTotalTestTime = () => {
-    return testRecords.reduce((sum, record) => sum + (record.testDuration || 0), 0)
-  }
-
-  const validateData = () => {
-    const errors: string[] = []
-
-    testRecords.forEach((record, index) => {
-      if (record.annualTestFrequency <= 0) {
-        errors.push(`第${index + 1}筆記錄年度測試頻率必須大於0次`)
-      }
-      if (record.testDuration <= 0) {
-        errors.push(`第${index + 1}筆記錄測試時間必須大於0分鐘`)
-      }
-      if (!record.generatorLocation.trim()) {
-        errors.push(`第${index + 1}筆記錄未填入發電機位置`)
-      }
-      if (record.powerRating <= 0) {
-        errors.push(`第${index + 1}筆記錄發電功率必須大於0kW`)
-      }
-
-      // 檢查已上傳檔案 OR 記憶體檔案
-      const totalFiles = record.files.length + (record.memoryFiles?.length || 0)
-      if (totalFiles === 0) {
-        errors.push(`第${index + 1}筆記錄未上傳測試佐證資料`)
-      }
-    })
-
-    return errors
-  }
-
-  const handleSubmit = async () => {
-    const errors = validateData()
-    if (errors.length > 0) {
-      setError('請修正以下問題：\n' + errors.join('\n'))
-      return
-    }
-
-    setSubmitting(true)
-    setError(null)
-    setSuccess(null)
-
-    try {
-      console.log('🔍 ========== 柴油發電機提交診斷開始 ==========')
-      console.log('🔍 [1] pageKey:', pageKey)
-
-      // 獲取正確的 category 資訊
-      const categoryInfo = getCategoryInfo(pageKey)
-      console.log('🔍 [2] categoryInfo:', categoryInfo)
-
-      // 將測試記錄轉換為月份資料格式 (直接使用年度總測試時間)
-      const monthly: Record<string, number> = {}
-      const totalTestTime = getTotalTestTime()
-
-      if (totalTestTime > 0) {
-        // 將總測試時間放到12月
-        monthly['12'] = totalTestTime
-      }
-
-      console.log('🔍 [3] monthly:', monthly)
-
-      const entryInput: UpsertEntryInput = {
-        page_key: pageKey,
-        period_year: year,
-        unit: '分鐘',
-        monthly: monthly,
-        extraPayload: {
-          mode: 'refuel',
-          testRecords: testRecords.map(record => ({
-            id: record.id,
-            annualTestFrequency: record.annualTestFrequency,
-            testDuration: record.testDuration,
-            generatorLocation: record.generatorLocation,
-            powerRating: record.powerRating
-          })),
-          totalTestTime: getTotalTestTime(),
-          notes: `柴油發電機測試記錄，共${testRecords.length}筆記錄`
-        }
-      }
-
-      console.log('🔍 [4] entryInput:', entryInput)
-
-      const { entry_id } = await upsertEnergyEntry(entryInput, true)
-
-      if (!currentEntryId) {
-        setCurrentEntryId(entry_id)
-      }
-
-      // 上傳測試記錄記憶體檔案
-      for (const record of testRecords) {
-        if (record.memoryFiles && record.memoryFiles.length > 0) {
-          console.log(`📁 [DieselGeneratorPage] Uploading ${record.memoryFiles.length} files for record ${record.id}...`)
-          for (const memoryFile of record.memoryFiles) {
-            await uploadEvidenceWithEntry(memoryFile.file, {
-              entryId: entry_id,
-              pageKey: pageKey,
-              year: year,
-              category: 'usage_evidence'
-            })
-          }
-        }
-      }
-
-      await commitEvidence({
-        entryId: entry_id,
-        pageKey: pageKey
-      })
-
-      await handleSubmitSuccess()
-
-      // 清空記憶體檔案
-      setTestRecords(prev => prev.map(record => ({
-        ...record,
-        memoryFiles: []
-      })))
-
-      setSuccess(`年度總測試時間：${totalTestTime} 分鐘`)
-      setHasSubmittedBefore(true)
-      setShowSuccessModal(true)
-
-    } catch (error) {
-      console.error('Submit error:', error)
-      setError(error instanceof Error ? error.message : '提交失敗')
-    } finally {
-      setSubmitting(false)
-    }
-  }
-
-  const handleStatusChange = async (newStatus: EntryStatus) => {
-    // 狀態變更由 StatusSwitcher 組件處理
-    console.log('Status change requested:', newStatus)
-  }
-
-  const handleClearAll = async () => {
-    console.log('🗑️ [DieselGeneratorPage] ===== CLEAR BUTTON CLICKED =====')
-
-    const clearSuccess = DocumentHandler.handleClear({
-      currentStatus: currentStatus,
-      title: '柴油發電機測試資料清除',
-      message: '確定要清除所有柴油發電機測試資料嗎？此操作無法復原。',
-      onClear: () => {
-        setSubmitting(true)
-        try {
-          console.log('🗑️ [DieselGeneratorPage] Starting complete clear operation...')
-
-          // 清理記憶體檔案
-          testRecords.forEach(record => {
-            if (record.memoryFiles) {
-              DocumentHandler.clearAllMemoryFiles(record.memoryFiles)
-            }
-          })
-
-          // 清除測試資料
-          setTestRecords([{
-            id: crypto.randomUUID(),
-            annualTestFrequency: 0,
-            testDuration: 0,
-            generatorLocation: '',
-            powerRating: 0,
-            files: [],
-            memoryFiles: []
-          }])
-          setHasSubmittedBefore(false)
-          setError(null)
-          setSuccess(null)
-          setShowClearConfirmModal(false)
-
-          setToast({
-            message: '資料已清除',
-            type: 'success'
-          })
-
-        } catch (error) {
-          console.error('❌ [DieselGeneratorPage] Clear operation failed:', error)
-          setError('清除操作失敗，請重試')
-        } finally {
-          console.log('🗑️ [DieselGeneratorPage] Clear operation finished, resetting loading state')
-          setSubmitting(false)
-        }
-      }
-    })
-
-    if (!clearSuccess && currentStatus === 'approved') {
-      setToast({
-        message: '已通過的資料無法清除',
-        type: 'error'
-      })
-    }
-  }
+  }, [data, hasSubmittedBefore])
 
   // Loading 狀態
   if (loading) {
@@ -411,27 +460,23 @@ const DieselGeneratorPage = () => {
   }
 
   return (
-    <div className="min-h-screen bg-green-50">
+    <>
+      <div className="min-h-screen bg-green-50">
+      {/* 主要內容區域 */}
       <div className="max-w-4xl mx-auto px-6 py-8 space-y-6">
 
-        {/* 頁面標題 */}
+        {/* 頁面標題 - 無背景框 */}
         <div className="text-center mb-8">
-          <h1
-            className="text-3xl font-semibold mb-3"
-            style={{ color: designTokens.colors.textPrimary }}
-          >
-            柴油發電機測試記錄
+          <h1 className="text-3xl font-bold text-center mb-2">
+            柴油發電機 加油記錄
           </h1>
-          <p
-            className="text-base"
-            style={{ color: designTokens.colors.textSecondary }}
-          >
-            請記錄發電機測試資料並上傳相關佐證文件
+          <p className="text-lg text-center text-gray-600 mb-6">
+            請記錄發電機加油資料並上傳加油發票
           </p>
         </div>
 
         {/* 重新提交提示 */}
-        {hasSubmittedBefore && !showSuccessModal && (
+        {hasSubmittedBefore && !showSuccess && (
           <div
             className="rounded-lg p-4 border-l-4"
             style={{
@@ -446,13 +491,13 @@ const DieselGeneratorPage = () => {
               />
               <div>
                 <h3
-                  className="text-sm font-medium mb-1"
+                  className="text-base font-medium mb-1"
                   style={{ color: designTokens.colors.accentBlue }}
                 >
                   資料已提交
                 </h3>
                 <p
-                  className="text-sm"
+                  className="text-base"
                   style={{ color: designTokens.colors.textSecondary }}
                 >
                   您可以繼續編輯資料，修改後請再次點擊「提交填報」以更新記錄。
@@ -462,8 +507,86 @@ const DieselGeneratorPage = () => {
           </div>
         )}
 
+        {/* 新增記錄表單 */}
+        {editPermissions.canEdit && (
+          <div
+            className="rounded-lg border p-6"
+            style={{
+              backgroundColor: designTokens.colors.cardBg,
+              borderColor: designTokens.colors.border,
+              boxShadow: designTokens.shadows.sm
+            }}
+          >
+            <h2
+              className="text-2xl font-medium mb-6"
+              style={{ color: designTokens.colors.textPrimary }}
+            >
+              新增加油記錄
+            </h2>
 
-        {/* 測試記錄區塊 */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+              <div>
+                <label className="block text-base font-medium mb-2" style={{ color: designTokens.colors.textPrimary }}>
+                  加油日期
+                </label>
+                <input
+                  type="date"
+                  value={newRecord.date}
+                  onChange={(e) => setNewRecord(prev => ({ ...prev, date: e.target.value }))}
+                  disabled={isReadOnly}
+                  className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  style={{ borderColor: designTokens.colors.border }}
+                />
+              </div>
+
+              <div>
+                <label className="block text-base font-medium mb-2" style={{ color: designTokens.colors.textPrimary }}>
+                  加油量 (L)
+                </label>
+                <input
+                  type="number"
+                  step="0.01"
+                  min="0"
+                  value={newRecord.quantity || ''}
+                  onChange={(e) => setNewRecord(prev => ({ ...prev, quantity: parseFloat(e.target.value) || 0 }))}
+                  disabled={isReadOnly}
+                  className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  style={{ borderColor: designTokens.colors.border }}
+                  placeholder="輸入加油量"
+                />
+              </div>
+            </div>
+
+            <div className="mb-4">
+              <label className="block text-sm font-medium mb-2" style={{ color: designTokens.colors.textPrimary }}>
+                加油發票
+              </label>
+              <EvidenceUpload
+                pageKey={pageKey}
+                files={newRecord.files}
+                onFilesChange={(files) => setNewRecord(prev => ({ ...prev, files }))}
+                memoryFiles={newRecord.memoryFiles}
+                onMemoryFilesChange={(memFiles) => setNewRecord(prev => ({ ...prev, memoryFiles: memFiles }))}
+                maxFiles={1}
+                disabled={submitting || !editPermissions.canUploadFiles || isReadOnly}
+                kind="other"
+                mode="edit"
+                hideFileCount={true}
+              />
+            </div>
+
+            <button
+              onClick={addRecord}
+              className="px-4 py-2 text-white rounded-lg hover:bg-blue-600 transition-colors flex items-center space-x-2"
+              style={{ backgroundColor: designTokens.colors.blue }}
+            >
+              <Plus className="w-4 h-4" />
+              <span>新增記錄</span>
+            </button>
+          </div>
+        )}
+
+        {/* 加油記錄列表 */}
         <div
           className="rounded-lg border p-6"
           style={{
@@ -472,265 +595,142 @@ const DieselGeneratorPage = () => {
             boxShadow: designTokens.shadows.sm
           }}
         >
-          <div className="mb-6">
-            <h2
-              className="text-xl font-medium"
-              style={{ color: designTokens.colors.textPrimary }}
-            >
-              測試記錄
-            </h2>
-          </div>
-
-          {/* 總測試時間統計 */}
-          <div
-            className="mb-6 p-4 rounded-lg"
-            style={{ backgroundColor: designTokens.colors.accentLight }}
+          <h2
+            className="text-2xl font-medium mb-6"
+            style={{ color: designTokens.colors.textPrimary }}
           >
-            <div className="flex justify-between items-center">
-              <span
-                className="text-sm font-medium"
-                style={{ color: designTokens.colors.textPrimary }}
-              >
-                總測試時間：
-              </span>
-              <span
-                className="text-lg font-bold"
-                style={{ color: designTokens.colors.accentSecondary }}
-              >
-                {getTotalTestTime()} 分鐘
-              </span>
-            </div>
-          </div>
-
+            加油記錄列表
+          </h2>
           <div className="space-y-4">
-            {testRecords.map((record, index) => (
+            {data.records.map((record) => (
               <div
                 key={record.id}
                 className="border rounded-lg p-4"
-                style={{ borderColor: designTokens.colors.border }}
+                style={{
+                  borderColor: designTokens.colors.border,
+                  backgroundColor: '#fafbfc'
+                }}
               >
-                <div className="flex justify-between items-center mb-4">
-                  <h3 className="text-lg font-medium">記錄 #{index + 1}</h3>
-                  {editPermissions.canEdit && testRecords.length > 1 && (
-                    <button
-                      onClick={() => removeTestRecord(record.id)}
-                      className="text-red-500 hover:text-red-700 p-1"
-                      disabled={submitting}
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </button>
-                  )}
+              <div className="flex items-center justify-between mb-3">
+                <div className="flex items-center space-x-4">
+                  <Truck className="w-5 h-5 text-blue-600" />
+                  <span className="font-medium text-base" style={{ color: designTokens.colors.textPrimary }}>
+                    {record.date}
+                  </span>
+                  <span className="text-base" style={{ color: designTokens.colors.textSecondary }}>
+                    {record.quantity} L
+                  </span>
                 </div>
+                {editPermissions.canEdit && (
+                  <button
+                    onClick={() => removeRecord(record.id)}
+                    className="p-1 text-red-500 hover:bg-red-50 rounded"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                  </button>
+                )}
+              </div>
 
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
-                  {/* 年度測試頻率 */}
-                  <div>
-                    <label className="block text-sm font-medium mb-2">
-                      年度測試頻率 (次)
-                    </label>
-                    <input
-                      type="number"
-                      min="0"
-                      value={record.annualTestFrequency || ''}
-                      onChange={(e) => updateTestRecord(record.id, 'annualTestFrequency', parseInt(e.target.value) || 0)}
-                      className="w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:border-transparent transition-all"
-                      style={{
-                        color: designTokens.colors.textPrimary,
-                        borderColor: designTokens.colors.border
-                      }}
-                      disabled={submitting || !editPermissions.canEdit}
-                      placeholder="12"
-                    />
-                  </div>
-
-                  {/* 測試時間 */}
-                  <div>
-                    <label className="block text-sm font-medium mb-2">
-                      測試時間 (分鐘)
-                    </label>
-                    <input
-                      type="number"
-                      min="0"
-                      value={record.testDuration || ''}
-                      onChange={(e) => updateTestRecord(record.id, 'testDuration', parseInt(e.target.value) || 0)}
-                      className="w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:border-transparent transition-all"
-                      style={{
-                        color: designTokens.colors.textPrimary,
-                        borderColor: designTokens.colors.border
-                      }}
-                      disabled={submitting || !editPermissions.canEdit}
-                      placeholder="30"
-                    />
-                  </div>
-
-                  {/* 發電機位置 */}
-                  <div>
-                    <label className="block text-sm font-medium mb-2">
-                      發電機位置
-                    </label>
-                    <input
-                      type="text"
-                      value={record.generatorLocation}
-                      onChange={(e) => updateTestRecord(record.id, 'generatorLocation', e.target.value)}
-                      className="w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:border-transparent transition-all"
-                      style={{
-                        color: designTokens.colors.textPrimary,
-                        borderColor: designTokens.colors.border
-                      }}
-                      disabled={submitting || !editPermissions.canEdit}
-                      placeholder="例：1樓機房"
-                    />
-                  </div>
-
-                  {/* 發電功率 */}
-                  <div>
-                    <label className="block text-sm font-medium mb-2">
-                      發電功率 (kW)
-                    </label>
-                    <input
-                      type="number"
-                      min="0"
-                      step="0.1"
-                      value={record.powerRating || ''}
-                      onChange={(e) => updateTestRecord(record.id, 'powerRating', parseFloat(e.target.value) || 0)}
-                      className="w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:border-transparent transition-all"
-                      style={{
-                        color: designTokens.colors.textPrimary,
-                        borderColor: designTokens.colors.border
-                      }}
-                      disabled={submitting || !editPermissions.canEdit}
-                      placeholder="100.0"
-                    />
-                  </div>
-                </div>
-
-                {/* 測試佐證檔案 */}
-                <div>
-                  <label className="block text-sm font-medium mb-2">
-                    測試佐證資料
-                  </label>
+              {(record.files.length > 0 || record.memoryFiles?.length > 0) && (
+                <div className="mt-3">
                   <EvidenceUpload
                     pageKey={pageKey}
-                    month={index + 1}
                     files={record.files}
-                    onFilesChange={(files) => handleTestFilesChange(record.id, files)}
+                    onFilesChange={(files) => handleRecordFileChange(record.id, files)}
                     memoryFiles={record.memoryFiles || []}
-                    onMemoryFilesChange={(files) => handleMemoryFilesChange(record.id, files)}
-                    maxFiles={3}
-                    disabled={submitting || !editPermissions.canUploadFiles}
-                    kind="usage_evidence"
+                    onMemoryFilesChange={(memFiles) => handleRecordMemoryFileChange(record.id, memFiles)}
+                    maxFiles={1}
+                    disabled={!editPermissions.canUploadFiles || isReadOnly}
+                    kind="other"
                     mode="edit"
+                    hideFileCount={true}
                   />
                 </div>
+              )}
               </div>
             ))}
           </div>
-
-          {/* 新增記錄按鈕 */}
-          {editPermissions.canEdit && (
-            <button
-              onClick={addTestRecord}
-              disabled={submitting}
-              className="w-full py-3 bg-green-500 hover:bg-green-600 text-white rounded-lg font-medium transition-colors"
-            >
-              + 新增測試記錄
-            </button>
-          )}
         </div>
 
-        {/* 底部空間 */}
+        {/* 年度總計 */}
+        {data.records.length > 0 && (
+          <div
+            className="rounded-lg border p-6"
+            style={{
+              backgroundColor: designTokens.colors.cardBg,
+              borderColor: designTokens.colors.border,
+              boxShadow: designTokens.shadows.sm
+            }}
+          >
+            <h3 className="text-2xl font-bold mb-4" style={{ color: designTokens.colors.textPrimary }}>
+              {currentYear} 年度總計
+            </h3>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              <div className="text-center p-4 bg-blue-50 rounded-lg">
+                <p className="text-base" style={{ color: designTokens.colors.textSecondary }}>總加油量</p>
+                <p className="text-3xl font-bold text-blue-600">{data.totalQuantity.toFixed(2)} L</p>
+              </div>
+              <div className="text-center p-4 bg-green-50 rounded-lg">
+                <p className="text-base" style={{ color: designTokens.colors.textSecondary }}>加油記錄數</p>
+                <p className="text-3xl font-bold text-green-600">{data.records.length} 筆</p>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* 成功/錯誤提示 */}
+        {showSuccess && (
+          <div className="fixed top-4 right-4 bg-green-500 text-white px-6 py-3 rounded-lg shadow-lg flex items-center space-x-2 z-50">
+            <CheckCircle className="w-5 h-5" />
+            <span>數據已成功提交！</span>
+          </div>
+        )}
+
+        {showError && (
+          <div className="fixed top-4 right-4 bg-red-500 text-white px-6 py-3 rounded-lg shadow-lg flex items-center space-x-2 z-50">
+            <AlertCircle className="w-5 h-5" />
+            <span>{errorMessage}</span>
+            <button onClick={() => setShowError(false)} className="ml-2 hover:bg-red-600 rounded p-1">×</button>
+          </div>
+        )}
+      </div>
+
+        {/* 底部空間，避免內容被固定底部欄遮擋 */}
         <div className="h-20"></div>
       </div>
 
-      {/* 錯誤模態框 */}
-      {error && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50 p-4">
-          <div
-            className="bg-white rounded-lg shadow-lg max-w-md w-full"
-            style={{ borderRadius: designTokens.borderRadius.lg }}
-          >
-            <div className="p-6">
-              <div className="flex items-start space-x-3 mb-4">
-                <div
-                  className="w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0"
-                  style={{ backgroundColor: `${designTokens.colors.error}15` }}
-                >
-                  <AlertCircle
-                    className="h-5 w-5"
-                    style={{ color: designTokens.colors.error }}
-                  />
-                </div>
-                <div className="flex-1">
-                  <h3
-                    className="text-lg font-semibold mb-2"
-                    style={{ color: designTokens.colors.textPrimary }}
-                  >
-                    操作失敗
-                  </h3>
-                  <p
-                    className="text-sm"
-                    style={{ color: designTokens.colors.textSecondary }}
-                  >
-                    {error}
-                  </p>
-                </div>
-              </div>
-              <div className="flex justify-end">
-                <button
-                  onClick={() => setError(null)}
-                  className="px-4 py-2 text-white rounded-lg transition-colors font-medium"
-                  style={{ backgroundColor: designTokens.colors.error }}
-                >
-                  確認
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
+        {/* 統一底部操作欄 - 審核模式下隱藏 */}
+        {!isReviewMode && (
+          <BottomActionBar
+          currentStatus={currentStatus}
+          currentEntryId={currentEntryId}
+          isUpdating={false}
+          hasSubmittedBefore={hasSubmittedBefore}
+          editPermissions={editPermissions}
+          submitting={submitting}
+          onSubmit={handleSubmit}
+          onClear={() => setShowClearConfirmModal(true)}
+          designTokens={designTokens}
+        />
+        )}
 
-      {/* 成功模態框 */}
-      {showSuccessModal && success && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50 p-4">
-          <div
-            className="bg-white rounded-lg shadow-lg max-w-md w-full"
-            style={{ borderRadius: designTokens.borderRadius.lg }}
-          >
-            <div className="p-6">
-              <div className="text-center">
-                <div
-                  className="w-12 h-12 mx-auto rounded-full mb-4 flex items-center justify-center"
-                  style={{ backgroundColor: designTokens.colors.accentLight }}
-                >
-                  <CheckCircle
-                    className="h-6 w-6"
-                    style={{ color: designTokens.colors.accentPrimary }}
-                  />
-                </div>
-                <h3
-                  className="text-lg font-medium mb-2"
-                  style={{ color: designTokens.colors.textPrimary }}
-                >
-                  提交成功！
-                </h3>
-                <p
-                  className="mb-4"
-                  style={{ color: designTokens.colors.textSecondary }}
-                >
-                  {success}
-                </p>
-                <button
-                  onClick={() => setShowSuccessModal(false)}
-                  className="px-6 py-2 text-white rounded-lg transition-colors font-medium"
-                  style={{ backgroundColor: designTokens.colors.accentPrimary }}
-                >
-                  確認
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
+        {/* 審核區塊 - 只在審核模式顯示 */}
+        {isReviewMode && currentEntryId && (
+          <ReviewSection
+            entryId={reviewEntryId || currentEntryId}
+            userId={reviewUserId || "current_user"}
+            category="柴油發電機"
+            userName={reviewUserId || "用戶"}
+            amount={data.totalQuantity}
+            unit="L"
+            onApprove={() => {
+              console.log('✅ 柴油發電機填報審核通過 - 由 ReviewSection 處理')
+            }}
+            onReject={(reason) => {
+              console.log('❌ 柴油發電機填報已退回 - 由 ReviewSection 處理:', reason)
+            }}
+          />
+        )}
 
       {/* 清除確認模態框 */}
       {showClearConfirmModal && (
@@ -752,16 +752,16 @@ const DieselGeneratorPage = () => {
                 </div>
                 <div className="flex-1">
                   <h3
-                    className="text-lg font-semibold mb-2"
+                    className="text-xl font-semibold mb-2"
                     style={{ color: designTokens.colors.textPrimary }}
                   >
                     確認清除
                   </h3>
                   <p
-                    className="text-sm"
+                    className="text-base"
                     style={{ color: designTokens.colors.textSecondary }}
                   >
-                    清除後，這一頁所有資料都會被移除，確定要繼續嗎？
+                    清除後，這一頁所有資料都會被移除，包括已上傳到伺服器的檔案也會被永久刪除。此操作無法復原，確定要繼續嗎？
                   </p>
                 </div>
               </div>
@@ -778,41 +778,37 @@ const DieselGeneratorPage = () => {
                 </button>
                 <button
                   onClick={handleClearAll}
-                  className="px-4 py-2 text-white rounded-lg transition-colors font-medium"
-                  style={{ backgroundColor: designTokens.colors.error }}
+                  disabled={clearLoading}
+                  className="px-4 py-2 text-white rounded-lg transition-colors font-medium flex items-center justify-center"
+                  style={{
+                    backgroundColor: clearLoading ? '#9ca3af' : designTokens.colors.error,
+                    opacity: clearLoading ? 0.7 : 1
+                  }}
+                  onMouseEnter={(e) => {
+                    if (!clearLoading) {
+                      (e.target as HTMLButtonElement).style.backgroundColor = '#dc2626';
+                    }
+                  }}
+                  onMouseLeave={(e) => {
+                    if (!clearLoading) {
+                      (e.target as HTMLButtonElement).style.backgroundColor = designTokens.colors.error;
+                    }
+                  }}
                 >
-                  確定清除
+                  {clearLoading ? (
+                    <>
+                      <Loader2 className="w-4 h-4 animate-spin mr-2" />
+                      清除中...
+                    </>
+                  ) : (
+                    '確定清除'
+                  )}
                 </button>
               </div>
             </div>
           </div>
         </div>
       )}
-
-      {/* 底部操作欄 */}
-      <BottomActionBar
-        currentStatus={currentStatus}
-        currentEntryId={currentEntryId}
-        isUpdating={isUpdating}
-        hasSubmittedBefore={hasSubmittedBefore}
-        hasAnyData={hasAnyData}
-        editPermissions={editPermissions}
-        submitting={submitting}
-        onSubmit={handleSubmit}
-        onClear={() => setShowClearConfirmModal(true)}
-        designTokens={designTokens}
-      />
-
-      {/* Toast 通知 */}
-      {toast && (
-        <Toast
-          message={toast.message}
-          type={toast.type}
-          onClose={() => setToast(null)}
-        />
-      )}
-    </div>
+    </>
   )
 }
-
-export default DieselGeneratorPage

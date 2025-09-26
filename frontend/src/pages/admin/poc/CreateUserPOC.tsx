@@ -1,14 +1,20 @@
-import React, { useState } from 'react'
+import React, { useState, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { energyCategories, scopeLabels, UserFormData } from './data/mockData'
-import { InputField, SelectField, validateUserForm, hasErrors, getFieldError } from './components/FormUtils'
+import { InputField, SelectField } from './components/FormUtils'
+import { PageHeader } from './components/PageHeader'
+import { PasswordStrengthIndicator } from './components/PasswordStrengthIndicator'
+import { handleAPIError, showErrorToast, withRetry } from './utils/errorHandler'
+import { useFormValidation, createValidationRules } from './hooks/useFormValidation'
+import { useKeyboardShortcuts, createCommonShortcuts } from './hooks/useKeyboardShortcuts'
 
 const CreateUserPOC: React.FC = () => {
   const navigate = useNavigate()
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [showSuccess, setShowSuccess] = useState(false)
+  const formRef = useRef<HTMLFormElement>(null)
 
-  const [formData, setFormData] = useState<UserFormData>({
+  const initialFormData: UserFormData = {
     name: '',
     email: '',
     password: '',
@@ -18,15 +24,35 @@ const CreateUserPOC: React.FC = () => {
     energyCategories: [],
     dieselGeneratorVersion: undefined,
     isActive: true
-  })
+  }
 
-  const [errors, setErrors] = useState<any>({})
+  // 建立驗證規則
+  const rules = createValidationRules()
+  const validationRules = {
+    name: [rules.required('姓名為必填欄位'), rules.minLength(2, '姓名至少需要 2 個字符')],
+    email: [rules.required('電子郵件為必填欄位'), rules.email()],
+    password: [rules.required('密碼為必填欄位'), rules.password()],
+    company: [rules.required('公司名稱為必填欄位')],
+    department: [rules.required('部門為必填欄位')],
+    targetYear: [rules.required('目標年份為必填欄位'), rules.custom(
+      (value: number) => {
+        const currentYear = new Date().getFullYear()
+        return value >= currentYear && value <= currentYear + 10
+      },
+      `目標年份必須在 ${new Date().getFullYear()} 到 ${new Date().getFullYear() + 10} 之間`
+    )],
+    energyCategories: [rules.arrayMinLength(1, '至少需要選擇一個能源類別')]
+  }
 
-  const currentYear = new Date().getFullYear()
-  const yearOptions = Array.from({ length: 11 }, (_, i) => ({
-    value: currentYear + i,
-    label: `${currentYear + i} 年`
-  }))
+  const {
+    data: formData,
+    errors,
+    updateField,
+    touchField,
+    hasErrors: formHasErrors,
+    validateAndGetErrors,
+    reset: resetForm
+  } = useFormValidation(initialFormData, validationRules)
 
   const groupedCategories = {
     1: energyCategories.filter(cat => cat.scope === 1),
@@ -35,10 +61,11 @@ const CreateUserPOC: React.FC = () => {
   }
 
   const handleInputChange = (field: keyof UserFormData, value: any) => {
-    setFormData(prev => ({ ...prev, [field]: value }))
-    if (errors[field]) {
-      setErrors((prev: any) => ({ ...prev, [field]: undefined }))
-    }
+    updateField(field, value)
+  }
+
+  const handleInputBlur = (field: keyof UserFormData) => {
+    touchField(field)
   }
 
   const handleCategoryChange = (categoryId: string, checked: boolean) => {
@@ -53,33 +80,121 @@ const CreateUserPOC: React.FC = () => {
     }
   }
 
+  // 全選/取消全選功能
+  const handleSelectAllInScope = (scope: 1 | 2 | 3) => {
+    const scopeCategories = groupedCategories[scope].map(cat => cat.id)
+    const currentScopeCategories = formData.energyCategories.filter(id =>
+      scopeCategories.includes(id)
+    )
+
+    if (currentScopeCategories.length === scopeCategories.length) {
+      // 全部已選，取消全選
+      const newCategories = formData.energyCategories.filter(id =>
+        !scopeCategories.includes(id)
+      )
+      handleInputChange('energyCategories', newCategories)
+    } else {
+      // 部分或全部未選，全選
+      const otherCategories = formData.energyCategories.filter(id =>
+        !scopeCategories.includes(id)
+      )
+      handleInputChange('energyCategories', [...otherCategories, ...scopeCategories])
+    }
+  }
+
+  // 成功 Toast
+  const showSuccessToast = () => {
+    const toast = document.createElement('div')
+    toast.style.cssText = `
+      position: fixed;
+      top: 20px;
+      right: 20px;
+      background: #10b981;
+      color: white;
+      padding: 16px 20px;
+      border-radius: 8px;
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+      z-index: 9999;
+      font-size: 14px;
+      animation: slideIn 0.3s ease-out;
+    `
+
+    toast.innerHTML = `
+      <div style="display: flex; align-items: center;">
+        <span style="margin-right: 8px;">✅</span>
+        <span>用戶創建成功！</span>
+      </div>
+    `
+
+    document.body.appendChild(toast)
+
+    setTimeout(() => {
+      if (toast.parentElement) {
+        toast.style.animation = 'slideOut 0.3s ease-in'
+        setTimeout(() => toast.remove(), 300)
+      }
+    }, 3000)
+  }
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
 
-    const validationErrors = validateUserForm(formData)
-    setErrors(validationErrors)
+    const validationErrors = validateAndGetErrors()
 
-    if (hasErrors(validationErrors)) {
+    if (formHasErrors(validationErrors)) {
       return
     }
 
     setIsSubmitting(true)
 
-    // 模擬 API 調用
     try {
-      await new Promise(resolve => setTimeout(resolve, 1500))
-      console.log('創建用戶:', formData)
+      await withRetry(async () => {
+        // 模擬 API 調用延遲
+        await new Promise(resolve => setTimeout(resolve, 1500))
+
+        // 模擬可能的錯誤（15% 機率）
+        if (Math.random() < 0.15) {
+          throw new Error('模擬創建用戶失敗')
+        }
+
+        console.log('創建用戶:', formData)
+      }, {
+        maxRetries: 2,
+        baseDelay: 1000
+      })
+
       setShowSuccess(true)
+      showSuccessToast()
 
       setTimeout(() => {
         navigate('/app/admin/poc')
       }, 2000)
-    } catch (error) {
-      console.error('創建用戶失敗:', error)
+    } catch (err) {
+      const apiError = handleAPIError(err)
+      showErrorToast(apiError)
     } finally {
       setIsSubmitting(false)
     }
   }
+
+  // 鍵盤快捷鍵
+  const handleSave = () => {
+    formRef.current?.requestSubmit()
+  }
+
+  const handleCancel = () => {
+    if (window.confirm('確定要取消建立用戶嗎？未儲存的變更將會遺失。')) {
+      navigate('/app/admin/poc')
+    }
+  }
+
+  const shortcuts = createCommonShortcuts({
+    save: handleSave,
+    cancel: handleCancel,
+    back: () => navigate('/app/admin/poc')
+  })
+
+  useKeyboardShortcuts({ shortcuts })
 
   if (showSuccess) {
     return (
@@ -101,24 +216,13 @@ const CreateUserPOC: React.FC = () => {
   return (
     <div className="min-h-screen bg-gray-50 p-6">
       <div className="max-w-4xl mx-auto">
-        <div className="mb-6">
-          <button
-            onClick={() => navigate('/app/admin/poc')}
-            className="flex items-center text-blue-600 hover:text-blue-800 mb-4"
-          >
-            <span className="mr-2">←</span>
-            返回主控台
-          </button>
+        <PageHeader
+          title="新增用戶 👤"
+          subtitle="建立新的用戶帳戶並設定能源類別權限"
+          currentPage="create"
+        />
 
-          <h1 className="text-3xl font-bold text-gray-900 mb-2">
-            新增用戶 👤
-          </h1>
-          <p className="text-gray-600">
-            建立新的用戶帳戶並設定能源類別權限
-          </p>
-        </div>
-
-        <form onSubmit={handleSubmit} className="bg-white rounded-xl shadow-lg p-6 space-y-6">
+        <form ref={formRef} onSubmit={handleSubmit} className="bg-white rounded-xl shadow-lg p-6 space-y-6">
           {/* 基本資料 */}
           <div className="border-b border-gray-200 pb-6">
             <h2 className="text-xl font-semibold text-gray-900 mb-4 flex items-center">
@@ -132,7 +236,8 @@ const CreateUserPOC: React.FC = () => {
                 name="name"
                 value={formData.name}
                 onChange={(value) => handleInputChange('name', value)}
-                error={getFieldError(errors, 'name')}
+                onBlur={() => handleInputBlur('name')}
+                error={errors.name}
                 placeholder="請輸入姓名"
                 required
               />
@@ -143,28 +248,34 @@ const CreateUserPOC: React.FC = () => {
                 type="email"
                 value={formData.email}
                 onChange={(value) => handleInputChange('email', value)}
-                error={getFieldError(errors, 'email')}
+                onBlur={() => handleInputBlur('email')}
+                error={errors.email}
                 placeholder="user@company.com"
                 required
               />
 
-              <InputField
-                label="密碼"
-                name="password"
-                type="password"
-                value={formData.password}
-                onChange={(value) => handleInputChange('password', value)}
-                error={getFieldError(errors, 'password')}
-                placeholder="至少6個字符"
-                required
-              />
+              <div>
+                <InputField
+                  label="密碼"
+                  name="password"
+                  type="text"
+                  value={formData.password}
+                  onChange={(value) => handleInputChange('password', value)}
+                  onBlur={() => handleInputBlur('password')}
+                  error={errors.password}
+                  placeholder="至少8個字符，包含字母和數字"
+                  required
+                />
+                <PasswordStrengthIndicator password={formData.password} />
+              </div>
 
               <InputField
                 label="公司名稱"
                 name="company"
                 value={formData.company}
                 onChange={(value) => handleInputChange('company', value)}
-                error={getFieldError(errors, 'company')}
+                onBlur={() => handleInputBlur('company')}
+                error={errors.company}
                 placeholder="請輸入公司名稱"
                 required
               />
@@ -174,18 +285,21 @@ const CreateUserPOC: React.FC = () => {
                 name="department"
                 value={formData.department}
                 onChange={(value) => handleInputChange('department', value)}
-                error={getFieldError(errors, 'department')}
+                onBlur={() => handleInputBlur('department')}
+                error={errors.department}
                 placeholder="請輸入部門"
                 required
               />
 
-              <SelectField
+              <InputField
                 label="目標年份"
                 name="targetYear"
-                value={formData.targetYear}
-                onChange={(value) => handleInputChange('targetYear', parseInt(value))}
-                options={yearOptions}
-                error={getFieldError(errors, 'targetYear')}
+                type="number"
+                value={formData.targetYear.toString()}
+                onChange={(value) => handleInputChange('targetYear', parseInt(value) || new Date().getFullYear())}
+                onBlur={() => handleInputBlur('targetYear')}
+                error={errors.targetYear}
+                placeholder="請輸入目標年份 (例：2024)"
                 required
               />
             </div>
@@ -198,40 +312,59 @@ const CreateUserPOC: React.FC = () => {
               能源類別權限
             </h2>
 
-            {getFieldError(errors, 'energyCategories') && (
+            {errors.energyCategories && (
               <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg">
                 <p className="text-sm text-red-600 flex items-center">
                   <span className="mr-1">⚠️</span>
-                  {getFieldError(errors, 'energyCategories')}
+                  {errors.energyCategories}
                 </p>
               </div>
             )}
 
             <div className="space-y-6">
-              {([1, 2, 3] as const).map(scope => (
-                <div key={scope} className="bg-gray-50 rounded-lg p-4">
-                  <h3 className="font-medium text-gray-900 mb-3">
-                    {scopeLabels[scope]}
-                  </h3>
+              {([1, 2, 3] as const).map(scope => {
+                const scopeCategories = groupedCategories[scope]
+                const selectedInScope = formData.energyCategories.filter(id =>
+                  scopeCategories.map(cat => cat.id).includes(id)
+                )
+                const allSelected = selectedInScope.length === scopeCategories.length
+                const noneSelected = selectedInScope.length === 0
 
-                  <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
-                    {groupedCategories[scope].map(category => (
-                      <label
-                        key={category.id}
-                        className="flex items-center space-x-2 cursor-pointer"
+                return (
+                  <div key={scope} className="bg-gray-50 rounded-lg p-4">
+                    <div className="flex items-center justify-between mb-3">
+                      <h3 className="font-medium text-gray-900">
+                        {scopeLabels[scope]}
+                      </h3>
+                      <button
+                        type="button"
+                        onClick={() => handleSelectAllInScope(scope)}
+                        className="text-sm text-blue-600 hover:text-blue-800 font-medium transition-colors duration-200"
                       >
-                        <input
-                          type="checkbox"
-                          checked={formData.energyCategories.includes(category.id)}
-                          onChange={(e) => handleCategoryChange(category.id, e.target.checked)}
-                          className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
-                        />
-                        <span className="text-sm text-gray-700">{category.name}</span>
-                      </label>
-                    ))}
+                        {allSelected ? '取消全選' : '全選'}
+                      </button>
+                    </div>
+
+                    <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
+                      {scopeCategories.map(category => (
+                        <label
+                          key={category.id}
+                          className="flex items-center space-x-2 cursor-pointer p-2 rounded-lg hover:bg-white transition-colors duration-200"
+                        >
+                          <input
+                            type="checkbox"
+                            checked={formData.energyCategories.includes(category.id)}
+                            onChange={(e) => handleCategoryChange(category.id, e.target.checked)}
+                            onBlur={() => handleInputBlur('energyCategories')}
+                            className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                          />
+                          <span className="text-sm text-gray-700 select-none">{category.name}</span>
+                        </label>
+                      ))}
+                    </div>
                   </div>
-                </div>
-              ))}
+                )
+              })}
             </div>
           </div>
 
@@ -275,10 +408,10 @@ const CreateUserPOC: React.FC = () => {
                 </label>
               </div>
 
-              {getFieldError(errors, 'dieselGeneratorVersion') && (
+              {errors.dieselGeneratorVersion && (
                 <p className="mt-2 text-sm text-red-600 flex items-center">
                   <span className="mr-1">⚠️</span>
-                  {getFieldError(errors, 'dieselGeneratorVersion')}
+                  {errors.dieselGeneratorVersion}
                 </p>
               )}
             </div>

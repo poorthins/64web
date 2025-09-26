@@ -1,0 +1,1 @@
+- 在寫任何一項api 都需要寫unit test且每完成或更新一支api 都要檢查現有的所有unit test是否正常運行

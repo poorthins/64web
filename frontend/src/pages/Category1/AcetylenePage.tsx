@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
-import { useNavigate } from 'react-router-dom'
-import { Upload, AlertCircle, CheckCircle, Loader2, X, Trash2 } from 'lucide-react'
+import { useNavigate, useSearchParams } from 'react-router-dom'
+import { Upload, AlertCircle, CheckCircle, Loader2, X, Trash2, Eye } from 'lucide-react'
 import EvidenceUpload from '../../components/EvidenceUpload'
 import StatusSwitcher, { EntryStatus } from '../../components/StatusSwitcher'
 import StatusIndicator from '../../components/StatusIndicator'
@@ -8,9 +8,10 @@ import Toast, { ToastType } from '../../components/Toast'
 import BottomActionBar from '../../components/BottomActionBar'
 import { useEditPermissions } from '../../hooks/useEditPermissions'
 import { useFrontendStatus } from '../../hooks/useFrontendStatus'
-import { upsertEnergyEntry, sumMonthly, UpsertEntryInput, getEntryByPageKeyAndYear, updateEntryStatus } from '../../api/entries'
+import { upsertEnergyEntry, sumMonthly, UpsertEntryInput, getEntryByPageKeyAndYear, getEntryById, updateEntryStatus, deleteEnergyEntry } from '../../api/entries'
 import { listMSDSFiles, listUsageEvidenceFiles, commitEvidence, deleteEvidence, deleteEvidenceFile, getEntryFiles, updateFileEntryAssociation, debugDatabaseContent, EvidenceFile, uploadEvidenceWithEntry } from '../../api/files'
 import { MemoryFile } from '../../components/EvidenceUpload'
+import ReviewSection from '../../components/ReviewSection'
 import { designTokens } from '../../utils/designTokens'
 import { DocumentHandler } from '../../services/documentHandler'
 
@@ -24,6 +25,13 @@ interface MonthData {
 
 const AcetylenePage = () => {
   const navigate = useNavigate()
+  const [searchParams] = useSearchParams()
+
+  // 審核模式檢測
+  const isReviewMode = searchParams.get('mode') === 'review'
+  const reviewEntryId = searchParams.get('entryId')
+  const reviewUserId = searchParams.get('userId')
+
   const [loading, setLoading] = useState(false)
   const [submitting, setSubmitting] = useState(false)
   const [clearLoading, setClearLoading] = useState(false)
@@ -83,8 +91,8 @@ const AcetylenePage = () => {
     return hasMonthlyData || hasBasicData || hasFiles || hasMemoryFiles
   }, [monthlyData, unitWeight, unitWeightFiles, unitWeightMemoryFiles, monthlyMemoryFiles])
   
-  // 允許所有狀態編輯
-  const isReadOnly = false
+  // 審核模式時為唯讀
+  const isReadOnly = isReviewMode
 
   const monthNames = [
     '1月', '2月', '3月', '4月', '5月', '6月',
@@ -99,7 +107,14 @@ const AcetylenePage = () => {
         setError(null)
 
         // 載入基本資料
-        const existingEntry = await getEntryByPageKeyAndYear(pageKey, year)
+        let existingEntry
+        if (isReviewMode && reviewEntryId) {
+          console.log('🔍 [AcetylenePage] 審核模式 - 載入特定記錄:', reviewEntryId)
+          existingEntry = await getEntryById(reviewEntryId)
+        } else {
+          console.log('🔍 [AcetylenePage] 一般模式 - 載入用戶自己的記錄')
+          existingEntry = await getEntryByPageKeyAndYear(pageKey, year)
+        }
 
         console.log('🚀 [AcetylenePage] Starting file loading process:', {
           pageKey,
@@ -186,19 +201,41 @@ const AcetylenePage = () => {
             // 診斷資料庫內容
             await debugDatabaseContent()
 
-            // 載入檔案：使用 file_type 進行精確查詢
+            // 載入檔案：使用 getEntryFiles 獲取該記錄的所有檔案（支援審核模式）
             try {
-              console.log('📁 [AcetylenePage] Loading files with file_type queries')
+              console.log('📁 [AcetylenePage] Loading files for entry:', existingEntry.id)
 
-              // 並行載入單位重量和所有月份檔案
-              const [unitWeightFilesFromAPI, ...monthlyFilesArrays] = await Promise.all([
-                listMSDSFiles(pageKey),  // 使用 MSDS 查詢作為單位重量檔案
-                ...Array.from({ length: 12 }, (_, i) =>
-                  listUsageEvidenceFiles(pageKey, i + 1)
+              // 使用 getEntryFiles 獲取該記錄的所有檔案（像 WD40 頁面一樣）
+              const allEntryFiles = await getEntryFiles(existingEntry.id)
+
+              console.log('📁 [AcetylenePage] Raw entry files:', {
+                entryId: existingEntry.id,
+                totalFiles: allEntryFiles.length,
+                fileDetails: allEntryFiles.map(f => ({
+                  id: f.id,
+                  name: f.file_name,
+                  type: f.file_type,
+                  month: f.month,
+                  page_key: f.page_key,
+                  entry_id: f.entry_id
+                }))
+              })
+
+              // 分類檔案：單位重量檔案（MSDS）
+              const unitWeightFilesFromAPI = allEntryFiles.filter(f =>
+                f.file_type === 'msds' && f.page_key === pageKey
+              )
+
+              // 分類檔案：月份使用證明檔案
+              const monthlyFilesArrays = Array.from({ length: 12 }, (_, i) =>
+                allEntryFiles.filter(f =>
+                  f.file_type === 'usage_evidence' &&
+                  f.month === i + 1 &&
+                  f.page_key === pageKey
                 )
-              ])
+              )
 
-              console.log('📁 [AcetylenePage] File loading results:', {
+              console.log('📁 [AcetylenePage] File classification:', {
                 unitWeightCount: unitWeightFilesFromAPI.length,
                 monthlyTotals: monthlyFilesArrays.map((files, i) =>
                   `月${i+1}: ${files.length}個檔案`
@@ -269,7 +306,7 @@ const AcetylenePage = () => {
     }
 
     loadData()
-  }, [])
+  }, [isReviewMode, reviewEntryId, reviewUserId])
 
 
   // 離開頁面提醒
@@ -367,6 +404,12 @@ const AcetylenePage = () => {
 
   const handleSubmit = async () => {
     console.log('=== Acetylene 提交除錯開始 ===')
+
+    // 診斷：檢查記憶體檔案狀態
+    console.log('🔍 提交時檢查記憶體檔案狀態:', {
+      unitWeightFiles: unitWeightMemoryFiles.length,
+      monthlyFiles: monthlyMemoryFiles.map(f => f.length)
+    })
 
     const errors = validateData()
     if (errors.length > 0) {
@@ -525,19 +568,26 @@ const AcetylenePage = () => {
     const clearSuccess = DocumentHandler.handleClear({
       currentStatus: currentStatus,
       title: '乙炔資料清除',
-      message: '確定要清除所有乙炔使用資料嗎？此操作無法復原。',
-      onClear: () => {
+      message: '確定要清除所有乙炔使用資料嗎？此操作無法復原，包括已保存到資料庫的記錄和檔案。',
+      onClear: async () => {
         setClearLoading(true)
         try {
           console.log('🗑️ [AcetylenePage] Starting complete clear operation...')
 
-          // 清理記憶體檔案
+          // 1. 刪除資料庫中的記錄（會級聯刪除相關檔案）
+          if (currentEntryId) {
+            console.log('🗑️ [AcetylenePage] Deleting database record:', currentEntryId)
+            await deleteEnergyEntry(currentEntryId)
+            console.log('✅ [AcetylenePage] Database record deleted successfully')
+          }
+
+          // 2. 清理記憶體檔案
           DocumentHandler.clearAllMemoryFiles(unitWeightMemoryFiles)
           monthlyMemoryFiles.forEach(memFiles => {
             DocumentHandler.clearAllMemoryFiles(memFiles)
           })
 
-          // 原有的清除邏輯保持不變
+          // 3. 重置所有本地狀態
           setUnitWeight(0)
           setUnitWeightFiles([])
           setUnitWeightMemoryFiles([])
@@ -549,16 +599,19 @@ const AcetylenePage = () => {
             files: []
           })))
 
+          // 4. 重置記錄狀態
+          setCurrentEntryId(null)
+          setInitialStatus('draft' as EntryStatus)
           setHasSubmittedBefore(false)
           setError(null)
           setSuccess(null)
           setShowClearConfirmModal(false)
 
-          setSuccess('資料已清除')
+          setSuccess('資料已完全清除，包括資料庫記錄和所有檔案')
 
         } catch (error) {
           console.error('❌ [AcetylenePage] Clear operation failed:', error)
-          setError('清除操作失敗，請重試')
+          setError(error instanceof Error ? error.message : '清除操作失敗，請重試')
           setShowClearConfirmModal(false)
         } finally {
           console.log('🗑️ [AcetylenePage] Clear operation finished, resetting loading state')
@@ -977,19 +1030,39 @@ const AcetylenePage = () => {
         </div>
       )}
 
-      {/* 底部操作欄 */}
-      <BottomActionBar
-        currentStatus={currentStatus}
-        currentEntryId={currentEntryId}
-        isUpdating={false}
-        hasSubmittedBefore={hasSubmittedBefore}
-        hasAnyData={hasAnyData}
-        editPermissions={editPermissions}
-        submitting={submitting}
-        onSubmit={handleSubmit}
-        onClear={() => setShowClearConfirmModal(true)}
-        designTokens={designTokens}
-      />
+      {/* 底部操作欄 - 審核模式下隱藏 */}
+      {!isReviewMode && (
+        <BottomActionBar
+          currentStatus={currentStatus}
+          currentEntryId={currentEntryId}
+          isUpdating={false}
+          hasSubmittedBefore={hasSubmittedBefore}
+          hasAnyData={hasAnyData}
+          editPermissions={editPermissions}
+          submitting={submitting}
+          onSubmit={handleSubmit}
+          onClear={() => setShowClearConfirmModal(true)}
+          designTokens={designTokens}
+        />
+      )}
+
+      {/* 審核區塊 - 只在審核模式顯示 */}
+      {isReviewMode && currentEntryId && (
+        <ReviewSection
+          entryId={reviewEntryId || currentEntryId}
+          userId={reviewUserId || "current_user"}
+          category="乙炔"
+          userName={reviewUserId || "用戶"}
+          amount={monthlyData.reduce((sum, data) => sum + data.quantity, 0)}
+          unit="支"
+          onApprove={() => {
+            console.log('✅ 乙炔填報審核通過 - 由 ReviewSection 處理')
+          }}
+          onReject={(reason) => {
+            console.log('❌ 乙炔填報已退回 - 由 ReviewSection 處理:', reason)
+          }}
+        />
+      )}
 
       {/* Toast 通知 */}
       {toast && (

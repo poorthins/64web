@@ -1,4 +1,4 @@
-export type UserStatus = 'submitted' | 'pending' | 'approved' | 'rejected'
+export type UserStatus = 'submitted' | 'approved' | 'rejected'
 
 export interface User {
   id: string
@@ -14,7 +14,6 @@ export interface User {
 
 export interface StatsData {
   submitted: number
-  pending: number
   approved: number
   rejected: number
 }
@@ -36,7 +35,7 @@ export const mockUsers: User[] = [
     name: '李美華',
     email: 'meihua.li@company.com',
     department: '行銷部',
-    status: 'pending',
+    status: 'submitted',
     submissionDate: '2024-03-18',
     lastActivity: '2024-03-21',
     entries: 8,
@@ -80,7 +79,7 @@ export const mockUsers: User[] = [
     name: '黃詩涵',
     email: 'shihan.huang@company.com',
     department: '設計部',
-    status: 'pending',
+    status: 'submitted',
     submissionDate: '2024-03-19',
     lastActivity: '2024-03-22',
     entries: 10,
@@ -113,7 +112,6 @@ export const mockUsers: User[] = [
 export const calculateStats = (users: User[]): StatsData => {
   return {
     submitted: users.filter(u => u.status === 'submitted').length,
-    pending: users.filter(u => u.status === 'pending').length,
     approved: users.filter(u => u.status === 'approved').length,
     rejected: users.filter(u => u.status === 'rejected').length
   }
@@ -124,11 +122,6 @@ export const statusColors = {
     bg: 'bg-blue-100',
     text: 'text-blue-800',
     border: 'border-blue-300'
-  },
-  pending: {
-    bg: 'bg-orange-100',
-    text: 'text-orange-800',
-    border: 'border-orange-300'
   },
   approved: {
     bg: 'bg-green-100',
@@ -144,7 +137,6 @@ export const statusColors = {
 
 export const statusLabels = {
   submitted: '已提交',
-  pending: '待審核',
   approved: '已通過',
   rejected: '已退回'
 }
@@ -213,6 +205,54 @@ export interface SubmissionRecord {
   reviewer?: string
   comments?: string
   priority: 'high' | 'medium' | 'low'
+  reviewNotes?: string
+  reviewedAt?: string
+  reviewerId?: string
+}
+
+// 常用退回原因選項
+export const COMMON_REJECT_REASONS = [
+  '資料不完整',
+  '證明文件缺失',
+  '數據異常',
+  '格式錯誤',
+  '計量單位錯誤',
+  '數值超出合理範圍',
+  '缺少必要檔案',
+  '其他（請說明）'
+]
+
+// 審核者資訊
+export const REVIEWERS = [
+  { id: 'admin_001', name: '張主管', department: '環保組' },
+  { id: 'admin_002', name: '林主管', department: '品管部' },
+  { id: 'admin_003', name: '陳主管', department: '安衛組' },
+  { id: 'admin_system', name: '系統管理員', department: '資訊部' }
+]
+
+// 測試用例資料
+export const TEST_SCENARIOS = {
+  // 正常審核流程
+  normalFlow: [
+    'sub_001', // submitted → approved
+    'sub_002', // submitted → rejected
+  ],
+
+  // 修正錯誤流程
+  errorCorrection: [
+    'sub_003', // approved → rejected
+  ],
+
+  // 重新審核流程
+  reReview: [
+    'sub_004', // rejected → approved
+    'sub_012'  // rejected → submitted
+  ],
+
+  // 批量操作測試
+  batchTest: [
+    'sub_005', 'sub_006', 'sub_007'
+  ]
 }
 
 export const mockSubmissions: SubmissionRecord[] = [
@@ -242,7 +282,7 @@ export const mockSubmissions: SubmissionRecord[] = [
     categoryId: 'electricity_bill',
     categoryName: '外購電力',
     scope: 2,
-    status: 'pending',
+    status: 'submitted',
     submissionDate: '2024-03-18',
     amount: 2850,
     unit: '度',
@@ -280,7 +320,10 @@ export const mockSubmissions: SubmissionRecord[] = [
     co2Emission: 160.6,
     reviewer: '林主管',
     comments: '數據來源不明確，請重新提交',
-    priority: 'medium'
+    priority: 'medium',
+    reviewNotes: '填報數據異常偏高，請確認是否有誤並提供相關證明文件。建議檢查計量單位是否正確，並附上氣表讀數照片。',
+    reviewedAt: '2024-03-12 15:30',
+    reviewerId: 'admin_001'
   },
   {
     id: 'sub_005',
@@ -308,7 +351,7 @@ export const mockSubmissions: SubmissionRecord[] = [
     categoryId: 'lpg',
     categoryName: '液化石油氣',
     scope: 1,
-    status: 'pending',
+    status: 'submitted',
     submissionDate: '2024-03-19',
     amount: 25.6,
     unit: '公斤',
@@ -355,7 +398,7 @@ export const mockSubmissions: SubmissionRecord[] = [
     categoryId: 'acetylene',
     categoryName: '乙炔',
     scope: 1,
-    status: 'pending',
+    status: 'submitted',
     submissionDate: '2024-03-22',
     amount: 15.2,
     unit: '公斤',
@@ -395,7 +438,10 @@ export const mockSubmissions: SubmissionRecord[] = [
     co2Emission: 5250,
     reviewer: '張主管',
     comments: '冷媒類型與申報不符',
-    priority: 'high'
+    priority: 'high',
+    reviewNotes: '申報的冷媒類型為 R-410A，但實際設備規格顯示使用 R-22。請重新確認冷媒種類並提交正確的設備規格書。',
+    reviewedAt: '2024-03-17 11:15',
+    reviewerId: 'admin_002'
   },
   {
     id: 'sub_012',
@@ -420,7 +466,7 @@ export const mockSubmissions: SubmissionRecord[] = [
     categoryId: 'electricity_bill',
     categoryName: '外購電力',
     scope: 2,
-    status: 'pending',
+    status: 'submitted',
     submissionDate: '2024-03-24',
     amount: 3200,
     unit: '度',
@@ -475,7 +521,10 @@ export const mockSubmissions: SubmissionRecord[] = [
     co2Emission: 16.4,
     reviewer: '林主管',
     comments: '設備檢查記錄不完整',
-    priority: 'medium'
+    priority: 'medium',
+    reviewNotes: '滅火器填充記錄缺少時間戳記和操作人員簽名。請補充完整的維護記錄表並加蓋廠商印章。',
+    reviewedAt: '2024-03-14 16:45',
+    reviewerId: 'admin_001'
   },
   {
     id: 'sub_017',
@@ -485,7 +534,7 @@ export const mockSubmissions: SubmissionRecord[] = [
     categoryId: 'septictank',
     categoryName: '化糞池',
     scope: 1,
-    status: 'pending',
+    status: 'submitted',
     submissionDate: '2024-03-26',
     amount: 1200,
     unit: '公升',
@@ -532,7 +581,7 @@ export const mockSubmissions: SubmissionRecord[] = [
     categoryId: 'employee_commute',
     categoryName: '員工通勤',
     scope: 3,
-    status: 'pending',
+    status: 'submitted',
     submissionDate: '2024-03-28',
     amount: 52.8,
     unit: '公里',
@@ -576,7 +625,6 @@ export const mockSubmissions: SubmissionRecord[] = [
 export const calculateSubmissionStats = (submissions: SubmissionRecord[]) => {
   return {
     submitted: submissions.filter(s => s.status === 'submitted').length,
-    pending: submissions.filter(s => s.status === 'pending').length,
     approved: submissions.filter(s => s.status === 'approved').length,
     rejected: submissions.filter(s => s.status === 'rejected').length
   }
@@ -604,4 +652,159 @@ export const priorityColors = {
     text: 'text-gray-800',
     border: 'border-gray-300'
   }
+}
+
+// 新增測試用例 - 狀態流程測試專用
+export const additionalTestSubmissions: SubmissionRecord[] = [
+  // 測試案例 1：即將被批准的項目
+  {
+    id: 'test_001',
+    userId: '9',
+    userName: '測試用戶 A',
+    userDepartment: '測試部門',
+    categoryId: 'diesel',
+    categoryName: '柴油',
+    scope: 1,
+    status: 'submitted',
+    submissionDate: '2024-03-29',
+    amount: 100,
+    unit: '公升',
+    co2Emission: 250,
+    priority: 'medium'
+  },
+
+  // 測試案例 2：即將被退回的項目
+  {
+    id: 'test_002',
+    userId: '10',
+    userName: '測試用戶 B',
+    userDepartment: '測試部門',
+    categoryId: 'electricity_bill',
+    categoryName: '外購電力',
+    scope: 2,
+    status: 'submitted',
+    submissionDate: '2024-03-29',
+    amount: 5000,
+    unit: '度',
+    co2Emission: 2500,
+    priority: 'high'
+  },
+
+  // 測試案例 3：已通過但需要修正的項目
+  {
+    id: 'test_003',
+    userId: '11',
+    userName: '測試用戶 C',
+    userDepartment: '測試部門',
+    categoryId: 'natural_gas',
+    categoryName: '天然氣',
+    scope: 1,
+    status: 'approved',
+    submissionDate: '2024-03-25',
+    reviewDate: '2024-03-26',
+    amount: 200,
+    unit: '立方公尺',
+    co2Emission: 400,
+    reviewer: '張主管',
+    comments: '已核准',
+    priority: 'medium'
+  },
+
+  // 測試案例 4：已退回準備重新審核的項目
+  {
+    id: 'test_004',
+    userId: '12',
+    userName: '測試用戶 D',
+    userDepartment: '測試部門',
+    categoryId: 'gasoline',
+    categoryName: '汽油',
+    scope: 1,
+    status: 'rejected',
+    submissionDate: '2024-03-20',
+    reviewDate: '2024-03-22',
+    amount: 150,
+    unit: '公升',
+    co2Emission: 345,
+    reviewer: '林主管',
+    comments: '數據需要重新確認',
+    priority: 'medium',
+    reviewNotes: '油料使用量異常偏高，請提供相關憑證並重新計算。建議檢查是否包含非營業用途使用量。',
+    reviewedAt: '2024-03-22 14:30',
+    reviewerId: 'admin_002'
+  },
+
+  // 測試案例 5-8：批量操作測試用例
+  {
+    id: 'test_005',
+    userId: '13',
+    userName: '批量測試 A',
+    userDepartment: '批量測試部',
+    categoryId: 'lpg',
+    categoryName: '液化石油氣',
+    scope: 1,
+    status: 'submitted',
+    submissionDate: '2024-03-28',
+    amount: 30,
+    unit: '公斤',
+    co2Emission: 90,
+    priority: 'low'
+  },
+  {
+    id: 'test_006',
+    userId: '14',
+    userName: '批量測試 B',
+    userDepartment: '批量測試部',
+    categoryId: 'acetylene',
+    categoryName: '乙炔',
+    scope: 1,
+    status: 'submitted',
+    submissionDate: '2024-03-28',
+    amount: 20,
+    unit: '公斤',
+    co2Emission: 60,
+    priority: 'low'
+  },
+  {
+    id: 'test_007',
+    userId: '15',
+    userName: '批量測試 C',
+    userDepartment: '批量測試部',
+    categoryId: 'welding_rod',
+    categoryName: '焊條',
+    scope: 1,
+    status: 'submitted',
+    submissionDate: '2024-03-28',
+    amount: 15,
+    unit: '公斤',
+    co2Emission: 30,
+    priority: 'low'
+  },
+  {
+    id: 'test_008',
+    userId: '16',
+    userName: '批量測試 D',
+    userDepartment: '批量測試部',
+    categoryId: 'wd40',
+    categoryName: 'WD-40',
+    scope: 1,
+    status: 'submitted',
+    submissionDate: '2024-03-28',
+    amount: 8,
+    unit: '公斤',
+    co2Emission: 24,
+    priority: 'low'
+  }
+]
+
+// 合併所有提交記錄
+export const allSubmissions = [...mockSubmissions, ...additionalTestSubmissions]
+
+// 取得測試案例的輔助函數
+export const getTestSubmission = (testId: string): SubmissionRecord | undefined => {
+  return allSubmissions.find(sub => sub.id === testId)
+}
+
+// 取得特定狀態的測試項目
+export const getTestSubmissionsByStatus = (status: UserStatus): SubmissionRecord[] => {
+  return additionalTestSubmissions.filter(sub => sub.status === status)
 }

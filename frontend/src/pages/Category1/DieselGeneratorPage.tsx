@@ -12,6 +12,8 @@ import DieselGeneratorTestPageImpl from './DieselGeneratorTestPageImpl'
 const DieselGeneratorPage = () => {
   const { profile, loading, error } = useUserProfile()
 
+  console.log('🔧 [DieselGeneratorPage] Render - loading:', loading, 'error:', error, 'profile:', profile)
+
   // 載入中狀態
   if (loading) {
     return (
@@ -78,8 +80,10 @@ const DieselGeneratorPage = () => {
 
   // 根據模式載入對應的頁面元件
   if (dieselGeneratorMode === 'test') {
+    console.log('🧪 [DieselGeneratorPage] Loading TEST version')
     return <DieselGeneratorTestPageImpl />
   } else {
+    console.log('⛽ [DieselGeneratorPage] Loading REFUEL version')
     return <DieselGeneratorRefuelPage />
   }
 }

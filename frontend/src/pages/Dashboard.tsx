@@ -2,7 +2,9 @@ import { useState, useEffect, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../contexts/AuthContext'
 import { useUserProfile } from '../hooks/useUserProfile'
+import { useCurrentUserPermissions } from '../hooks/useCurrentUserPermissions'
 import { designTokens } from '../utils/designTokens'
+import { ALL_ENERGY_CATEGORIES } from '../utils/energyCategories'
 import {
   getReportingProgress,
   getRejectedEntries,
@@ -64,8 +66,9 @@ const getStatusInfo = (status: string | null) => {
 
 const DashboardPage = () => {
   const navigate = useNavigate()
-  const { user } = useAuth()
+  const { user, isAdmin } = useAuth()
   const { displayName } = useUserProfile()
+  const { permissions, filterByPermissions, hasPermissionSync, isLoading: isPermissionsLoading } = useCurrentUserPermissions()
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
@@ -88,6 +91,48 @@ const DashboardPage = () => {
   const [selectedStatus, setSelectedStatus] = useState<string | null>(null)
   const [expandedRejections, setExpandedRejections] = useState<Set<string>>(new Set())
   const [rejectionReasons, setRejectionReasons] = useState<Record<string, RejectionDetail>>({})
+
+  // 計算基於權限的統計
+  const permissionBasedStats = useMemo(() => {
+    if (isPermissionsLoading || !permissions) {
+      return {
+        totalCategories: 0,
+        completedCount: 0,
+        progressPercentage: 0,
+        visibleEntries: [],
+        visibleCategoryCounts: { pending: 0, submitted: 0, approved: 0, rejected: 0 }
+      }
+    }
+
+    // 管理員看到所有 14 個類別，一般用戶看有權限的類別
+    const totalCategories = isAdmin ? ALL_ENERGY_CATEGORIES.length : (permissions.energy_categories?.length || 0)
+
+    // 只統計有權限的項目
+    const visibleEntries = filterByPermissions(allEntries, (entry) => entry.pageKey)
+
+    // 計算已完成數量（只統計有權限且狀態為 approved 的項目）
+    const completedCount = visibleEntries.filter(entry => entry.status === 'approved').length
+
+    // 計算進度百分比
+    const progressPercentage = totalCategories > 0 ? Math.round((completedCount / totalCategories) * 100) : 0
+
+    // 計算各狀態的數量（只統計可見項目）
+    const visibleCategoryCounts = { pending: 0, submitted: 0, approved: 0, rejected: 0 }
+    visibleEntries.forEach(entry => {
+      const status = entry.status || 'pending'
+      if (status in visibleCategoryCounts) {
+        visibleCategoryCounts[status as keyof typeof visibleCategoryCounts]++
+      }
+    })
+
+    return {
+      totalCategories,
+      completedCount,
+      progressPercentage,
+      visibleEntries,
+      visibleCategoryCounts
+    }
+  }, [isPermissionsLoading, permissions, isAdmin, allEntries, filterByPermissions])
 
   useEffect(() => {
     loadDashboardData()
@@ -120,6 +165,11 @@ const DashboardPage = () => {
   }
 
   const handleNavigateToPage = (pageKey: string) => {
+    // 檢查權限（雖然理論上不應該顯示無權限的項目，但保險起見）
+    if (!isAdmin && !hasPermissionSync(pageKey)) {
+      console.warn(`嘗試訪問無權限的頁面: ${pageKey}`)
+      return
+    }
     navigate(`/app/${pageKey}`)
   }
 
@@ -137,22 +187,15 @@ const DashboardPage = () => {
   }
 
   const filteredEntries = useMemo(() => {
+    const { visibleEntries } = permissionBasedStats
     if (selectedStatus === null) {
-      return allEntries
+      return visibleEntries
     }
-    return allEntries.filter(entry => getEntryStatus(entry) === selectedStatus)
-  }, [allEntries, selectedStatus])
+    return visibleEntries.filter(entry => getEntryStatus(entry) === selectedStatus)
+  }, [permissionBasedStats, selectedStatus])
 
-  const statusCounts = useMemo(() => {
-    const counts = { pending: 0, submitted: 0, approved: 0, rejected: 0 }
-    allEntries.forEach(entry => {
-      const status = getEntryStatus(entry)
-      if (status in counts) {
-        counts[status as keyof typeof counts]++
-      }
-    })
-    return counts
-  }, [allEntries])
+  // 使用基於權限的統計
+  const statusCounts = permissionBasedStats.visibleCategoryCounts
 
   const toggleStatusFilter = (status: string | null) => {
     setSelectedStatus(prev => prev === status ? null : status)
@@ -230,13 +273,15 @@ const DashboardPage = () => {
     return formatDate(dateString)
   }
 
-  if (loading) {
+  if (loading || isPermissionsLoading) {
     return (
       <div className="flex items-center justify-center min-h-screen" style={{ backgroundColor: designTokens.colors.background }}>
         <div className="text-center">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 mx-auto mb-4" 
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 mx-auto mb-4"
                style={{ borderColor: designTokens.colors.accentPrimary }}></div>
-          <p style={{ color: designTokens.colors.textSecondary }}>載入填報工作台...</p>
+          <p style={{ color: designTokens.colors.textSecondary }}>
+            {isPermissionsLoading ? '載入權限資料...' : '載入填報工作台...'}
+          </p>
         </div>
       </div>
     )
@@ -261,7 +306,8 @@ const DashboardPage = () => {
     )
   }
 
-  const progressPercentage = progress ? Math.round((progress.completed / progress.total) * 100) : 0
+  // 使用基於權限的進度統計
+  const { totalCategories, completedCount, progressPercentage } = permissionBasedStats
 
   return (
     <div className="min-h-screen" style={{ backgroundColor: designTokens.colors.background }}>
@@ -295,7 +341,12 @@ const DashboardPage = () => {
                   整體完成度
                 </span>
                 <span className="text-2xl font-bold" style={{ color: designTokens.colors.accentPrimary }}>
-                  {progress.completed}/{progress.total}
+                  {completedCount}/{totalCategories}
+                  {!isAdmin && (
+                    <span className="text-sm font-normal text-gray-500 ml-2">
+                      (您有權限的類別)
+                    </span>
+                  )}
                 </span>
               </div>
               
@@ -326,8 +377,8 @@ const DashboardPage = () => {
                     : 'bg-gray-50 hover:shadow-sm'
                 }`}
               >
-                <div className="text-2xl font-bold text-gray-600">{allEntries.length}</div>
-                <div className="text-sm text-gray-500">全部</div>
+                <div className="text-2xl font-bold text-gray-600">{permissionBasedStats.visibleEntries.length}</div>
+                <div className="text-sm text-gray-500">全部{!isAdmin && '(有權限)'}</div>
               </button>
 
               <button

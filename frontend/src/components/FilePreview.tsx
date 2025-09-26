@@ -1,7 +1,8 @@
 import { useState, useEffect } from 'react'
 import { X, Download, ZoomIn, ZoomOut, RotateCcw, RotateCw, FileText, File } from 'lucide-react'
-import { EvidenceFile, getFileUrl } from '../api/files'
+import { EvidenceFile, getFileUrl, getFileUrlForAdmin, debugAuthAndPermissions } from '../api/files'
 import { MemoryFile } from './EvidenceUpload'
+import { supabase } from '../lib/supabaseClient'
 
 interface FilePreviewProps {
   file: EvidenceFile | MemoryFile | null
@@ -44,11 +45,103 @@ const FilePreview: React.FC<FilePreviewProps> = ({ file, isOpen, onClose }) => {
         setLoading(true)
         setError(null)
         try {
-          const url = await getFileUrl(file.file_path)
+          // 增強除錯輸出
+          console.log('🔍 [FilePreview] Loading file URL:', {
+            filePath: file.file_path,
+            fileName: file.file_name,
+            fileId: file.id,
+            fileOwnerId: (file as any).owner_id,
+            mimeType: file.mime_type,
+            fileSize: file.file_size,
+            timestamp: new Date().toISOString()
+          })
+
+          // 檢測審核模式
+          const searchParams = new URLSearchParams(window.location.search)
+          const isReviewMode = searchParams.get('mode') === 'review'
+          const reviewUserId = searchParams.get('userId')
+
+          // 獲取當前用戶資訊
+          const { data: { user } } = await supabase.auth.getUser()
+          const currentUserId = user?.id
+
+          console.log('🔐 [FilePreview] Access context:', {
+            isReviewMode,
+            reviewUserId,
+            currentUserId,
+            fileOwnerId: (file as any).owner_id,
+            isOwnFile: currentUserId === (file as any).owner_id,
+            currentUrl: window.location.href
+          })
+
+          // 根據模式選擇適當的 URL 生成方式
+          let url: string
+
+          if (isReviewMode && reviewUserId && reviewUserId !== currentUserId) {
+            // 審核模式且檢視其他用戶的檔案
+            console.log('🔍 [FilePreview] Using admin access for review mode')
+
+            // 在審核模式首次失敗時，執行詳細的權限檢查
+            let firstAttemptFailed = false
+
+            try {
+              url = await getFileUrlForAdmin(file.file_path, reviewUserId, true)
+            } catch (adminError) {
+              console.error('❌ [FilePreview] Admin access failed, trying standard access:', adminError)
+              firstAttemptFailed = true
+
+              // 執行詳細的權限診斷
+              console.log('🔍 [FilePreview] Running detailed permission diagnostics...')
+              await debugAuthAndPermissions()
+
+              try {
+                // 如果管理員存取失敗，嘗試標準方式
+                url = await getFileUrl(file.file_path)
+              } catch (standardError) {
+                console.error('❌ [FilePreview] Standard access also failed:', standardError)
+                throw new Error(`無法存取檔案：管理員權限失敗 (${(adminError as Error).message}), 標準權限也失敗 (${(standardError as Error).message})`)
+              }
+            }
+          } else {
+            // 一般模式或檢視自己的檔案
+            console.log('📂 [FilePreview] Using standard access')
+            url = await getFileUrl(file.file_path)
+          }
+
+          console.log('✅ [FilePreview] File URL generated successfully:', {
+            urlLength: url?.length,
+            urlPrefix: url?.substring(0, 50)
+          })
+
           setImageUrl(url)
         } catch (err) {
-          console.error('Failed to load file URL:', err)
-          setError('無法載入檔案預覽')
+          console.error('❌ [FilePreview] Failed to load file URL:', {
+            error: err,
+            errorMessage: err instanceof Error ? err.message : 'Unknown error',
+            errorStack: err instanceof Error ? err.stack : undefined,
+            filePath: file.file_path,
+            fileName: file.file_name
+          })
+
+          // 根據錯誤類型和模式提供更詳細的錯誤訊息
+          const searchParams = new URLSearchParams(window.location.search)
+          const isReviewMode = searchParams.get('mode') === 'review'
+
+          let errorMessage = '無法載入檔案預覽'
+
+          if (err instanceof Error) {
+            if (err.message.includes('權限')) {
+              errorMessage = isReviewMode
+                ? '審核模式：無法存取其他用戶的檔案，請確認管理員權限'
+                : '權限不足：無法存取此檔案'
+            } else if (err.message.includes('審核模式')) {
+              errorMessage = err.message
+            } else {
+              errorMessage = `載入失敗：${err.message}`
+            }
+          }
+
+          setError(errorMessage)
         } finally {
           setLoading(false)
         }
@@ -90,7 +183,34 @@ const FilePreview: React.FC<FilePreviewProps> = ({ file, isOpen, onClose }) => {
         fileName = file.file_name
       } else {
         // 已上傳檔案從API獲取
-        downloadUrl = await getFileUrl(file.file_path)
+        // 檢測審核模式
+        const searchParams = new URLSearchParams(window.location.search)
+        const isReviewMode = searchParams.get('mode') === 'review'
+        const reviewUserId = searchParams.get('userId')
+
+        // 獲取當前用戶資訊
+        const { data: { user } } = await supabase.auth.getUser()
+        const currentUserId = user?.id
+
+        console.log('📥 [FilePreview] Download request:', {
+          isReviewMode,
+          reviewUserId,
+          currentUserId,
+          filePath: file.file_path
+        })
+
+        // 根據模式選擇適當的 URL 生成方式
+        if (isReviewMode && reviewUserId && reviewUserId !== currentUserId) {
+          try {
+            downloadUrl = await getFileUrlForAdmin(file.file_path, reviewUserId, true)
+          } catch (adminError) {
+            console.error('❌ [FilePreview] Admin download failed, trying standard:', adminError)
+            downloadUrl = await getFileUrl(file.file_path)
+          }
+        } else {
+          downloadUrl = await getFileUrl(file.file_path)
+        }
+
         fileName = file.file_name
       }
 
@@ -107,7 +227,16 @@ const FilePreview: React.FC<FilePreviewProps> = ({ file, isOpen, onClose }) => {
       }
     } catch (err) {
       console.error('Download failed:', err)
-      alert('下載失敗')
+
+      // 根據錯誤類型提供更詳細的訊息
+      const searchParams = new URLSearchParams(window.location.search)
+      const isReviewMode = searchParams.get('mode') === 'review'
+
+      const errorMessage = isReviewMode
+        ? '審核模式：無法下載其他用戶的檔案'
+        : '下載失敗'
+
+      alert(errorMessage)
     }
   }
 

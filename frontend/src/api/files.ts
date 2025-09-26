@@ -66,22 +66,10 @@ function inferMimeType(file: File): string {
 }
 
 /**
- * 驗證檔案類型
+ * 驗證檔案類型（已移除限制，允許所有類型）
  */
 function validateFileType(file: File): { valid: boolean; error?: string } {
-  const mimeType = inferMimeType(file)
-  
-  // 允許的類型：圖片或 PDF
-  const isImage = mimeType.startsWith('image/')
-  const isPdf = mimeType === 'application/pdf'
-  
-  if (!isImage && !isPdf) {
-    return {
-      valid: false,
-      error: '僅允許上傳圖片或 PDF 檔案'
-    }
-  }
-  
+  // 移除檔案類型限制，允許所有檔案上傳
   return { valid: true }
 }
 
@@ -144,7 +132,8 @@ async function uploadEvidenceWithValidation(file: File, meta: FileMetadata & { e
 
     // Month 和 file_type 參數驗證
     const expectedFileType = meta.category === 'msds' ? 'msds' :
-                            meta.category === 'usage_evidence' ? 'usage_evidence' : 'other'
+                            meta.category === 'usage_evidence' ? 'usage_evidence' :
+                            meta.category === 'nameplate_evidence' ? 'nameplate_evidence' : 'other'
 
     console.log('🔍 [uploadEvidence] File type validation:', {
       file_name: file.name,
@@ -214,11 +203,26 @@ async function uploadEvidenceWithValidation(file: File, meta: FileMetadata & { e
       }
     }
 
-    // 安全處理檔案名稱（防止路徑穿越和特殊字符）
+    // 安全處理檔案名稱（使用字符替換確保 Supabase Storage 兼容性）
+    console.log('🔧 [DEBUG] 處理檔案名稱:', {
+      原始檔名: file.name,
+      檔案大小: file.size,
+      檔案類型: file.type
+    })
+
     const safeName = file.name
-      .normalize('NFKD')                 // 拆分重音/特殊字
-      .replace(/[^\w.\-]+/g, '_')        // 非 [A-Za-z0-9_.-] 全部變 _
-      .replace(/^_+|_+$/g, '');  
+      .normalize('NFKD')                    // 標準化 Unicode 字符
+      .replace(/[^\x00-\x7F]/g, '')         // 移除所有非 ASCII 字符
+      .replace(/[\/\\:*?"<>|\s]+/g, '_')    // 替換特殊字符和空格
+      .replace(/_{2,}/g, '_')               // 將多個連續底線合併為一個
+      .replace(/^_+|_+$/g, '')              // 移除開頭和結尾的底線
+      .substring(0, 50) || 'file';          // 限制長度，如果為空則使用預設名稱
+
+    console.log('✅ [DEBUG] 檔案名稱處理完成:', {
+      原始檔名: file.name,
+      安全檔名: safeName,
+      處理步驟: '標準化 -> 移除非ASCII -> 替換特殊字符 -> 限制長度'
+    })
     
     const timestamp = Date.now()
     const randomSuffix = Math.random().toString(36).substring(2, 8) // 新增隨機字串以防止衝突
@@ -259,7 +263,7 @@ async function uploadEvidenceWithValidation(file: File, meta: FileMetadata & { e
       filePath,
       fileSize: file.size,
       contentType: resolvedType,
-      supabaseUrl: supabase.supabaseUrl,
+      supabaseUrl: (supabase as any)?.supabaseUrl || 'unknown',
       hasStorageClient: !!supabase.storage
     })
 
@@ -274,8 +278,8 @@ async function uploadEvidenceWithValidation(file: File, meta: FileMetadata & { e
       console.error('❌ [DEBUG] Storage upload failed:', {
         error: uploadError,
         errorMessage: uploadError.message,
-        errorCode: uploadError.code,
-        statusCode: uploadError.statusCode,
+        errorCode: (uploadError as any)?.code,
+        statusCode: (uploadError as any)?.statusCode,
         filePath,
         fileSize: file.size
       })
@@ -286,7 +290,7 @@ async function uploadEvidenceWithValidation(file: File, meta: FileMetadata & { e
         throw new Error('請先建立 evidence bucket 並確認名稱')
       }
 
-      if (uploadError.message.includes('Permission denied') || uploadError.statusCode === 401) {
+      if (uploadError.message.includes('Permission denied') || (uploadError as any)?.statusCode === 401) {
         console.error('❌ [DEBUG] Permission denied - authentication or RLS issue')
       }
 
@@ -414,7 +418,8 @@ async function uploadEvidenceWithValidation(file: File, meta: FileMetadata & { e
     // 建立資料庫記錄
     const monthValue = meta.category === 'usage_evidence' ? meta.month : null
     const fileTypeValue = meta.category === 'msds' ? 'msds' :
-                         meta.category === 'usage_evidence' ? 'usage_evidence' : 'other'
+                         meta.category === 'usage_evidence' ? 'usage_evidence' :
+                         meta.category === 'nameplate_evidence' ? 'nameplate_evidence' : 'other'
 
     const fileRecord = {
       owner_id: user.id,
@@ -725,19 +730,322 @@ export async function listEvidence(pageKey: string): Promise<EvidenceFile[]> {
  * 取得檔案的公開 URL
  */
 export async function getFileUrl(filePath: string): Promise<string> {
+  // 加入路徑診斷
+  console.log('📂 嘗試載入檔案:', {
+    原始路徑: filePath,
+    是否為空: !filePath,
+    路徑長度: filePath?.length,
+    路徑類型: typeof filePath,
+    是否包含斜線: filePath?.includes('/'),
+    路徑開頭: filePath?.substring(0, 20),
+    路徑結尾: filePath?.substring(filePath.length - 20)
+  })
+
+  // 檢查路徑格式
+  if (!filePath || filePath === 'null' || filePath === 'undefined') {
+    console.error('❌ 檔案路徑無效:', {
+      filePath,
+      typeOf: typeof filePath,
+      isEmpty: !filePath
+    })
+    throw new Error('檔案路徑無效')
+  }
+
+  console.log('📂 [getFileUrl] Attempting to get URL for:', {
+    filePath,
+    timestamp: new Date().toISOString()
+  })
+
   try {
-    const { data } = await supabase.storage
+    const { data, error } = await supabase.storage
       .from('evidence')
       .createSignedUrl(filePath, 3600) // 1小時有效期
 
+    if (error) {
+      console.error('❌ [getFileUrl] Supabase storage error:', {
+        message: error?.message,
+        status: (error as any)?.status,
+        statusText: (error as any)?.statusText,
+        error: (error as any)?.error,
+        code: (error as any)?.code,
+        hint: (error as any)?.hint,
+        details: (error as any)?.details,
+        filePath,
+        fullError: JSON.stringify(error, null, 2)
+      })
+      throw new Error(`Storage error: ${error.message || '未知錯誤'}`)
+    }
+
     if (!data?.signedUrl) {
+      console.error('❌ [getFileUrl] No signed URL returned:', { data, filePath })
       throw new Error('無法生成檔案 URL')
     }
 
+    console.log('✅ [getFileUrl] URL generated successfully:', {
+      filePath,
+      urlLength: data.signedUrl.length,
+      urlPrefix: data.signedUrl.substring(0, 50)
+    })
+
     return data.signedUrl
   } catch (error) {
-    console.error('Error getting file URL:', error)
-    throw new Error('取得檔案 URL 失敗')
+    console.error('❌ [getFileUrl] Failed to get file URL:', {
+      errorMessage: (error as any)?.message || 'Unknown error',
+      errorType: (error as any)?.name || typeof error,
+      errorStack: (error as any)?.stack,
+      errorCode: (error as any)?.code,
+      errorStatus: (error as any)?.status,
+      errorDetails: error,
+      filePath,
+      fullError: JSON.stringify(error, null, 2)
+    })
+    throw error instanceof Error ? error : new Error('取得檔案 URL 失敗')
+  }
+}
+
+/**
+ * 調試用：檢查資料庫中檔案路徑的完整性
+ */
+export async function debugFilePathsInDatabase(): Promise<void> {
+  console.log('🔍 [Debug] Checking file paths in database...')
+
+  try {
+    // 檢查 entry_files 表中的所有檔案路徑
+    const { data: allFiles, error: filesError } = await supabase
+      .from('entry_files')
+      .select('id, file_name, file_path, file_size, mime_type, created_at, owner_id')
+      .order('created_at', { ascending: false })
+      .limit(50)
+
+    if (filesError) {
+      console.error('❌ [Debug] Failed to fetch files from database:', filesError)
+      return
+    }
+
+    console.log('📊 [Debug] Database file analysis:', {
+      totalFiles: allFiles?.length || 0,
+      files: allFiles?.map(f => ({
+        id: f.id,
+        name: f.file_name,
+        path: f.file_path,
+        pathAnalysis: {
+          isEmpty: !f.file_path,
+          length: f.file_path?.length,
+          containsEvidence: f.file_path?.includes('evidence'),
+          pathSegments: f.file_path?.split('/').length,
+          firstSegment: f.file_path?.split('/')[0],
+          lastSegment: f.file_path?.split('/').pop()
+        },
+        size: f.file_size,
+        mimeType: f.mime_type,
+        ownerId: f.owner_id?.substring(0, 8) + '...'
+      }))
+    })
+
+    // 分析路徑模式
+    const pathPatterns = allFiles?.map(f => f.file_path).filter(Boolean) || []
+    const patternAnalysis = {
+      totalPaths: pathPatterns.length,
+      uniquePatterns: [...new Set(pathPatterns.map(path => {
+        const parts = path.split('/')
+        return parts.length > 2 ? `${parts[0]}/${parts[1]}/...` : path
+      }))],
+      pathStructures: pathPatterns.map(path => ({
+        fullPath: path,
+        segments: path.split('/').length,
+        startsWithEvidence: path.startsWith('evidence/'),
+        endsWithFileName: path.split('/').pop()?.includes('.')
+      }))
+    }
+
+    console.log('📈 [Debug] Path pattern analysis:', patternAnalysis)
+
+    // 檢查 Supabase Storage 中實際存在的檔案
+    try {
+      const { data: storageFiles, error: storageError } = await supabase.storage
+        .from('evidence')
+        .list('', { limit: 100 })
+
+      if (!storageError && storageFiles) {
+        console.log('💾 [Debug] Storage bucket content:', {
+          storageFiles: storageFiles.length,
+          fileNames: storageFiles.map(f => f.name).slice(0, 10),
+          folders: storageFiles.filter(f => !f.name.includes('.')).map(f => f.name)
+        })
+      } else {
+        console.warn('⚠️ [Debug] Could not list storage files:', storageError)
+      }
+    } catch (storageError) {
+      console.warn('⚠️ [Debug] Storage access failed:', storageError)
+    }
+
+  } catch (error) {
+    console.error('❌ [Debug] Database file path check failed:', error)
+  }
+}
+
+/**
+ * 調試用：檢查當前用戶權限和認證狀態
+ */
+export async function debugAuthAndPermissions(): Promise<void> {
+  console.log('🔍 [Debug] Checking authentication and permissions...')
+
+  try {
+    const { data: { user }, error: authError } = await supabase.auth.getUser()
+
+    console.log('👤 [Debug] Current user info:', {
+      isAuthenticated: !!user,
+      userId: user?.id,
+      email: user?.email,
+      authError: authError?.message,
+      userMetadata: user?.user_metadata,
+      appMetadata: user?.app_metadata
+    })
+
+    // 檢查 Storage 權限
+    try {
+      const { data: buckets, error: bucketsError } = await supabase.storage.listBuckets()
+      console.log('🪣 [Debug] Storage buckets access:', {
+        canListBuckets: !bucketsError,
+        bucketsCount: buckets?.length || 0,
+        bucketsError: bucketsError?.message,
+        buckets: buckets?.map(b => ({ name: b.name, public: b.public }))
+      })
+    } catch (storageError) {
+      console.error('❌ [Debug] Storage access failed:', storageError)
+    }
+
+    // 檢查是否為管理員
+    if (user) {
+      try {
+        const { data: profile, error: profileError } = await supabase
+          .from('profiles')
+          .select('role, is_admin')
+          .eq('id', user.id)
+          .single()
+
+        console.log('👨‍💼 [Debug] User role info:', {
+          hasProfile: !!profile,
+          role: profile?.role,
+          isAdmin: profile?.is_admin,
+          profileError: profileError?.message
+        })
+      } catch (roleError) {
+        console.error('❌ [Debug] Role check failed:', roleError)
+      }
+    }
+
+  } catch (error) {
+    console.error('❌ [Debug] Authentication check failed:', error)
+  }
+}
+
+/**
+ * 取得檔案的公開 URL - 管理員版本
+ * 用於審核模式下存取其他用戶的檔案
+ */
+export async function getFileUrlForAdmin(
+  filePath: string,
+  ownerId?: string,
+  isReviewMode: boolean = false
+): Promise<string> {
+  // 管理員模式路徑診斷
+  console.log('🔐 管理員模式檔案路徑診斷:', {
+    原始路徑: filePath,
+    檔案擁有者: ownerId,
+    審核模式: isReviewMode,
+    路徑分析: {
+      是否為空: !filePath,
+      路徑長度: filePath?.length,
+      包含evidence: filePath?.includes('evidence'),
+      路徑結構: filePath?.split('/'),
+      開頭30字元: filePath?.substring(0, 30),
+      結尾30字元: filePath?.substring(filePath.length - 30)
+    }
+  })
+
+  // 檢查路徑有效性
+  if (!filePath || filePath === 'null' || filePath === 'undefined') {
+    console.error('❌ [getFileUrlForAdmin] 管理員模式檔案路徑無效:', {
+      filePath,
+      ownerId,
+      問題: '路徑為空或無效'
+    })
+    throw new Error('管理員模式：檔案路徑無效')
+  }
+
+  console.log('🔐 [getFileUrlForAdmin] Admin file access request:', {
+    filePath,
+    ownerId,
+    isReviewMode,
+    timestamp: new Date().toISOString()
+  })
+
+  try {
+    // 首先嘗試標準方式
+    console.log('📍 [getFileUrlForAdmin] Trying standard approach first...')
+    const { data, error } = await supabase.storage
+      .from('evidence')
+      .createSignedUrl(filePath, 3600) // 1小時有效期
+
+    if (!error && data?.signedUrl) {
+      console.log('✅ [getFileUrlForAdmin] Standard approach succeeded')
+      return data.signedUrl
+    }
+
+    // 如果標準方式失敗，記錄錯誤
+    if (error) {
+      console.error('⚠️ [getFileUrlForAdmin] Standard approach failed:', {
+        message: error?.message,
+        status: (error as any)?.status,
+        statusText: (error as any)?.statusText,
+        error: (error as any)?.error,
+        code: (error as any)?.code,
+        hint: (error as any)?.hint,
+        details: (error as any)?.details,
+        filePath,
+        ownerId,
+        fullError: JSON.stringify(error, null, 2)
+      })
+    }
+
+    // 嘗試使用公開 URL（如果 bucket 設置為公開）
+    console.log('📍 [getFileUrlForAdmin] Trying public URL approach...')
+    const { data: publicUrlData } = supabase.storage
+      .from('evidence')
+      .getPublicUrl(filePath)
+
+    if (publicUrlData?.publicUrl) {
+      console.log('✅ [getFileUrlForAdmin] Public URL generated:', {
+        url: publicUrlData.publicUrl.substring(0, 50) + '...'
+      })
+      // 直接返回公開 URL，讓瀏覽器嘗試載入
+      // 如果 bucket 是公開的，這應該可以工作
+      return publicUrlData.publicUrl
+    }
+
+    // 如果所有方法都失敗，拋出錯誤
+    const errorMessage = isReviewMode
+      ? `審核模式：無法存取用戶 ${ownerId} 的檔案 ${filePath}`
+      : `管理員權限不足：無法存取檔案 ${filePath}`
+
+    console.error('❌ [getFileUrlForAdmin] All approaches failed')
+    throw new Error(errorMessage)
+
+  } catch (error) {
+    console.error('❌ [getFileUrlForAdmin] Admin file URL generation failed:', {
+      errorMessage: (error as any)?.message || 'Unknown error',
+      errorType: (error as any)?.name || typeof error,
+      errorStack: (error as any)?.stack,
+      errorCode: (error as any)?.code,
+      errorStatus: (error as any)?.status,
+      errorDetails: error,
+      filePath,
+      ownerId,
+      isReviewMode,
+      fullError: JSON.stringify(error, null, 2)
+    })
+    throw error
   }
 }
 
@@ -927,12 +1235,9 @@ export function validateFile(file: File, options?: {
   allowedTypes?: string[]
 }): { valid: boolean; error?: string } {
   const maxSize = options?.maxSize || 10 * 1024 * 1024 // 預設 10MB
-  const allowedTypes = options?.allowedTypes || [
-    'image/jpeg', 'image/png', 'image/gif',
-    'application/pdf',
-    'application/msword',
-    'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
-  ]
+
+  // 如果有指定 allowedTypes 才進行檢查，否則允許所有類型
+  const allowedTypes = options?.allowedTypes
 
   if (file.size > maxSize) {
     return {
@@ -941,7 +1246,7 @@ export function validateFile(file: File, options?: {
     }
   }
 
-  if (!allowedTypes.includes(file.type)) {
+  if (allowedTypes && !allowedTypes.includes(file.type)) {
     return {
       valid: false,
       error: '不支援的檔案格式'
