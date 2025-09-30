@@ -58,7 +58,7 @@ const mockRejectedEntries = [
   },
   {
     id: '3',
-    page_key: 'septictank',
+    page_key: 'septic_tank',
     category: '範疇一',
     updated_at: '2024-09-22T00:00:00Z',
     review_notes: '數值錯誤'
@@ -118,12 +118,12 @@ describe('getRejectedEntries 權限過濾測試', () => {
 
     const result = await getRejectedEntries()
 
-    // Should only return diesel and septictank (frontend format), not wd40
+    // Should only return diesel and septic_tank (frontend format), not wd40
     expect(result).toHaveLength(2)
 
     const pageKeys = result.map(entry => entry.pageKey)
     expect(pageKeys).toContain('diesel')
-    expect(pageKeys).toContain('septictank')
+    expect(pageKeys).toContain('septic_tank')
     expect(pageKeys).not.toContain('wd40') // WD-40 should be filtered out
 
     // Verify result structure
@@ -156,9 +156,9 @@ describe('getRejectedEntries 權限過濾測試', () => {
 
     const result = await getRejectedEntries()
 
-    // Should convert septic_tank (db) to septictank (frontend) and include it
+    // Should convert septic_tank (db) to septic_tank (frontend) and include it
     expect(result).toHaveLength(1)
-    expect(result[0].pageKey).toBe('septictank')
+    expect(result[0].pageKey).toBe('septic_tank')
     expect(result[0].title).toBe('化糞池')
   })
 
@@ -194,7 +194,7 @@ describe('getRejectedEntries 權限過濾測試', () => {
 
     // No permissions config should return all items (backward compatibility)
     expect(result).toHaveLength(3)
-    expect(result.map(r => r.pageKey)).toEqual(['wd40', 'diesel', 'septictank'])
+    expect(result.map(r => r.pageKey)).toEqual(['wd40', 'diesel', 'septic_tank'])
   })
 
   test('處理空的退回記錄', async () => {

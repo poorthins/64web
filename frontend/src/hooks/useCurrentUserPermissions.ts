@@ -4,14 +4,13 @@ import { useAuth } from '../contexts/AuthContext'
 import { ALL_ENERGY_CATEGORIES, ENERGY_CATEGORIES_BY_SCOPE, EnergyCategory } from '../utils/energyCategories'
 
 // 雙向格式轉換映射表
+// Fixed: unified page_key to 'septic_tank'
 const DB_TO_FRONTEND_MAP: Record<string, string> = {
-  'septic_tank': 'septictank',
   'electricity': 'electricity_bill',
   'diesel_generator': 'diesel_generator' // 柴油發電機保持一致
 };
 
 const FRONTEND_TO_DB_MAP: Record<string, string> = {
-  'septictank': 'septic_tank',
   'electricity_bill': 'electricity',
   'diesel_generator': 'diesel_generator' // 柴油發電機保持一致
 };

@@ -153,7 +153,7 @@ export const energyCategories: EnergyCategory[] = [
   { id: 'wd40', name: 'WD-40', scope: 1 },
   { id: 'acetylene', name: '乙炔', scope: 1 },
   { id: 'refrigerant', name: '冷媒', scope: 1 },
-  { id: 'septictank', name: '化糞池', scope: 1 },
+  { id: 'septic_tank', name: '化糞池', scope: 1 }, // Fixed: unified page_key to 'septic_tank'
   { id: 'natural_gas', name: '天然氣', scope: 1 },
   { id: 'urea', name: '尿素', scope: 1 },
   { id: 'diesel_generator', name: '柴油(發電機)', scope: 1, hasVersion: true },
@@ -485,7 +485,7 @@ export const mockSubmissions: SubmissionRecord[] = [
     userId: '1',
     userName: '王小明',
     userDepartment: '研發部',
-    categoryId: 'septictank',
+    categoryId: 'septic_tank', // Fixed: unified page_key to 'septic_tank'
     categoryName: '化糞池',
     scope: 1,
     status: 'submitted',

@@ -142,19 +142,13 @@ async function uploadEvidenceWithValidation(file: File, meta: FileMetadata & { e
       expected_file_type: expectedFileType
     })
 
-    if (meta.category === 'usage_evidence') {
-      if (!meta.month || meta.month < 1 || meta.month > 12) {
-        const error = `usage_evidence 類型必須有有效的月份參數 (1-12)，但收到: ${meta.month}`
-        console.error('❌ [uploadEvidence] Month validation failed:', error)
-        throw new Error(error)
-      }
-    } else if (meta.category === 'msds') {
-      if (meta.month !== undefined && meta.month !== null) {
-        const error = `msds 類型不應該有 month 參數，但收到: ${meta.month}`
-        console.error('❌ [uploadEvidence] Month validation failed:', error)
-        throw new Error(error)
-      }
-    }
+    // 記錄上傳參數（不做限制）
+    console.log('📁 [uploadEvidence] File upload info:', {
+      file_name: file.name,
+      category: meta.category || 'not specified',
+      month: meta.month || 'not specified',
+      page_key: meta.pageKey
+    })
 
     // 只有當 allowOverwrite 為 true 時才刪除現有檔案
     if (meta.allowOverwrite) {

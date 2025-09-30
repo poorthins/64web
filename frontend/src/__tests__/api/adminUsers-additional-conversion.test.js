@@ -17,11 +17,11 @@ const mockUserFromDB = {
 };
 
 // 預期的前端格式
-const expectedFrontendFormat = ['septictank', 'electricity_bill', 'diesel', 'wd40'];
+const expectedFrontendFormat = ['septic_tank', 'electricity_bill', 'diesel', 'wd40'];
 
 // 模擬轉換函數
 const DB_TO_FRONTEND_MAP = {
-  'septic_tank': 'septictank',
+  'septic_tank': 'septic_tank',
   'electricity': 'electricity_bill'
 };
 
@@ -60,16 +60,14 @@ function runAdditionalConversionTests() {
 
   const categories = processedUser.filling_config.energy_categories;
   const hasCorrectTransform =
-    categories.includes('septictank') &&        // septic_tank → septictank
-    !categories.includes('septic_tank') &&      // 不應該有原始的 septic_tank
+    categories.includes('septic_tank') &&        // septic_tank 保持不變
     categories.includes('electricity_bill') &&  // electricity → electricity_bill
     !categories.includes('electricity') &&      // 不應該有原始的 electricity
     categories.includes('diesel') &&            // 未變更的項目保持不變
     categories.includes('wd40');                // 未變更的項目保持不變
 
   console.log('轉換檢查:', {
-    '包含 septictank': categories.includes('septictank'),
-    '不包含 septic_tank': !categories.includes('septic_tank'),
+    '包含 septic_tank': categories.includes('septic_tank'),
     '包含 electricity_bill': categories.includes('electricity_bill'),
     '不包含 electricity': !categories.includes('electricity'),
     '保持 diesel 不變': categories.includes('diesel'),
@@ -120,7 +118,7 @@ function runAdditionalConversionTests() {
   if (allTestsPassed) {
     console.log('\n🎉 getUserById 和 getUserDetails 函數的轉換邏輯正常！');
     console.log('✓ 資料庫格式正確轉換為前端格式');
-    console.log('✓ 化糞池: septic_tank → septictank');
+    console.log('✓ 化糞池: septic_tank → septic_tank');
     console.log('✓ 外購電力: electricity → electricity_bill');
     console.log('✓ 邊界情況處理正確');
   }

@@ -26,7 +26,7 @@ const energyCategories = [
   { id: 'wd40', name: 'WD-40' },
   { id: 'acetylene', name: '乙炔' },
   { id: 'refrigerant', name: '冷媒' },
-  { id: 'septictank', name: '化糞池' },
+  { id: 'septic_tank', name: '化糞池' }, // Fixed: unified page_key to 'septic_tank'
   { id: 'natural_gas', name: '天然氣' },
   { id: 'urea', name: '尿素' },
   { id: 'diesel_generator', name: '柴油(發電機)' },
@@ -67,7 +67,7 @@ const AdminDashboard: React.FC<SubmissionManagementProps> = ({ onViewUserSubmiss
     'wd40': '/app/wd40',
     'acetylene': '/app/acetylene',
     'refrigerant': '/app/refrigerant',
-    'septictank': '/app/septictank',
+    'septic_tank': '/app/septic_tank', // Fixed: unified page_key to 'septic_tank'
     'natural_gas': '/app/natural_gas',
     'urea': '/app/urea',
     'diesel_generator': '/app/diesel_generator',

@@ -8,7 +8,8 @@ import Toast, { ToastType } from '../../components/Toast'
 import BottomActionBar from '../../components/BottomActionBar'
 import { useEditPermissions } from '../../hooks/useEditPermissions'
 import { useFrontendStatus } from '../../hooks/useFrontendStatus'
-import { listMSDSFiles, listUsageEvidenceFiles, commitEvidence, deleteEvidence, EvidenceFile, uploadEvidenceWithEntry } from '../../api/files'
+import { listMSDSFiles, listUsageEvidenceFiles, commitEvidence, deleteEvidence, EvidenceFile, uploadEvidenceWithEntry, deleteEvidenceFile } from '../../api/files'
+import { smartOverwriteFiles } from '../../api/smartFileOverwrite'
 import { upsertEnergyEntry, sumMonthly, UpsertEntryInput, updateEntryStatus, getEntryByPageKeyAndYear } from '../../api/entries'
 import { getEntryFiles } from '../../api/files'
 import { designTokens } from '../../utils/designTokens'
@@ -323,39 +324,123 @@ const UreaPage = () => {
         setCurrentEntryId(entry_id)
       }
 
-      // 上傳 MSDS 記憶體檔案
-      if (msdsMemoryFiles.length > 0) {
-        console.log(`📁 [UreaPage] Uploading ${msdsMemoryFiles.length} MSDS memory files...`)
-        for (const memoryFile of msdsMemoryFiles) {
-          await uploadEvidenceWithEntry(memoryFile.file, {
-            entryId: entry_id,
-            pageKey: pageKey,
-            year: year,
-            category: 'msds'
-          })
-        }
-        setMsdsMemoryFiles([]) // 清空記憶體檔案
+      console.log('========== 智慧型檔案覆蓋開始 ==========')
+      console.log('當前 entry_id:', entry_id)
+      console.log('當前 currentEntryId:', currentEntryId)
+
+      // 取得現有檔案
+      const existingFiles = currentEntryId ? await getEntryFiles(currentEntryId || entry_id) : []
+
+      // 準備智慧型覆蓋資料
+      const overwriteItems = []
+
+      // 1. 處理 MSDS 檔案
+      const existingMsdsFiles = existingFiles.filter(f =>
+        f.file_type === 'msds' && f.page_key === pageKey
+      )
+
+      overwriteItems.push({
+        itemKey: 'msds',
+        newFiles: msdsMemoryFiles,
+        existingFiles: existingMsdsFiles,
+        fileType: 'msds' as const
+      })
+
+      // 2. 處理使用證明檔案 - 按記錄分組
+      for (let i = 0; i < usageRecords.length; i++) {
+        const record = usageRecords[i]
+        const recordKey = `usage_${i}` // 使用索引作為 key
+        const recordExistingFiles = existingFiles.filter(f =>
+          f.file_type === 'usage_evidence' && f.page_key === pageKey
+        )
+
+        // 簡化邏輯：每個記錄的檔案按順序分配
+        // 更精確的關聯邏輯可以在後續版本中改進
+        const filesForThisRecord = recordExistingFiles.slice(i * 10, (i + 1) * 10) // 每個記錄最多10個檔案
+
+        overwriteItems.push({
+          itemKey: recordKey,
+          newFiles: record.memoryFiles || [],
+          existingFiles: filesForThisRecord,
+          fileType: 'usage_evidence' as const
+        })
       }
 
-      // 上傳使用證明記憶體檔案
-      for (const record of usageRecords) {
-        if (record.memoryFiles && record.memoryFiles.length > 0) {
-          console.log(`📁 [UreaPage] Uploading ${record.memoryFiles.length} usage files for record ${record.id}...`)
-          for (const memoryFile of record.memoryFiles) {
-            await uploadEvidenceWithEntry(memoryFile.file, {
-              entryId: entry_id,
-              pageKey: pageKey,
-              year: year,
-              category: 'usage_evidence'
-            })
-          }
+      // 執行智慧型覆蓋
+      const results = await smartOverwriteFiles(overwriteItems, {
+        entryId: entry_id,
+        pageKey,
+        year,
+        debug: true  // 開啟除錯模式
+      })
+
+      // 檢查結果
+      results.forEach(result => {
+        if (result.error) {
+          console.error(`項目 ${result.itemKey} 處理失敗:`, result.error)
         }
-      }
+      })
+
+      console.log('✅ 智慧型檔案覆蓋完成')
 
       await commitEvidence({
         entryId: entry_id,
         pageKey: pageKey
       })
+
+      // 步驟 5：上傳後重新載入檔案
+      console.log('🔄 重新載入檔案列表...')
+      try {
+        const updatedFiles = await getEntryFiles(entry_id)
+        console.log('📁 上傳後的檔案:', updatedFiles.length, '個')
+        updatedFiles.forEach(file => {
+          console.log('  - ', file.file_name, '(類型:', file.file_type, ', 月份:', file.month, ', 建立時間:', file.created_at, ')')
+        })
+
+        // 重新載入 MSDS 檔案
+        const msdsFilesFromEntry = updatedFiles.filter(f =>
+          f.file_type === 'msds' && f.page_key === pageKey
+        )
+        setMsdsFiles(msdsFilesFromEntry)
+        console.log(`✅ [UreaPage] 重新載入 ${msdsFilesFromEntry.length} 個 MSDS 檔案`)
+
+        // 重新載入使用記錄檔案，並更新 usageRecords 狀態
+        const updatedRecords = usageRecords.map((record, index) => {
+          // 改進檔案關聯邏輯：按順序關聯檔案
+          const usageFiles = updatedFiles.filter(f => f.file_type === 'usage_evidence' && f.page_key === pageKey)
+
+          // 簡化關聯邏輯：如果有檔案上傳，按記錄順序分配
+          const filesForThisRecord = usageFiles.slice(index * 10, (index + 1) * 10) // 每個記錄最多 10 個檔案
+
+          console.log(`記錄 ${record.id} (日期: ${record.date}) 關聯到 ${filesForThisRecord.length} 個檔案:`)
+          filesForThisRecord.forEach(file => {
+            console.log(`  - ${file.file_name}`)
+          })
+
+          return {
+            ...record,
+            files: filesForThisRecord,
+            memoryFiles: [] // 清空記憶體檔案，因為已經上傳
+          }
+        })
+
+        setUsageRecords(updatedRecords)
+        console.log(`✅ [UreaPage] 重新載入使用記錄檔案完成`)
+
+        // 步驟 6：最後確保清空所有記憶體檔案
+        console.log('🧹 清空所有記憶體檔案...')
+        setMsdsMemoryFiles([])
+        setUsageRecords(prev => prev.map(record => ({
+          ...record,
+          memoryFiles: []
+        })))
+        console.log('✅ 記憶體檔案清空完成')
+
+      } catch (fileError) {
+        console.error('❌ [UreaPage] 檔案重新載入失敗:', fileError)
+      }
+
+      console.log('========== 智慧型檔案覆蓋診斷結束 ==========')
 
       // 草稿清理功能已移除
       await handleSubmitSuccess()

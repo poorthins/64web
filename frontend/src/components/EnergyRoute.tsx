@@ -15,7 +15,7 @@ const ROUTE_TO_CATEGORY_MAP: Record<string, string> = {
   '/app/electricity_bill': 'electricity_bill',
   '/app/employee_commute': 'employee_commute',
   '/app/refrigerant': 'refrigerant',
-  '/app/septictank': 'septic_tank',
+  '/app/septic_tank': 'septic_tank',
   '/app/natural_gas': 'natural_gas',
   '/app/urea': 'urea',
   '/app/gasoline': 'gasoline',

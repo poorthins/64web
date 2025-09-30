@@ -32,14 +32,14 @@ describe('getCategoryFromPageKey API測試', () => {
       expect(result).toBe('化糞池')
     })
 
-    it('應該支援septictank格式（向後相容）', () => {
-      const result = getCategoryFromPageKey('septictank')
+    it('應該支援septic_tank格式（向後相容）', () => {
+      const result = getCategoryFromPageKey('septic_tank')
       expect(result).toBe('化糞池')
     })
 
     it('兩種格式應該返回相同結果', () => {
       const result1 = getCategoryFromPageKey('septic_tank')
-      const result2 = getCategoryFromPageKey('septictank')
+      const result2 = getCategoryFromPageKey('septic_tank')
       expect(result1).toBe(result2)
     })
   })
@@ -50,7 +50,7 @@ describe('getCategoryFromPageKey API測試', () => {
       { pageKey: 'acetylene', expected: '乙炔' },
       { pageKey: 'refrigerant', expected: '冷媒' },
       { pageKey: 'septic_tank', expected: '化糞池' },
-      { pageKey: 'septictank', expected: '化糞池' },
+      { pageKey: 'septic_tank', expected: '化糞池' },
       { pageKey: 'natural_gas', expected: '天然氣' },
       { pageKey: 'urea', expected: '尿素' },
       { pageKey: 'diesel_generator', expected: '柴油(發電機)' },
@@ -101,8 +101,8 @@ describe('getCategoryFromPageKey API測試', () => {
   })
 
   describe('修復前後對比測試', () => {
-    it('修復前septictank可能無法正確映射，現在應該可以', () => {
-      const result = getCategoryFromPageKey('septictank')
+    it('修復前septic_tank可能無法正確映射，現在應該可以', () => {
+      const result = getCategoryFromPageKey('septic_tank')
       expect(result).not.toBe('SEPTICTANK') // 不應該是fallback結果
       expect(result).toBe('化糞池') // 應該正確映射
     })

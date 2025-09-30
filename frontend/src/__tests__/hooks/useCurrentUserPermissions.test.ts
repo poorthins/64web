@@ -428,7 +428,7 @@ describe('useEnergyPermission', () => {
         id: 'user-frontend-format',
         display_name: '前端格式權限用戶',
         role: 'user',
-        energy_categories: ['septictank', 'electricity_bill'], // 前端格式
+        energy_categories: ['septic_tank', 'electricity_bill'], // 前端格式
         target_year: 2024,
         diesel_generator_version: 'refuel'
       }
@@ -454,7 +454,7 @@ describe('useEnergyPermission', () => {
       expect(result.current.hasPermissionSync('electricity')).toBe(true) // DB格式 → 前端格式
 
       // 直接使用前端格式檢查也應該正常
-      expect(result.current.hasPermissionSync('septictank')).toBe(true)
+      expect(result.current.hasPermissionSync('septic_tank')).toBe(true)
       expect(result.current.hasPermissionSync('electricity_bill')).toBe(true)
 
       // 沒有權限的項目應該返回 false
@@ -489,7 +489,7 @@ describe('useEnergyPermission', () => {
       })
 
       // 使用前端格式檢查應該能找到對應的資料庫格式權限
-      expect(result.current.hasPermissionSync('septictank')).toBe(true) // 前端格式 → DB格式
+      expect(result.current.hasPermissionSync('septic_tank')).toBe(true) // 前端格式 → DB格式
       expect(result.current.hasPermissionSync('electricity_bill')).toBe(true) // 前端格式 → DB格式
 
       // 直接使用資料庫格式檢查也應該正常
@@ -505,7 +505,7 @@ describe('useEnergyPermission', () => {
         id: 'user-mixed',
         display_name: '混合格式用戶',
         role: 'user',
-        energy_categories: ['wd40', 'natural_gas', 'septictank'], // 混合：普通 + 前端格式
+        energy_categories: ['wd40', 'natural_gas', 'septic_tank'], // 混合：普通 + 前端格式
         target_year: 2024,
         diesel_generator_version: 'refuel'
       }
@@ -531,7 +531,7 @@ describe('useEnergyPermission', () => {
       expect(result.current.hasPermissionSync('natural_gas')).toBe(true)
 
       // 前端格式應該正常
-      expect(result.current.hasPermissionSync('septictank')).toBe(true)
+      expect(result.current.hasPermissionSync('septic_tank')).toBe(true)
 
       // 對應的資料庫格式也應該能檢查到
       expect(result.current.hasPermissionSync('septic_tank')).toBe(true)

@@ -105,7 +105,7 @@ const energyCategories = [
   { id: 'wd40', name: 'WD-40', scope: 1 },
   { id: 'acetylene', name: '乙炔', scope: 1 },
   { id: 'refrigerant', name: '冷媒', scope: 1 },
-  { id: 'septictank', name: '化糞池', scope: 1 },
+  { id: 'septic_tank', name: '化糞池', scope: 1 },
   { id: 'natural_gas', name: '天然氣', scope: 1 },
   { id: 'urea', name: '尿素', scope: 1 },
   { id: 'diesel_generator', name: '柴油(發電機)', scope: 1, hasVersion: true },

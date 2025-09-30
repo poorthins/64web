@@ -143,7 +143,8 @@
       "Bash(npx vitest:*)",
       "Bash(npm test)",
       "Bash(npm test:*)",
-      "Bash(pkill:*)"
+      "Bash(pkill:*)",
+      "Bash(do)"
     ],
     "deny": [],
     "ask": []

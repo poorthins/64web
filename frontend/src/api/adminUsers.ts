@@ -2,15 +2,15 @@ import { supabase } from '../lib/supabaseClient'
 import { validateAuth, handleAPIError } from '../utils/authHelpers'
 
 // 前端 key 轉資料庫 key
+// Fixed: unified page_key to 'septic_tank'
 const FRONTEND_TO_DB_MAP: Record<string, string> = {
-  'septictank': 'septic_tank',
   'electricity_bill': 'electricity',
   'diesel_generator': 'diesel_generator' // 柴油發電機保持一致
 };
 
 // 資料庫 key 轉前端 key
+// Fixed: unified page_key to 'septic_tank'
 const DB_TO_FRONTEND_MAP: Record<string, string> = {
-  'septic_tank': 'septictank',
   'electricity': 'electricity_bill',
   'diesel_generator': 'diesel_generator' // 柴油發電機保持一致
 };

@@ -60,7 +60,7 @@ export const useAdvancedNavigation = (options: AdvancedNavigationOptions = {}) =
         { key: '1', category: 'wd40', name: 'WD40' },
         { key: '2', category: 'acetylene', name: '乙炔' },
         { key: '3', category: 'refrigerant', name: '冷媒' },
-        { key: '4', category: 'septictank', name: '化糞池' },
+        { key: '4', category: 'septic_tank', name: '化糞池' },
         { key: '5', category: 'natural_gas', name: '天然氣' },
         { key: '6', category: 'urea', name: '尿素' },
         { key: '7', category: 'diesel_generator', name: '柴油(發電機)' },
@@ -137,7 +137,7 @@ export const useAdvancedNavigation = (options: AdvancedNavigationOptions = {}) =
           action: () => {
             // Navigate to next category for review
             const categories = [
-              'wd40', 'acetylene', 'refrigerant', 'septictank', 'natural_gas', 'urea',
+              'wd40', 'acetylene', 'refrigerant', 'septic_tank', 'natural_gas', 'urea',
               'diesel_generator', 'diesel', 'gasoline', 'lpg', 'fire_extinguisher', 'welding_rod',
               'electricity_bill', 'employee_commute'
             ]
@@ -155,7 +155,7 @@ export const useAdvancedNavigation = (options: AdvancedNavigationOptions = {}) =
           action: () => {
             // Navigate to previous category for review
             const categories = [
-              'wd40', 'acetylene', 'refrigerant', 'septictank', 'natural_gas', 'urea',
+              'wd40', 'acetylene', 'refrigerant', 'septic_tank', 'natural_gas', 'urea',
               'diesel_generator', 'diesel', 'gasoline', 'lpg', 'fire_extinguisher', 'welding_rod',
               'electricity_bill', 'employee_commute'
             ]
@@ -250,7 +250,7 @@ export const getCategoryDisplayName = (categoryId: string): string => {
     wd40: 'WD40',
     acetylene: '乙炔',
     refrigerant: '冷媒',
-    septictank: '化糞池',
+    septic_tank: '化糞池',
     natural_gas: '天然氣',
     urea: '尿素',
     diesel_generator: '柴油(發電機)',

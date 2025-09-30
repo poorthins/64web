@@ -4,12 +4,12 @@
 
 // 模擬對應表（從 adminUsers.ts 複製）
 const FRONTEND_TO_DB_MAP = {
-  'septictank': 'septic_tank',
+  'septic_tank': 'septic_tank',
   'electricity_bill': 'electricity'
 };
 
 const DB_TO_FRONTEND_MAP = {
-  'septic_tank': 'septictank',
+  'septic_tank': 'septic_tank',
   'electricity': 'electricity_bill'
 };
 
@@ -28,19 +28,18 @@ function runKeyConversionTests() {
 
   // 測試 1: 前端 → 資料庫格式轉換
   console.log('=== 測試 1: 前端 → 資料庫格式轉換 ===');
-  const frontendKeys = ['wd40', 'septictank', 'electricity_bill', 'diesel', 'employee_commute'];
+  const frontendKeys = ['wd40', 'septic_tank', 'electricity_bill', 'diesel', 'employee_commute'];
   const convertedToDb = convertFrontendKeysToDb(frontendKeys);
 
   console.log('輸入 (前端格式):', frontendKeys);
   console.log('輸出 (資料庫格式):', convertedToDb);
   console.log('預期轉換:', {
-    'septictank': 'septic_tank',
+    'septic_tank': 'septic_tank',
     'electricity_bill': 'electricity'
   });
 
   const test1Pass =
-    convertedToDb.includes('septic_tank') &&
-    !convertedToDb.includes('septictank') &&
+    convertedToDb.includes('septic_tank') && // septic_tank 現在不需要轉換，保持原樣
     convertedToDb.includes('electricity') &&
     !convertedToDb.includes('electricity_bill') &&
     convertedToDb.includes('wd40') && // 未變更的保持原樣
@@ -57,13 +56,12 @@ function runKeyConversionTests() {
   console.log('輸入 (資料庫格式):', dbKeys);
   console.log('輸出 (前端格式):', convertedToFrontend);
   console.log('預期轉換:', {
-    'septic_tank': 'septictank',
+    'septic_tank': 'septic_tank',
     'electricity': 'electricity_bill'
   });
 
   const test2Pass =
-    convertedToFrontend.includes('septictank') &&
-    !convertedToFrontend.includes('septic_tank') &&
+    convertedToFrontend.includes('septic_tank') && // septic_tank 現在不需要轉換，保持原樣
     convertedToFrontend.includes('electricity_bill') &&
     !convertedToFrontend.includes('electricity') &&
     convertedToFrontend.includes('wd40') && // 未變更的保持原樣
@@ -74,7 +72,7 @@ function runKeyConversionTests() {
 
   // 測試 3: 雙向轉換一致性
   console.log('=== 測試 3: 雙向轉換一致性 ===');
-  const originalFrontend = ['septictank', 'electricity_bill', 'wd40'];
+  const originalFrontend = ['septic_tank', 'electricity_bill', 'wd40'];
   const toDb = convertFrontendKeysToDb(originalFrontend);
   const backToFrontend = convertDbKeysToFrontend(toDb);
 

@@ -247,7 +247,7 @@ describe('userProfile API', () => {
       expect(result).toHaveProperty('energy_categories')
 
       // 應該轉換為前端格式
-      expect(result?.energy_categories).toEqual(['septictank', 'electricity_bill'])
+      expect(result?.energy_categories).toEqual(['septic_tank', 'electricity_bill'])
       expect(result?.energy_categories).not.toContain('septic_tank')
       expect(result?.energy_categories).not.toContain('electricity')
     })
@@ -384,11 +384,11 @@ describe('userProfile API', () => {
       const result = await getCurrentUserPermissions()
 
       expect(result).not.toBeNull()
-      expect(result?.energy_categories).toEqual(['wd40', 'septictank', 'natural_gas', 'electricity_bill'])
+      expect(result?.energy_categories).toEqual(['wd40', 'septic_tank', 'natural_gas', 'electricity_bill'])
 
       // 檢查轉換是否正確
       expect(result?.energy_categories).toContain('wd40') // 不需要轉換
-      expect(result?.energy_categories).toContain('septictank') // septic_tank → septictank
+      expect(result?.energy_categories).toContain('septic_tank') // septic_tank → septic_tank
       expect(result?.energy_categories).toContain('natural_gas') // 不需要轉換
       expect(result?.energy_categories).toContain('electricity_bill') // electricity → electricity_bill
 
@@ -474,7 +474,7 @@ describe('userProfile API', () => {
         .mockReturnValueOnce({ select: selectMock2 })
 
       // 檢查前端格式的權限
-      const hasSeptictank = await hasEnergyCategory('septictank')
+      const hasSeptictank = await hasEnergyCategory('septic_tank')
       expect(hasSeptictank).toBe(true)
 
       // Reset mocks for second call

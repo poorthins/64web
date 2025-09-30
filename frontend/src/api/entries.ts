@@ -8,6 +8,7 @@ export interface UpsertEntryInput {
   unit: string
   monthly: Record<string, number>
   notes?: string
+  payload?: any       // 主要的 payload 數據
   extraPayload?: any  // 額外的 payload 數據
 }
 
@@ -57,8 +58,7 @@ export function getCategoryFromPageKey(pageKey: string): string {
     'wd40': 'WD-40',
     'acetylene': '乙炔',
     'refrigerant': '冷媒',
-    'septic_tank': '化糞池',
-    'septictank': '化糞池', // 向後相容
+    'septic_tank': '化糞池', // Fixed: unified page_key to 'septic_tank'
     'natural_gas': '天然氣',
     'urea': '尿素',
     'diesel_generator': '柴油(發電機)',
@@ -149,7 +149,8 @@ export async function upsertEnergyEntry(input: UpsertEntryInput, preserveStatus:
       payload: {
         monthly: input.monthly,
         notes: input.notes ?? null,
-        ...(input.extraPayload || {})  // 合併額外的 payload 數據
+        ...(input.extraPayload || {}), // 先合併額外的 payload 數據（作為後備）
+        ...(input.payload || {})       // 然後合併主要的 payload（優先級更高）
       },
       status: status,
       // 設定期間範圍（年度範圍）

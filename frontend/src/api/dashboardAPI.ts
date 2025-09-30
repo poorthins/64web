@@ -2,8 +2,8 @@ import { supabase } from '../lib/supabaseClient'
 import { validateAuth, handleAPIError } from '../utils/authHelpers'
 
 // 資料庫 key 轉前端 key 的映射
+// Fixed: unified page_key to 'septic_tank'
 const DB_TO_FRONTEND_MAP: Record<string, string> = {
-  'septic_tank': 'septictank',
   'electricity': 'electricity_bill'
 }
 
@@ -74,7 +74,7 @@ const allCategories = [
   { pageKey: 'wd40', title: 'WD-40', category: '範疇一', scope: '直接排放' },
   { pageKey: 'acetylene', title: '乙炔', category: '範疇一', scope: '直接排放' },
   { pageKey: 'refrigerant', title: '冷媒', category: '範疇一', scope: '直接排放' },
-  { pageKey: 'septictank', title: '化糞池', category: '範疇一', scope: '直接排放' },
+  { pageKey: 'septic_tank', title: '化糞池', category: '範疇一', scope: '直接排放' }, // Fixed: unified page_key to 'septic_tank'
   { pageKey: 'natural_gas', title: '天然氣', category: '範疇一', scope: '直接排放' },
   { pageKey: 'urea', title: '尿素', category: '範疇一', scope: '直接排放' },
   { pageKey: 'diesel_generator', title: '柴油(發電機)', category: '範疇一', scope: '直接排放' },
@@ -91,7 +91,7 @@ const titleMap: Record<string, string> = {
   'wd40': 'WD-40',
   'acetylene': '乙炔',
   'refrigerant': '冷媒',
-  'septictank': '化糞池',
+  'septic_tank': '化糞池', // Fixed: unified page_key to 'septic_tank'
   'natural_gas': '天然氣',
   'urea': '尿素',
   'diesel_generator': '柴油(發電機)',

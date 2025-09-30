@@ -21,11 +21,11 @@ jest.mock('../../api/userProfile', () => ({
 
 // 模擬能源類別常數
 jest.mock('../../utils/energyCategories', () => ({
-  ALL_ENERGY_CATEGORIES: ['wd40', 'diesel_generator', 'gasoline', 'septictank', 'electricity_bill'],
+  ALL_ENERGY_CATEGORIES: ['wd40', 'diesel_generator', 'gasoline', 'septic_tank', 'electricity_bill'],
   ENERGY_CATEGORIES_BY_SCOPE: {
     scope1: ['wd40', 'diesel_generator', 'gasoline'],
     scope2: ['electricity_bill'],
-    scope3: ['septictank']
+    scope3: ['septic_tank']
   }
 }))
 

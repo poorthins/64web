@@ -21,7 +21,7 @@ const mockCurrentUser = {
 
 // 模擬轉換函數
 const FRONTEND_TO_DB_MAP = {
-  'septictank': 'septic_tank',
+  'septic_tank': 'septic_tank',
   'electricity_bill': 'electricity'
 };
 
@@ -175,15 +175,15 @@ function runUpdateUserFixTest() {
     console.log('轉換後（資料庫格式）:', converted);
 
     const hasCorrectConversion =
-      (energyCategories.includes('septictank') ? converted.includes('septic_tank') : true) &&
+      (energyCategories.includes('septic_tank') ? converted.includes('septic_tank') : true) &&
       (energyCategories.includes('electricity_bill') ? converted.includes('electricity') : true);
 
     return hasCorrectConversion;
   };
 
   const test5Cases = [
-    ['septictank', 'electricity_bill', 'diesel'],
-    ['wd40', 'septictank'],
+    ['septic_tank', 'electricity_bill', 'diesel'],
+    ['wd40', 'septic_tank'],
     undefined // 沒有能源類別
   ];
 

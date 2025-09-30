@@ -14,7 +14,7 @@ const ENERGY_CATEGORY_LABELS: Record<string, string> = {
   wd40: 'WD-40',
   acetylene: '乙炔',
   refrigerant: '冷媒',
-  septic_tank: '化糞池',
+  septic_tank: '化糞池', // Fixed: unified page_key to 'septic_tank'
   natural_gas: '天然氣',
   urea: '尿素',
   diesel_generator: '柴油(發電機)',

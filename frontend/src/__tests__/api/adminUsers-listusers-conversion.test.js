@@ -48,7 +48,7 @@ const mockUsersFromDB = [
 
 // 模擬轉換函數
 const DB_TO_FRONTEND_MAP = {
-  'septic_tank': 'septictank',
+  'septic_tank': 'septic_tank',
   'electricity': 'electricity_bill'
 };
 
@@ -102,7 +102,7 @@ function runListUsersConversionTest() {
   const user2Categories = processedUsers[1].filling_config.energy_categories;
 
   const test1Pass =
-    user1Categories.includes('septictank') &&        // septic_tank → septictank
+    user1Categories.includes('septic_tank') &&        // septic_tank → septic_tank
     !user1Categories.includes('septic_tank') &&      // 不應該有原始的 septic_tank
     user1Categories.includes('electricity_bill') &&  // electricity → electricity_bill
     !user1Categories.includes('electricity') &&      // 不應該有原始的 electricity
@@ -110,7 +110,7 @@ function runListUsersConversionTest() {
 
   const test2Pass =
     user2Categories.includes('wd40') &&               // 保持不變
-    user2Categories.includes('septictank') &&         // septic_tank → septictank
+    user2Categories.includes('septic_tank') &&         // septic_tank → septic_tank
     user2Categories.includes('electricity_bill') &&  // electricity → electricity_bill
     user2Categories.includes('employee_commute');     // 保持不變
 
@@ -146,7 +146,7 @@ function runListUsersConversionTest() {
   if (allTestsPassed) {
     console.log('\n🎉 listUsers 函數的批量轉換功能正常！');
     console.log('✓ 批量轉換所有使用者的能源類別格式');
-    console.log('✓ 化糞池: septic_tank → septictank');
+    console.log('✓ 化糞池: septic_tank → septic_tank');
     console.log('✓ 外購電力: electricity → electricity_bill');
     console.log('✓ 邊界情況正確處理');
     console.log('✓ 資料完整性維持');

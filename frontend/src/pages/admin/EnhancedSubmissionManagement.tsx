@@ -142,7 +142,7 @@ const EnhancedSubmissionManagement: React.FC<EnhancedSubmissionManagementProps> 
     '液化石油氣': '/app/lpg',
     '乙炔': '/app/acetylene',
     '冷媒': '/app/refrigerant',
-    '化糞池': '/app/septictank',
+    '化糞池': '/app/septic_tank',
     '尿素': '/app/urea',
     '焊條': '/app/welding_rod',
     '滅火器': '/app/fire_extinguisher',

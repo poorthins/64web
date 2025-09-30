@@ -6,8 +6,8 @@ import Toast, { ToastType } from '../../components/Toast'
 import BottomActionBar from '../../components/BottomActionBar'
 import { useEditPermissions } from '../../hooks/useEditPermissions'
 import { useFrontendStatus } from '../../hooks/useFrontendStatus'
-import { commitEvidence, getEntryFiles, EvidenceFile, uploadEvidenceWithEntry } from '../../api/files'
-import { upsertEnergyEntry, UpsertEntryInput, updateEntryStatus, getEntryByPageKeyAndYear } from '../../api/entries'
+import { commitEvidence, getEntryFiles, EvidenceFile, uploadEvidenceWithEntry, deleteEvidenceFile } from '../../api/files'
+import { upsertEnergyEntry, UpsertEntryInput, updateEntryStatus, getEntryByPageKeyAndYear, deleteEnergyEntry } from '../../api/entries'
 import { designTokens } from '../../utils/designTokens'
 import MonthlyProgressGrid, { MonthStatus } from '../../components/MonthlyProgressGrid'
 import { DocumentHandler } from '../../services/documentHandler'
@@ -348,7 +348,7 @@ const NaturalGasPage = () => {
   const addBill = () => {
     const newBill: SimpleBillData = {
       id: Date.now().toString(),
-      paymentMonth: 1,
+      paymentMonth: bills.length + 1,  // 自動設定期數（第1期、第2期...）
       billingStart: '',
       billingEnd: '',
       billingDays: 0,
@@ -374,8 +374,9 @@ const NaturalGasPage = () => {
       errors.push('天然氣熱值應在 8,000 - 12,000 kcal/m³ 範圍內')
     }
 
-    // 檢查熱值佐證文件
-    if (heatValueFiles.length === 0) {
+    // 檢查熱值佐證文件（包含已提交檔案和記憶體暫存檔案）
+    const totalHeatValueFiles = heatValueFiles.length + heatValueMemoryFiles.length
+    if (totalHeatValueFiles === 0) {
       errors.push('請上傳熱值佐證文件')
     }
 
@@ -407,7 +408,10 @@ const NaturalGasPage = () => {
         errors.push(`第${billNum}筆帳單：請輸入計費度數`)
       }
 
-      if (bill.files.length === 0) {
+      // 檢查帳單檔案（包含已提交檔案和記憶體暫存檔案）
+      const billMemoryFilesForThisBill = billMemoryFiles[bill.id] || []
+      const totalBillFiles = bill.files.length + billMemoryFilesForThisBill.length
+      if (totalBillFiles === 0) {
         errors.push(`第${billNum}筆帳單：請上傳帳單檔案`)
       }
     })
@@ -447,20 +451,27 @@ const NaturalGasPage = () => {
         }
       })
 
+      // 準備帳單資料
+      const billData = bills.map(bill => ({
+        id: bill.id,
+        paymentMonth: bill.paymentMonth,
+        billingStartDate: bill.billingStart,
+        billingEndDate: bill.billingEnd,
+        billingDays: bill.billingDays,
+        billingUnits: bill.billingUnits
+      }))
+
       const entryInput: UpsertEntryInput = {
         page_key: pageKey,
         period_year: year,
         unit: 'kcal',
         monthly: monthly,
+        payload: {
+          billData: billData,
+          heatValue: heatValue
+        },
         extraPayload: {
-          billData: bills.map(bill => ({
-            id: bill.id,
-            paymentMonth: bill.paymentMonth,
-            billingStartDate: bill.billingStart,
-            billingEndDate: bill.billingEnd,
-            billingDays: bill.billingDays,
-            billingUnits: bill.billingUnits
-          })),
+          billData: billData, // 向後兼容
           heatValue: heatValue,
           notes: `天然氣用量填報 - ${bills.length}筆帳單，熱值${heatValue}kcal/m³`
         }
@@ -478,7 +489,7 @@ const NaturalGasPage = () => {
           entryId: entry_id,
           pageKey: pageKey,
           year: new Date().getFullYear(),
-          category: 'annual_evidence'
+          category: 'other'
         })
       }
 
@@ -491,7 +502,7 @@ const NaturalGasPage = () => {
             pageKey: pageKey,
             year: new Date().getFullYear(),
             category: 'usage_evidence',
-            month: bills.indexOf(bill) + 1
+            month: bill.paymentMonth // 使用實際的繳費月份而非陣列索引
           })
         }
       }
@@ -504,6 +515,36 @@ const NaturalGasPage = () => {
         entryId: entry_id,
         pageKey: pageKey
       })
+
+      // 重新載入檔案以更新UI顯示
+      try {
+        const updatedFiles = await getEntryFiles(entry_id)
+
+        // 重新載入熱值佐證檔案
+        const newHeatValueFiles = updatedFiles.filter(f =>
+          f.file_type === 'annual_evidence' && f.page_key === pageKey
+        )
+        setHeatValueFiles(newHeatValueFiles)
+
+        // 為每個帳單重新載入對應的檔案
+        const updatedBills = bills.map(bill => ({
+          ...bill,
+          files: updatedFiles.filter(f =>
+            f.file_type === 'usage_evidence' &&
+            f.page_key === pageKey &&
+            f.month === bill.paymentMonth
+          )
+        }))
+        setBills(updatedBills)
+
+        console.log('✅ [NaturalGas] 檔案重新載入完成:', {
+          熱值檔案數量: newHeatValueFiles.length,
+          帳單數量: updatedBills.length,
+          總檔案數: updatedFiles.length
+        })
+      } catch (error) {
+        console.warn('⚠️ [NaturalGas] 檔案重新載入失敗:', error)
+      }
 
       await frontendStatus?.handleSubmitSuccess()
       setHasSubmittedBefore(true)
@@ -543,24 +584,59 @@ const NaturalGasPage = () => {
       currentStatus: frontendStatus?.currentStatus || initialStatus,
       title: '天然氣資料清除',
       message: '確定要清除所有天然氣使用資料嗎？此操作無法復原。',
-      onClear: () => {
+      onClear: async () => {  // 注意要加 async
         setSubmitting(true)
         try {
           console.log('🗑️ [NaturalGasPage] Starting complete clear operation...')
 
-          // 清理記憶體檔案
+          // 新增：真正刪除資料庫記錄和檔案
+          if (currentEntryId) {
+            console.log('🗑️ [NaturalGasPage] Deleting database records and files...')
+
+            // 刪除熱值佐證檔案
+            for (const file of heatValueFiles) {
+              try {
+                await deleteEvidenceFile(file.id)
+                console.log('✅ Deleted heat value file:', file.file_name)
+              } catch (err) {
+                console.warn('Failed to delete file:', err)
+              }
+            }
+
+            // 刪除帳單檔案
+            for (const bill of bills) {
+              for (const file of bill.files) {
+                try {
+                  await deleteEvidenceFile(file.id)
+                  console.log('✅ Deleted bill file:', file.file_name)
+                } catch (err) {
+                  console.warn('Failed to delete file:', err)
+                }
+              }
+            }
+
+            // 刪除能源記錄
+            try {
+              await deleteEnergyEntry(currentEntryId)
+              console.log('✅ Deleted energy entry:', currentEntryId)
+              setCurrentEntryId(null)  // 清空 ID
+              setHasSubmittedBefore(false)  // 重置提交狀態
+            } catch (err) {
+              console.warn('Failed to delete entry:', err)
+            }
+          }
+
+          // 以下是原有的清理記憶體和前端狀態
           setHeatValueMemoryFiles([])
           setBillMemoryFiles({})
-
-          // 原有的清除邏輯保持不變
           setBills([])
-          setHeatValue(9000) // 重設為預設值
-          setHeatValueFiles([]) // 清除熱值佐證文件
+          setHeatValue(9000)
+          setHeatValueFiles([])
           setError(null)
           setShowClearModal(false)
 
           setToast({
-            message: '資料已清除',
+            message: '資料已完全清除',
             type: 'success'
           })
 
@@ -594,44 +670,67 @@ const NaturalGasPage = () => {
           setCurrentEntryId(existingEntry.id)
           setHasSubmittedBefore(true)
 
-          // 載入帳單資料
-          if (existingEntry.extraPayload?.billData && Array.isArray(existingEntry.extraPayload.billData)) {
-            const billDataWithFiles = await Promise.all(
-              existingEntry.extraPayload.billData.map(async (bill: any) => {
-                try {
-                  const files = await getEntryFiles(existingEntry.id)
-                  const associatedFiles = files.filter(f =>
-                    f.file_type === 'usage_evidence' && f.page_key === pageKey
-                  )
+          // 載入帳單資料（從 payload.billData 讀取）
+          const billDataSource = existingEntry.payload?.billData || existingEntry.extraPayload?.billData
+          if (billDataSource && Array.isArray(billDataSource)) {
+            console.log('📊 [NaturalGas] Loading bill data from payload:', {
+              billCount: billDataSource.length,
+              source: existingEntry.payload?.billData ? 'payload' : 'extraPayload'
+            })
 
-                  return {
-                    id: bill.id || Date.now().toString(),
-                    paymentMonth: bill.paymentMonth || 1,
-                    billingStart: bill.billingStartDate || '',
-                    billingEnd: bill.billingEndDate || '',
-                    billingDays: bill.billingDays || 0,
-                    billingUnits: bill.billingUnits || 0,
-                    files: associatedFiles
-                  }
-                } catch {
-                  return bill
+            // 先取得所有檔案
+            const allFiles = await getEntryFiles(existingEntry.id)
+
+            const billDataWithFiles = billDataSource.map((bill: any, index: number) => {
+              try {
+                const correctPaymentMonth = bill.paymentMonth || (index + 1) // 如果沒有就用索引+1
+
+                // 根據繳費月份關聯檔案
+                const associatedFiles = allFiles.filter(f =>
+                  f.file_type === 'usage_evidence' &&
+                  f.page_key === pageKey &&
+                  Number(f.month) === Number(correctPaymentMonth) // 使用修正後的繳費月份關聯檔案
+                )
+
+                return {
+                  id: bill.id || Date.now().toString(),
+                  paymentMonth: correctPaymentMonth,  // 使用修正後的期數
+                  billingStart: bill.billingStartDate || '',
+                  billingEnd: bill.billingEndDate || '',
+                  billingDays: bill.billingDays || 0,
+                  billingUnits: bill.billingUnits || 0,
+                  files: associatedFiles
                 }
-              })
-            )
+              } catch (error) {
+                console.warn(`載入帳單 ${bill.id} 的檔案時發生錯誤:`, error)
+                return {
+                  id: bill.id || Date.now().toString(),
+                  paymentMonth: bill.paymentMonth || (index + 1),  // 如果沒有就用索引+1
+                  billingStart: bill.billingStartDate || '',
+                  billingEnd: bill.billingEndDate || '',
+                  billingDays: bill.billingDays || 0,
+                  billingUnits: bill.billingUnits || 0,
+                  files: []
+                }
+              }
+            })
 
             setBills(billDataWithFiles)
+            console.log('✅ [NaturalGas] Successfully loaded', billDataWithFiles.length, 'bills')
           }
 
-          // 載入熱值
-          if (existingEntry.extraPayload?.heatValue) {
-            setHeatValue(existingEntry.extraPayload.heatValue)
+          // 載入熱值（從 payload.heatValue 讀取）
+          const heatValueSource = existingEntry.payload?.heatValue || existingEntry.extraPayload?.heatValue
+          if (heatValueSource) {
+            setHeatValue(heatValueSource)
+            console.log('✅ [NaturalGas] Heat value loaded:', heatValueSource)
           }
 
           // 載入熱值佐證文件
           try {
             const entryFiles = await getEntryFiles(existingEntry.id)
             const heatValueFiles = entryFiles.filter(f =>
-              f.file_type === 'annual_evidence' && f.page_key === pageKey
+              f.file_type === 'other' && f.month === null
             )
             setHeatValueFiles(heatValueFiles)
           } catch (error) {

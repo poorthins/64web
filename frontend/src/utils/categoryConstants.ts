@@ -10,7 +10,7 @@ export const ENERGY_CATEGORIES = {
     'wd40': { category: 'WD-40', unit: 'ML', scope: 1 },
     'acetylene': { category: '乙炔', unit: 'kg', scope: 1 },
     'refrigerant': { category: '冷媒', unit: 'kg', scope: 1 },
-    'septictank': { category: '化糞池', unit: 'person', scope: 1 },
+    'septic_tank': { category: '化糞池', unit: 'person', scope: 1 }, // Fixed: unified page_key to 'septic_tank'
     'natural_gas': { category: '天然氣', unit: 'm³', scope: 1 },
     'urea': { category: '尿素', unit: 'kg', scope: 1 },
     'diesel_generator': { category: '柴油(發電機)', unit: 'L', scope: 1 },

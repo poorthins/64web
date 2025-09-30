@@ -191,14 +191,9 @@ function AppRouter() {
                   </ErrorBoundary>
                 </UserRoute>
               } />
-              <Route path="septictank" element={
-                <UserRoute energyCategory="septictank">
-                  <SepticTankPage />
-                </UserRoute>
-              } />
-              {/* 添加重定向路由支援底線版本 */}
+              {/* Fixed: unified page_key to 'septic_tank' */}
               <Route path="septic_tank" element={
-                <UserRoute energyCategory="septictank">
+                <UserRoute energyCategory="septic_tank">
                   <SepticTankPage />
                 </UserRoute>
               } />
