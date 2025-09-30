@@ -25,7 +25,7 @@ vi.mock('../../pages/admin/poc/data/mockData', () => ({
       userId: 'user_001',
       userName: '測試用戶',
       userDepartment: '測試部門',
-      categoryId: 'electricity_bill',
+      categoryId: 'electricity',
       categoryName: '外購電力',
       scope: 2,
       status: 'approved',
@@ -53,7 +53,7 @@ vi.mock('../../pages/admin/poc/data/mockData', () => ({
   ],
   energyCategories: [
     { id: 'diesel', name: '柴油', scope: 1 },
-    { id: 'electricity_bill', name: '外購電力', scope: 2 },
+    { id: 'electricity', name: '外購電力', scope: 2 },
     { id: 'employee_commute', name: '員工通勤', scope: 3 }
   ]
 }))
@@ -150,7 +150,7 @@ describe('AdminReviewsAPI', () => {
     })
 
     it('應該在記錄已經被通過時返回失敗', async () => {
-      const result = await api.approveReview('user_001', 'electricity_bill')
+      const result = await api.approveReview('user_001', 'electricity')
 
       expect(result.success).toBe(false)
       expect(result.message).toContain('已經被通過')
@@ -195,7 +195,7 @@ describe('AdminReviewsAPI', () => {
 
       expect(categories).toEqual([
         { id: 'diesel', name: '柴油', scope: 1 },
-        { id: 'electricity_bill', name: '外購電力', scope: 2 },
+        { id: 'electricity', name: '外購電力', scope: 2 },
         { id: 'employee_commute', name: '員工通勤', scope: 3 }
       ])
     })
@@ -212,7 +212,7 @@ describe('AdminReviewsAPI', () => {
       })
       expect(reviews[1]).toMatchObject({
         userId: 'user_001',
-        categoryId: 'electricity_bill'
+        categoryId: 'electricity'
       })
     })
 

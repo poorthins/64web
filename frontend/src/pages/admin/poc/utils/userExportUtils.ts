@@ -95,7 +95,7 @@ export async function simulateUserExport(
       department: user.department,
       phone: '+886-2-1234-5678', // 模擬電話
       targetYear: 2024,
-      activeCategories: ['diesel', 'electricity_bill', 'employee_commute'], // 模擬啟用的類別
+      activeCategories: ['diesel', 'electricity', 'employee_commute'], // 模擬啟用的類別
       accountStatus: user.status === 'approved' ? '啟用' :
                    '停用',
       createdAt: '2024-01-15',

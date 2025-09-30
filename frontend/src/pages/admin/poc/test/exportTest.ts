@@ -18,7 +18,7 @@ export function testSmartFileRenaming() {
     { file: 'sds_information.pdf', category: 'natural_gas', expected: '天然氣_MSDS安全資料表.pdf' },
 
     // 月份檔案測試
-    { file: '03_monthly_usage.jpg', category: 'electricity_bill', expected: '電費單_3月_使用證明.jpg' },
+    { file: '03_monthly_usage.jpg', category: 'electricity', expected: '電費單_3月_使用證明.jpg' },
     { file: 'jan_report.xlsx', category: 'employee_commute', expected: '員工通勤_1月_使用證明.xlsx' },
     { file: 'file_12_bill.png', category: 'lpg', expected: '液化石油氣_12月_帳單.png' },
 

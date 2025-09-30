@@ -56,7 +56,7 @@ const mockUserData = {
   email: 'ming.wang@company.com',
   role: 'user' as const,
   department: '研發部',
-  energyCategories: ['diesel', 'electricity_bill', 'employee_commute'],
+  energyCategories: ['diesel', 'electricity', 'employee_commute'],
   isActive: true,
   createdAt: '2024-01-01',
   lastLogin: '2024-01-15'

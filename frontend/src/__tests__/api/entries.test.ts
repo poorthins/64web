@@ -114,7 +114,7 @@ describe('entries API', () => {
       expect(getCategoryFromPageKey('wd40')).toBe('WD-40')
       expect(getCategoryFromPageKey('acetylene')).toBe('乙炔')
       expect(getCategoryFromPageKey('natural_gas')).toBe('天然氣')
-      expect(getCategoryFromPageKey('electricity_bill')).toBe('外購電力')
+      expect(getCategoryFromPageKey('electricity')).toBe('外購電力')
       expect(getCategoryFromPageKey('employee_commute')).toBe('員工通勤')
     })
 

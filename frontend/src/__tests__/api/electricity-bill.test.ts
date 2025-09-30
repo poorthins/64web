@@ -41,7 +41,7 @@ describe('外購電力 API 測試', () => {
   })
 
   const mockElectricityInput: UpsertEntryInput = {
-    page_key: 'electricity_bill',
+    page_key: 'electricity',
     period_year: 2024,
     unit: 'kWh',
     monthly: {
@@ -112,7 +112,7 @@ describe('外購電力 API 測試', () => {
       expect(insertMock).toHaveBeenCalledWith(
         expect.objectContaining({
           owner_id: 'current-user',
-          page_key: 'electricity_bill',
+          page_key: 'electricity',
           period_year: 2024,
           category: '外購電力',
           unit: 'kWh',
@@ -252,7 +252,7 @@ describe('外購電力 API 測試', () => {
     it('應該正確查詢外購電力記錄', async () => {
       const mockElectricityEntry = {
         id: 'electricity-entry-id',
-        page_key: 'electricity_bill',
+        page_key: 'electricity',
         period_year: 2024,
         unit: 'kWh',
         monthly: { '1': 1500.5, '2': 1800.2 },
@@ -286,7 +286,7 @@ describe('外購電力 API 測試', () => {
 
       mockSupabase.from.mockReturnValue({ select: selectMock })
 
-      const result = await getEntryByPageKeyAndYear('electricity_bill', 2024)
+      const result = await getEntryByPageKeyAndYear('electricity', 2024)
 
       expect(result).toEqual(mockElectricityEntry)
 
@@ -310,7 +310,7 @@ describe('外購電力 API 測試', () => {
 
       mockSupabase.from.mockReturnValue({ select: selectMock })
 
-      const result = await getEntryByPageKeyAndYear('electricity_bill', 2024)
+      const result = await getEntryByPageKeyAndYear('electricity', 2024)
       expect(result).toBeNull()
     })
   })
@@ -400,7 +400,7 @@ describe('外購電力 API 測試', () => {
       const existingEntry = {
         id: 'existing-electricity-id',
         status: 'draft',
-        page_key: 'electricity_bill'
+        page_key: 'electricity'
       }
 
       const selectMock = vi.fn(() => ({
@@ -438,7 +438,7 @@ describe('外購電力 API 測試', () => {
       expect(updateMock).toHaveBeenCalledWith(
         expect.objectContaining({
           owner_id: 'current-user',
-          page_key: 'electricity_bill',
+          page_key: 'electricity',
           period_year: 2024,
           category: '外購電力',
           unit: 'kWh',
@@ -452,7 +452,7 @@ describe('外購電力 API 測試', () => {
       const approvedEntry = {
         id: 'approved-electricity-id',
         status: 'approved',
-        page_key: 'electricity_bill'
+        page_key: 'electricity'
       }
 
       const selectMock = vi.fn(() => ({

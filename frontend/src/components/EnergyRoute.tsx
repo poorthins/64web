@@ -12,7 +12,7 @@ interface EnergyRouteProps {
 const ROUTE_TO_CATEGORY_MAP: Record<string, string> = {
   '/app/wd40': 'wd40',
   '/app/acetylene': 'acetylene',
-  '/app/electricity_bill': 'electricity_bill',
+  '/app/electricity': 'electricity',
   '/app/employee_commute': 'employee_commute',
   '/app/refrigerant': 'refrigerant',
   '/app/septic_tank': 'septic_tank',

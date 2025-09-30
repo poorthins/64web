@@ -146,7 +146,7 @@ const EnhancedSubmissionManagement: React.FC<EnhancedSubmissionManagementProps> 
     '尿素': '/app/urea',
     '焊條': '/app/welding_rod',
     '滅火器': '/app/fire_extinguisher',
-    '外購電力': '/app/electricity_bill',
+    '外購電力': '/app/electricity',
     '員工通勤': '/app/employee_commute'
   }
 

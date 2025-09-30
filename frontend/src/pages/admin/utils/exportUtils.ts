@@ -13,7 +13,7 @@ export const categoryNameMap: Record<string, string> = {
   'coal': '煤炭使用',
 
   // 範疇二
-  'electricity_bill': '電費單',
+  'electricity': '電費單',
   'renewable_energy': '再生能源憑證',
 
   // 範疇三
@@ -371,7 +371,7 @@ export function demonstrateFileRenaming(): void {
     'bill_invoice_123.pdf'
   ]
 
-  const testCategories = ['diesel', 'natural_gas', 'electricity_bill', 'employee_commute']
+  const testCategories = ['diesel', 'natural_gas', 'electricity', 'employee_commute']
 
   console.log('🔄 智慧檔案重新命名展示：')
   console.log('='.repeat(50))

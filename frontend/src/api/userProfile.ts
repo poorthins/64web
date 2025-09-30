@@ -4,7 +4,7 @@ import { validateAuth, handleAPIError } from '../utils/authHelpers'
 // 資料庫 key 轉前端 key
 // Fixed: unified page_key to 'septic_tank'
 const DB_TO_FRONTEND_MAP: Record<string, string> = {
-  'electricity': 'electricity_bill'
+  'electricity': 'electricity'
 };
 
 /**

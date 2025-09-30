@@ -247,7 +247,7 @@ describe('userProfile API', () => {
       expect(result).toHaveProperty('energy_categories')
 
       // 應該轉換為前端格式
-      expect(result?.energy_categories).toEqual(['septic_tank', 'electricity_bill'])
+      expect(result?.energy_categories).toEqual(['septic_tank', 'electricity'])
       expect(result?.energy_categories).not.toContain('septic_tank')
       expect(result?.energy_categories).not.toContain('electricity')
     })
@@ -384,13 +384,13 @@ describe('userProfile API', () => {
       const result = await getCurrentUserPermissions()
 
       expect(result).not.toBeNull()
-      expect(result?.energy_categories).toEqual(['wd40', 'septic_tank', 'natural_gas', 'electricity_bill'])
+      expect(result?.energy_categories).toEqual(['wd40', 'septic_tank', 'natural_gas', 'electricity'])
 
       // 檢查轉換是否正確
       expect(result?.energy_categories).toContain('wd40') // 不需要轉換
       expect(result?.energy_categories).toContain('septic_tank') // septic_tank → septic_tank
       expect(result?.energy_categories).toContain('natural_gas') // 不需要轉換
-      expect(result?.energy_categories).toContain('electricity_bill') // electricity → electricity_bill
+      expect(result?.energy_categories).toContain('electricity') // electricity → electricity
 
       // 檢查原始的資料庫格式不存在
       expect(result?.energy_categories).not.toContain('septic_tank')
@@ -482,7 +482,7 @@ describe('userProfile API', () => {
         .mockReturnValueOnce({ select: selectMock1 })
         .mockReturnValueOnce({ select: selectMock2 })
 
-      const hasElectricityBill = await hasEnergyCategory('electricity_bill')
+      const hasElectricityBill = await hasEnergyCategory('electricity')
       expect(hasElectricityBill).toBe(true)
 
       // Reset mocks for third call - 檢查原始資料庫格式應該檢查失敗
@@ -491,7 +491,7 @@ describe('userProfile API', () => {
         .mockReturnValueOnce({ select: selectMock2 })
 
       const hasElectricity = await hasEnergyCategory('electricity')
-      expect(hasElectricity).toBe(false) // 應該找不到，因為已經轉換成 electricity_bill
+      expect(hasElectricity).toBe(false) // 應該找不到，因為已經轉換成 electricity
     })
 
     it('應該處理用戶沒有能源類別權限的情況', async () => {

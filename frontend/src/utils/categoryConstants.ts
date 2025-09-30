@@ -22,7 +22,7 @@ export const ENERGY_CATEGORIES = {
   },
   // 範疇二 - 能源間接溫室氣體排放
   scope2: {
-    'electricity_bill': { category: '外購電力', unit: 'kWh', scope: 2 }
+    'electricity': { category: '外購電力', unit: 'kWh', scope: 2 }
   },
   // 範疇三 - 其他間接溫室氣體排放
   scope3: {
@@ -77,6 +77,6 @@ export function isValidCategory(category: string): boolean {
 export const TEST_CATEGORIES = {
   WD40: { category: 'WD-40', page_key: 'wd40', unit: 'ML', scope: 1 },
   ACETYLENE: { category: '乙炔', page_key: 'acetylene', unit: 'kg', scope: 1 },
-  ELECTRICITY: { category: '外購電力', page_key: 'electricity_bill', unit: 'kWh', scope: 2 },
+  ELECTRICITY: { category: '外購電力', page_key: 'electricity', unit: 'kWh', scope: 2 },
   COMMUTE: { category: '員工通勤', page_key: 'employee_commute', unit: 'person-km', scope: 3 }
 } as const

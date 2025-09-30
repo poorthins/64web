@@ -313,7 +313,7 @@ describe('adminUsers API', () => {
           data: [
             { page_key: 'wd40' },
             { page_key: 'diesel' },
-            { page_key: 'electricity_bill' }
+            { page_key: 'electricity' }
           ],
           error: null
         }))
@@ -328,7 +328,7 @@ describe('adminUsers API', () => {
       expect(result).toBeInstanceOf(Array)
       expect(result).toContain('wd')  // The regex extracts 'wd' from 'wd40'
       expect(result).toContain('diesel')
-      expect(result).toContain('electricity_bill')
+      expect(result).toContain('electricity')
     })
 
     it('應該處理沒有填報記錄的情況', async () => {

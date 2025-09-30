@@ -43,7 +43,7 @@ const energyCategories = [
   { id: 'lpg', name: '液化石油氣' },
   { id: 'fire_extinguisher', name: '滅火器' },
   { id: 'welding_rod', name: '焊條' },
-  { id: 'electricity_bill', name: '外購電力' },
+  { id: 'electricity', name: '外購電力' },
   { id: 'employee_commute', name: '員工通勤' }
 ]
 
@@ -91,7 +91,7 @@ const AdminDashboard: React.FC = () => {
     'lpg': '/app/lpg',
     'fire_extinguisher': '/app/fire_extinguisher',
     'welding_rod': '/app/welding_rod',
-    'electricity_bill': '/app/electricity_bill',
+    'electricity': '/app/electricity',
     'employee_commute': '/app/employee_commute'
   }
 

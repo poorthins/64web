@@ -50,7 +50,7 @@ const ElectricityBillPage = () => {
   const [showSuccessModal, setShowSuccessModal] = useState(false)
   const [showClearModal, setShowClearModal] = useState(false)
 
-  const pageKey = 'electricity_bill'
+  const pageKey = 'electricity'
 
   // 前端狀態管理
   const frontendStatus = useFrontendStatus({

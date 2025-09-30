@@ -16,14 +16,14 @@ vi.mock('../../utils/energyCategories', () => ({
   ALL_ENERGY_CATEGORIES: [
     'wd40', 'acetylene', 'refrigerant', 'septic_tank', 'natural_gas',
     'urea', 'diesel_generator', 'diesel', 'gasoline', 'lpg',
-    'fire_extinguisher', 'welding_rod', 'electricity_bill', 'employee_commute'
+    'fire_extinguisher', 'welding_rod', 'electricity', 'employee_commute'
   ],
   ENERGY_CATEGORIES_BY_SCOPE: {
     scope1: [
       'wd40', 'acetylene', 'refrigerant', 'septic_tank', 'natural_gas', 'urea',
       'diesel_generator', 'diesel', 'gasoline', 'lpg', 'fire_extinguisher', 'welding_rod'
     ],
-    scope2: ['electricity_bill'],
+    scope2: ['electricity'],
     scope3: ['employee_commute']
   }
 }))
@@ -73,7 +73,7 @@ describe('外購電力權限檢查測試', () => {
       })
 
       // 測試前端格式檢查
-      expect(result.current.hasPermissionSync('electricity_bill')).toBe(true)
+      expect(result.current.hasPermissionSync('electricity')).toBe(true)
 
       // 測試資料庫格式檢查
       expect(result.current.hasPermissionSync('electricity')).toBe(true)
@@ -97,7 +97,7 @@ describe('外購電力權限檢查測試', () => {
       })
 
       // 應該沒有外購電力權限
-      expect(result.current.hasPermissionSync('electricity_bill')).toBe(false)
+      expect(result.current.hasPermissionSync('electricity')).toBe(false)
       expect(result.current.hasPermissionSync('electricity')).toBe(false)
     })
 
@@ -106,7 +106,7 @@ describe('外購電力權限檢查測試', () => {
         id: 'user-3',
         display_name: '格式轉換測試',
         role: 'user',
-        energy_categories: ['electricity_bill'], // 前端格式存在資料庫中
+        energy_categories: ['electricity'], // 前端格式存在資料庫中
         target_year: 2024,
         diesel_generator_version: 'refuel',
         is_active: true
@@ -119,7 +119,7 @@ describe('外購電力權限檢查測試', () => {
       })
 
       // 兩種格式都應該有權限
-      expect(result.current.hasPermissionSync('electricity_bill')).toBe(true)
+      expect(result.current.hasPermissionSync('electricity')).toBe(true)
       expect(result.current.hasPermissionSync('electricity')).toBe(true)
     })
   })
@@ -141,7 +141,7 @@ describe('外購電力權限檢查測試', () => {
       })
 
       // 管理員應該有所有權限
-      expect(result.current.hasPermissionSync('electricity_bill')).toBe(true)
+      expect(result.current.hasPermissionSync('electricity')).toBe(true)
       expect(result.current.hasPermissionSync('electricity')).toBe(true)
       expect(result.current.hasPermissionSync('wd40')).toBe(true)
       expect(result.current.hasPermissionSync('employee_commute')).toBe(true)
@@ -234,9 +234,9 @@ describe('外購電力權限檢查測試', () => {
         expect(result.current.isLoading).toBe(false)
       })
 
-      const hasPermission = await result.current.hasPermission('electricity_bill')
+      const hasPermission = await result.current.hasPermission('electricity')
       expect(hasPermission).toBe(true)
-      expect(mockHasEnergyCategory).toHaveBeenCalledWith('electricity_bill')
+      expect(mockHasEnergyCategory).toHaveBeenCalledWith('electricity')
     })
 
     it('應該處理 API 檢查失敗', async () => {
@@ -248,7 +248,7 @@ describe('外購電力權限檢查測試', () => {
         expect(result.current.isLoading).toBe(false)
       })
 
-      const hasPermission = await result.current.hasPermission('electricity_bill')
+      const hasPermission = await result.current.hasPermission('electricity')
       expect(hasPermission).toBe(false)
     })
   })
@@ -277,13 +277,13 @@ describe('外購電力權限檢查測試', () => {
         expect(result.current.isLoading).toBe(false)
       })
 
-      const allCategories = ['wd40', 'electricity_bill', 'diesel', 'employee_commute']
+      const allCategories = ['wd40', 'electricity', 'diesel', 'employee_commute']
       const filteredCategories = result.current.filterByPermissions(
         allCategories,
         (item) => item
       )
 
-      expect(filteredCategories).toEqual(['wd40', 'electricity_bill'])
+      expect(filteredCategories).toEqual(['wd40', 'electricity'])
     })
 
     it('管理員應該看到所有項目', async () => {
@@ -299,7 +299,7 @@ describe('外購電力權限檢查測試', () => {
         expect(result.current.isLoading).toBe(false)
       })
 
-      const allCategories = ['wd40', 'electricity_bill', 'diesel', 'employee_commute']
+      const allCategories = ['wd40', 'electricity', 'diesel', 'employee_commute']
       const filteredCategories = result.current.filterByPermissions(
         allCategories,
         (item) => item

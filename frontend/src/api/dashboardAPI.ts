@@ -4,7 +4,7 @@ import { validateAuth, handleAPIError } from '../utils/authHelpers'
 // 資料庫 key 轉前端 key 的映射
 // Fixed: unified page_key to 'septic_tank'
 const DB_TO_FRONTEND_MAP: Record<string, string> = {
-  'electricity': 'electricity_bill'
+  'electricity': 'electricity'
 }
 
 /**
@@ -83,7 +83,7 @@ const allCategories = [
   { pageKey: 'lpg', title: '液化石油氣', category: '範疇一', scope: '直接排放' },
   { pageKey: 'fire_extinguisher', title: '滅火器', category: '範疇一', scope: '直接排放' },
   { pageKey: 'welding_rod', title: '焊條', category: '範疇一', scope: '直接排放' },
-  { pageKey: 'electricity_bill', title: '外購電力', category: '範疇二', scope: '間接排放' },
+  { pageKey: 'electricity', title: '外購電力', category: '範疇二', scope: '間接排放' },
   { pageKey: 'employee_commute', title: '員工通勤', category: '範疇三', scope: '其他間接' }
 ]
 
@@ -100,7 +100,7 @@ const titleMap: Record<string, string> = {
   'lpg': '液化石油氣',
   'fire_extinguisher': '滅火器',
   'welding_rod': '焊條',
-  'electricity_bill': '外購電力',
+  'electricity': '外購電力',
   'employee_commute': '員工通勤'
 }
 

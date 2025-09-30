@@ -174,8 +174,8 @@ function AppRouter() {
                   <AcetylenePage />
                 </UserRoute>
               } />
-              <Route path="electricity_bill" element={
-                <UserRoute energyCategory="electricity_bill">
+              <Route path="electricity" element={
+                <UserRoute energyCategory="electricity">
                   <ElectricityBillPage />
                 </UserRoute>
               } />

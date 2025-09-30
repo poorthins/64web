@@ -182,7 +182,7 @@ const ReviewPage: React.FC = () => {
           </div>
         )
 
-      case 'electricity_bill':
+      case 'electricity':
         return (
           <div className="space-y-6">
             {baseInfo}

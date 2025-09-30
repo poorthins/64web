@@ -164,7 +164,7 @@ export const energyCategories: EnergyCategory[] = [
   { id: 'welding_rod', name: '焊條', scope: 1 },
 
   // 範疇二
-  { id: 'electricity_bill', name: '外購電力', scope: 2 },
+  { id: 'electricity', name: '外購電力', scope: 2 },
 
   // 範疇三
   { id: 'employee_commute', name: '員工通勤', scope: 3 }
@@ -233,7 +233,7 @@ export const mockSubmissions: SubmissionRecord[] = [
     userId: '2',
     userName: '李美華',
     userDepartment: '行銷部',
-    categoryId: 'electricity_bill',
+    categoryId: 'electricity',
     categoryName: '外購電力',
     scope: 2,
     status: 'submitted',
@@ -332,7 +332,7 @@ export const mockSubmissions: SubmissionRecord[] = [
     userId: '8',
     userName: '楊雅琪',
     userDepartment: '品管部',
-    categoryId: 'electricity_bill',
+    categoryId: 'electricity',
     categoryName: '外購電力',
     scope: 2,
     status: 'approved',
@@ -417,7 +417,7 @@ export const mockSubmissions: SubmissionRecord[] = [
     userId: '5',
     userName: '林俊傑',
     userDepartment: '業務部',
-    categoryId: 'electricity_bill',
+    categoryId: 'electricity',
     categoryName: '外購電力',
     scope: 2,
     status: 'submitted',
@@ -564,7 +564,7 @@ export const mockSubmissions: SubmissionRecord[] = [
     userId: '6',
     userName: '黃詩涵',
     userDepartment: '設計部',
-    categoryId: 'electricity_bill',
+    categoryId: 'electricity',
     categoryName: '外購電力',
     scope: 2,
     status: 'submitted',

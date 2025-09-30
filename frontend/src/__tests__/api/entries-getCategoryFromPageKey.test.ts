@@ -59,7 +59,7 @@ describe('getCategoryFromPageKey API測試', () => {
       { pageKey: 'lpg', expected: '液化石油氣' },
       { pageKey: 'fire_extinguisher', expected: '滅火器' },
       { pageKey: 'welding_rod', expected: '焊條' },
-      { pageKey: 'electricity_bill', expected: '外購電力' },
+      { pageKey: 'electricity', expected: '外購電力' },
       { pageKey: 'employee_commute', expected: '員工通勤' }
     ]
 

@@ -150,7 +150,7 @@ export const handlers = [
       const mockEntries = [
         { owner_id: userId, page_key: 'wd40' },
         { owner_id: userId, page_key: 'diesel' },
-        { owner_id: userId, page_key: 'electricity_bill' }
+        { owner_id: userId, page_key: 'electricity' }
       ]
       return HttpResponse.json(mockEntries)
     }

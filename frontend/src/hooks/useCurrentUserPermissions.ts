@@ -6,12 +6,12 @@ import { ALL_ENERGY_CATEGORIES, ENERGY_CATEGORIES_BY_SCOPE, EnergyCategory } fro
 // 雙向格式轉換映射表
 // Fixed: unified page_key to 'septic_tank'
 const DB_TO_FRONTEND_MAP: Record<string, string> = {
-  'electricity': 'electricity_bill',
+  'electricity': 'electricity',
   'diesel_generator': 'diesel_generator' // 柴油發電機保持一致
 };
 
 const FRONTEND_TO_DB_MAP: Record<string, string> = {
-  'electricity_bill': 'electricity',
+  'electricity': 'electricity',
   'diesel_generator': 'diesel_generator' // 柴油發電機保持一致
 };
 

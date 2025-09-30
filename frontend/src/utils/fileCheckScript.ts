@@ -46,14 +46,8 @@ const PAGE_REQUIREMENTS: Record<string, PageRequirement> = {
     requireMultiple: false,
     maxUploadTime: 3000
   },
-  'diesel_generator_test': {
-    name: '柴油發電機_測試',
-    requireOverwrite: false,
-    requireMultiple: true,
-    maxUploadTime: 5000
-  },
-  'diesel_generator_actual': {
-    name: '柴油發電機_實際',
+  'diesel_generator': {
+    name: '柴油發電機',
     requireOverwrite: false,
     requireMultiple: true,
     maxUploadTime: 5000
@@ -88,7 +82,7 @@ const PAGE_REQUIREMENTS: Record<string, PageRequirement> = {
     requireMultiple: false,
     maxUploadTime: 3000
   },
-  'electricity_bill': {
+  'electricity': {
     name: '電力',
     requireOverwrite: false,
     requireMultiple: false,

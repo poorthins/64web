@@ -12,7 +12,7 @@ export const ALL_ENERGY_CATEGORIES = [
   'lpg',
   'fire_extinguisher',
   'welding_rod',
-  'electricity_bill',
+  'electricity',
   'employee_commute'
 ] as const
 
@@ -22,7 +22,7 @@ export const ENERGY_CATEGORIES_BY_SCOPE = {
     'wd40', 'acetylene', 'refrigerant', 'septic_tank', 'natural_gas', 'urea',
     'diesel_generator', 'diesel', 'gasoline', 'lpg', 'fire_extinguisher', 'welding_rod'
   ],
-  scope2: ['electricity_bill'],
+  scope2: ['electricity'],
   scope3: ['employee_commute']
 } as const
 
@@ -49,7 +49,7 @@ export const CATEGORY_TO_SCOPE_MAP: Record<string, keyof typeof ENERGY_CATEGORIE
   fire_extinguisher: 'scope1',
   welding_rod: 'scope1',
   // 範疇二
-  electricity_bill: 'scope2',
+  electricity: 'scope2',
   // 範疇三
   employee_commute: 'scope3'
 }

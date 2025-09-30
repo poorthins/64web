@@ -332,13 +332,13 @@ describe('ReviewPage', () => {
       const electricityData = {
         ...mockReviewData,
         category: {
-          id: 'electricity_bill',
+          id: 'electricity',
           name: '外購電力',
           scope: 2 as const
         },
         submission: {
           ...mockReviewData.submission,
-          categoryId: 'electricity_bill',
+          categoryId: 'electricity',
           categoryName: '外購電力'
         }
       }
@@ -346,7 +346,7 @@ describe('ReviewPage', () => {
       const mockGetReviewData = vi.spyOn(adminReviewsAPI.adminReviewsAPI, 'getReviewData')
       mockGetReviewData.mockResolvedValue(electricityData)
 
-      mockParams.category = 'electricity_bill'
+      mockParams.category = 'electricity'
 
       render(
         <TestWrapper>

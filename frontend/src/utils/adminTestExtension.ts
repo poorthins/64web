@@ -96,7 +96,7 @@ const PAGE_REQUIREMENTS: Record<string, any> = {
   'lpg': { name: '液化石油氣', requireOverwrite: false, requireMultiple: false, maxUploadTime: 3000 },
   'fire_extinguisher': { name: '滅火器', requireOverwrite: false, requireMultiple: false, maxUploadTime: 3000 },
   'welding_rod': { name: '焊條', requireOverwrite: false, requireMultiple: false, maxUploadTime: 3000 },
-  'electricity_bill': { name: '電力', requireOverwrite: false, requireMultiple: false, maxUploadTime: 3000 },
+  'electricity': { name: '電力', requireOverwrite: false, requireMultiple: false, maxUploadTime: 3000 },
   'employee_commute': { name: '通勤', requireOverwrite: false, requireMultiple: false, maxUploadTime: 3000 }
 };
 

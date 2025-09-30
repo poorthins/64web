@@ -89,7 +89,7 @@ const EditUserPOC: React.FC = () => {
           password: '', // 空白表示不更改密碼，輸入新密碼則更新
           company: '示例科技有限公司',
           targetYear: 2024,
-          energyCategories: ['diesel', 'electricity_bill', 'employee_commute'], // 模擬已選擇的類別
+          energyCategories: ['diesel', 'electricity', 'employee_commute'], // 模擬已選擇的類別
           dieselGeneratorVersion: undefined,
           isActive: true
         }

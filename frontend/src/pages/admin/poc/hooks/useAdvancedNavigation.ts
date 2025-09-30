@@ -87,7 +87,7 @@ export const useAdvancedNavigation = (options: AdvancedNavigationOptions = {}) =
           key: '1',
           altKey: true,
           shiftKey: true,
-          action: () => navigate(`/app/admin/poc/users/${userId}/review/electricity_bill`),
+          action: () => navigate(`/app/admin/poc/users/${userId}/review/electricity`),
           description: 'Alt+Shift+1: 審核外購電力',
           preventDefault: true
         },
@@ -139,7 +139,7 @@ export const useAdvancedNavigation = (options: AdvancedNavigationOptions = {}) =
             const categories = [
               'wd40', 'acetylene', 'refrigerant', 'septic_tank', 'natural_gas', 'urea',
               'diesel_generator', 'diesel', 'gasoline', 'lpg', 'fire_extinguisher', 'welding_rod',
-              'electricity_bill', 'employee_commute'
+              'electricity', 'employee_commute'
             ]
             const currentIndex = categories.indexOf(category)
             const nextIndex = (currentIndex + 1) % categories.length
@@ -157,7 +157,7 @@ export const useAdvancedNavigation = (options: AdvancedNavigationOptions = {}) =
             const categories = [
               'wd40', 'acetylene', 'refrigerant', 'septic_tank', 'natural_gas', 'urea',
               'diesel_generator', 'diesel', 'gasoline', 'lpg', 'fire_extinguisher', 'welding_rod',
-              'electricity_bill', 'employee_commute'
+              'electricity', 'employee_commute'
             ]
             const currentIndex = categories.indexOf(category)
             const prevIndex = currentIndex === 0 ? categories.length - 1 : currentIndex - 1
@@ -259,7 +259,7 @@ export const getCategoryDisplayName = (categoryId: string): string => {
     lpg: '液化石油氣',
     fire_extinguisher: '滅火器',
     welding_rod: '焊條',
-    electricity_bill: '外購電力',
+    electricity: '外購電力',
     employee_commute: '員工通勤'
   }
 
