@@ -163,7 +163,7 @@ async function uploadEvidenceWithValidation(file: File, meta: FileMetadata & { e
         .eq('energy_entries.page_key', meta.pageKey)
         .eq('energy_entries.owner_id', user.id)
         .eq('energy_entries.period_year', meta.year)
-        .eq('energy_entries.status', 'draft')
+        .eq('energy_entries.status', 'submitted')
 
       const { data: existingFiles, error: queryError } = await existingFileQuery
 
@@ -302,7 +302,7 @@ async function uploadEvidenceWithValidation(file: File, meta: FileMetadata & { e
         throw new Error('檔案上傳必須關聯到現有的能源記錄')
       }
       
-      // 嘗試尋找現有的草稿記錄
+      // 嘗試尋找現有的已提交記錄
       // 根據資料庫唯一約束，使用 category 而不是 page_key 查詢
       const categoryInfo = getCategoryInfo(meta.pageKey)
       const { data: existingEntry } = await supabase
@@ -311,7 +311,7 @@ async function uploadEvidenceWithValidation(file: File, meta: FileMetadata & { e
         .eq('owner_id', user.id)
         .eq('category', categoryInfo.category)
         .eq('period_year', meta.year)
-        .eq('status', 'draft')
+        .eq('status', 'submitted')
         .maybeSingle()
       
       if (!existingEntry) {
@@ -334,7 +334,7 @@ async function uploadEvidenceWithValidation(file: File, meta: FileMetadata & { e
             scope: categoryInfo.scope,
             unit: categoryInfo.unit,
             amount: 0.00001, // 預設為最小值避免 amount > 0 約束錯誤
-            status: 'draft',
+            status: 'submitted',
             period_start: `${meta.year}-01-01`,
             period_end: `${meta.year}-12-31`,
             payload: {}
@@ -360,7 +360,7 @@ async function uploadEvidenceWithValidation(file: File, meta: FileMetadata & { e
             .eq('owner_id', user.id)
             .eq('category', categoryInfo.category)
             .eq('period_year', meta.year)
-            .eq('status', 'draft')
+            .eq('status', 'submitted')
             .maybeSingle()
           
           if (queryError) {
@@ -484,7 +484,7 @@ export async function listEvidenceByCategory(
       .eq('owner_id', user.id)
       .eq('energy_entries.page_key', pageKey)
       .eq('energy_entries.owner_id', user.id)
-      .in('energy_entries.status', ['draft', 'submitted'])
+      .in('energy_entries.status', ['submitted'])
       .order('created_at', { ascending: false })
 
     // 根據類別和月份過濾檔案路徑
@@ -691,7 +691,7 @@ export async function listEvidence(pageKey: string): Promise<EvidenceFile[]> {
       .eq('owner_id', user.id)
       .eq('energy_entries.page_key', pageKey)
       .eq('energy_entries.owner_id', user.id)
-      .in('energy_entries.status', ['draft', 'submitted'])
+      .in('energy_entries.status', ['submitted'])
       .order('created_at', { ascending: false })
 
     const { data, error } = await query
@@ -1128,7 +1128,7 @@ export async function commitEvidence(params: { entryId?: string; pageKey: string
       .eq('owner_id', user.id)
       .eq('energy_entries.page_key', params.pageKey)
       .eq('energy_entries.owner_id', user.id)
-      .in('energy_entries.status', ['draft', 'submitted'])
+      .in('energy_entries.status', ['submitted'])
       
 
     console.log('Files to commit:', {

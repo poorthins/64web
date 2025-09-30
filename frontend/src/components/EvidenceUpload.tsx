@@ -6,6 +6,16 @@ import { MemoryFile } from '../services/documentHandler'
 
 export type { MemoryFile }
 
+// 處理中文檔名的預覽 - 安全建立預覽 URL
+const createSafePreviewUrl = (file: File): string | null => {
+  try {
+    return URL.createObjectURL(file)
+  } catch (error) {
+    console.warn('預覽載入失敗:', file.name, error)
+    return null // 顯示預設圖示代替預覽
+  }
+}
+
 // 檔案去重工具函數
 function deduplicateFilesByID(files: EvidenceFile[], context: string = ''): EvidenceFile[] {
   const deduplicated = Array.from(
@@ -156,14 +166,10 @@ const EvidenceUpload: React.FC<EvidenceUploadProps> = ({
       const newMemoryFiles: MemoryFile[] = []
 
       for (const file of Array.from(selectedFiles)) {
-        // 生成預覽URL
+        // 生成預覽URL - 使用安全函數處理中文檔名
         let preview = ''
         if (file.type.startsWith('image/')) {
-          try {
-            preview = URL.createObjectURL(file)
-          } catch (previewError) {
-            console.warn('Failed to create preview for image:', previewError)
-          }
+          preview = createSafePreviewUrl(file) || ''
         }
 
         const memoryFile: MemoryFile = {
