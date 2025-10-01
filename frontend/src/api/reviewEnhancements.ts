@@ -290,28 +290,39 @@ export async function reviewEntry(
 
     console.log('5. 執行更新（不限制原始狀態）');
 
-    const { data, error, count } = await supabase
+    // 執行更新前，先確認記錄存在
+    console.log('準備更新的 ID:', entryId);
+
+    const { data: checkData, error: checkError } = await supabase
+      .from('energy_entries')
+      .select('id, status, owner_id')
+      .eq('id', entryId);
+
+    console.log('查詢結果:', { checkData, checkError });
+
+    if (!checkData || checkData.length === 0) {
+      throw new Error(`找不到記錄 ID: ${entryId}`);
+    }
+
+    // 然後才執行更新
+    const { data, error } = await supabase
       .from('energy_entries')
       .update(updateData)
-      .eq('id', entryId)  // 只根據 ID 更新，不檢查狀態
+      .eq('id', entryId)
       .select();
 
-    console.log('更新結果:', {
-      success: !error,
-      data: data,
-      error: error,
-      count: count
-    });
-
+    // 檢查是否成功
     if (error) {
       console.error('❌ Supabase 錯誤:', error);
       throw error;
     }
 
-    if (!data || data.length === 0) {
+    if (!data || !Array.isArray(data) || data.length === 0) {
       console.error('❌ 沒有更新任何記錄');
       throw new Error('沒有找到或更新指定的記錄');
     }
+
+    console.log('✅ 更新成功，受影響記錄:', data[0]);
 
     console.log('✅ 更新成功');
 

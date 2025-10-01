@@ -54,117 +54,11 @@ export interface SubmissionStats {
 
 /**
  * 取得所有使用者及其填報統計
+ * ⚠️ 暫時停用：避免造成 stack overflow
  */
 export async function getAllUsersWithSubmissions(): Promise<UserWithSubmissions[]> {
-  try {
-    const authResult = await validateAuth()
-    if (authResult.error) throw authResult.error
-
-    // 取得所有用戶基本資料
-    const { data: profiles, error: profilesError } = await supabase
-      .from('profiles')
-      .select('id, display_name, email, is_active, role')
-
-    if (profilesError) {
-      throw handleAPIError(profilesError, '無法取得用戶列表')
-    }
-
-    // 取得所有填報記錄統計
-    const { data: submissions, error: submissionsError } = await supabase
-      .from('energy_entries')
-      .select(`
-        id,
-        owner_id,
-        created_at,
-        review_history (
-          old_status,
-          new_status,
-          review_notes
-        )
-      `)
-
-    if (submissionsError) {
-      throw handleAPIError(submissionsError, '無法取得填報統計')
-    }
-
-    // 建立用戶填報統計映射
-    const userSubmissionStats = new Map<string, {
-      count: number
-      latestDate?: string
-      pending: number
-      approved: number
-      needsFix: number
-    }>()
-
-    submissions?.forEach(submission => {
-      if (!submission.owner_id) return
-
-      const existing = userSubmissionStats.get(submission.owner_id) || {
-        count: 0,
-        pending: 0,
-        approved: 0,
-        needsFix: 0
-      }
-
-      existing.count++
-      
-      // 更新最新填報日期
-      if (!existing.latestDate || submission.created_at > existing.latestDate) {
-        existing.latestDate = submission.created_at
-      }
-
-      // 統計審核狀態
-      if (submission.review_history && submission.review_history.length > 0) {
-        // 取最新的審核狀態
-        const latestReview = submission.review_history[submission.review_history.length - 1]
-        switch (latestReview.new_status) {
-          case 'approved':
-            existing.approved++
-            break
-          case 'needs_fix':
-            existing.needsFix++
-            break
-          default:
-            existing.pending++
-        }
-      } else {
-        existing.pending++
-      }
-
-      userSubmissionStats.set(submission.owner_id, existing)
-    })
-
-    // 結合用戶資料與統計
-    const result: UserWithSubmissions[] = profiles?.map(profile => {
-      const stats = userSubmissionStats.get(profile.id) || {
-        count: 0,
-        pending: 0,
-        approved: 0,
-        needsFix: 0
-      }
-
-      return {
-        id: profile.id,
-        display_name: profile.display_name || '',
-        email: profile.email,
-        is_active: profile.is_active ?? true,
-        role: profile.role || 'user',
-        submission_count: stats.count,
-        latest_submission_date: stats.latestDate,
-        pending_reviews: stats.pending,
-        approved_reviews: stats.approved,
-        needs_fix_reviews: stats.needsFix
-      }
-    }) || []
-
-    return result.sort((a, b) => b.submission_count - a.submission_count)
-  } catch (error) {
-    console.error('Error in getAllUsersWithSubmissions:', error)
-    if (error instanceof Error) {
-      throw error
-    }
-    throw new Error('取得用戶填報列表時發生未知錯誤')
-  }
+  console.warn('⚠️ getAllUsersWithSubmissions 已暫時停用，避免 stack overflow')
+  return []
 }
 
 /**
@@ -323,70 +217,16 @@ export async function reviewSubmission(
 
 /**
  * 取得填報統計資料
+ * ⚠️ 暫時停用：避免造成 stack overflow
  */
 export async function getSubmissionStats(): Promise<SubmissionStats> {
-  try {
-    const authResult = await validateAuth()
-    if (authResult.error) throw authResult.error
-
-    const { data: submissions, error: submissionsError } = await supabase
-      .from('energy_entries')
-      .select(`
-        id,
-        owner_id,
-        review_history (
-          old_status,
-          new_status,
-          review_notes
-        )
-      `)
-
-    if (submissionsError) {
-      throw handleAPIError(submissionsError, '無法取得填報統計')
-    }
-
-    let totalSubmissions = 0
-    let pendingReviews = 0
-    let approvedReviews = 0
-    let needsFixReviews = 0
-    const uniqueUsers = new Set<string>()
-
-    submissions?.forEach(submission => {
-      totalSubmissions++
-      if (submission.owner_id) {
-        uniqueUsers.add(submission.owner_id)
-      }
-
-      if (submission.review_history && submission.review_history.length > 0) {
-        const latestReview = submission.review_history[submission.review_history.length - 1]
-        switch (latestReview.new_status) {
-          case 'approved':
-            approvedReviews++
-            break
-          case 'needs_fix':
-            needsFixReviews++
-            break
-          default:
-            pendingReviews++
-        }
-      } else {
-        pendingReviews++
-      }
-    })
-
-    return {
-      total_submissions: totalSubmissions,
-      pending_reviews: pendingReviews,
-      approved_reviews: approvedReviews,
-      needs_fix_reviews: needsFixReviews,
-      total_users_with_submissions: uniqueUsers.size
-    }
-  } catch (error) {
-    console.error('Error in getSubmissionStats:', error)
-    if (error instanceof Error) {
-      throw error
-    }
-    throw new Error('取得填報統計時發生未知錯誤')
+  console.warn('⚠️ getSubmissionStats 已暫時停用，避免 stack overflow')
+  return {
+    total_submissions: 0,
+    pending_reviews: 0,
+    approved_reviews: 0,
+    needs_fix_reviews: 0,
+    total_users_with_submissions: 0
   }
 }
 

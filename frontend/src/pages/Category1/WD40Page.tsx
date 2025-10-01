@@ -26,7 +26,7 @@ import { MemoryFile } from '../../components/EvidenceUpload'
 import ReviewSection from '../../components/ReviewSection'
 import { useSubmissions } from '../admin/hooks/useSubmissions'
 
-import { upsertEnergyEntry, sumMonthly, UpsertEntryInput, updateEntryStatus, getEntryByPageKeyAndYear, getEntryById } from '../../api/entries'
+import { upsertEnergyEntry, sumMonthly, UpsertEntryInput, updateEntryStatus, getEntryByPageKeyAndYear, getEntryById, deleteEnergyEntry } from '../../api/entries'
 import { supabase } from '../../lib/supabaseClient'
 import { designTokens } from '../../utils/designTokens'
 import { debugRLSOperation, diagnoseAuthState } from '../../utils/authDiagnostics'
@@ -206,6 +206,30 @@ const WD40Page = () => {
   useEffect(() => {
     const loadData = async () => {
       try {
+        // === 診斷程式碼開始 ===
+        console.log('🔍 [WD40] loadData 開始執行', {
+          pageKey: 'wd40',
+          year,
+          timestamp: new Date().toISOString()
+        })
+
+        const { data: { user } } = await supabase.auth.getUser()
+        console.log('👤 [WD40] 當前用戶:', user?.id)
+
+        const { data: rawData, error: rawError } = await supabase
+          .from('energy_entries')
+          .select('*')
+          .eq('page_key', 'wd40')
+          .eq('owner_id', user?.id)
+          .eq('period_year', year)
+
+        console.log('📊 [WD40] 查詢結果:', {
+          找到記錄數: rawData?.length || 0,
+          錯誤訊息: rawError?.message || null,
+          第一筆資料: rawData?.[0] || null
+        })
+        // === 診斷程式碼結束 ===
+
         setLoading(true)
         setError(null)
 
@@ -993,18 +1017,46 @@ const WD40Page = () => {
       currentStatus: currentStatus,
       title: 'WD-40資料清除',
       message: '確定要清除所有WD-40使用資料嗎？此操作無法復原。',
-      onClear: () => {
+      onClear: async () => {
         setClearLoading(true)
         try {
           console.log('🗑️ [WD40Page] Starting complete clear operation...')
 
-          // 清理記憶體檔案
+          // 1. 刪除所有檔案
+          if (currentEntryId) {
+            const allFiles = [...msdsFiles]
+            monthlyData.forEach(data => {
+              allFiles.push(...data.files)
+            })
+
+            console.log('🗑️ [WD40Page] Deleting files:', allFiles.length)
+            for (const file of allFiles) {
+              try {
+                await deleteEvidenceFile(file.id)
+                console.log('✅ Deleted file:', file.file_name)
+              } catch (err) {
+                console.warn('Failed to delete file:', err)
+              }
+            }
+
+            // 2. 刪除能源記錄
+            try {
+              await deleteEnergyEntry(currentEntryId)
+              console.log('✅ Deleted energy entry:', currentEntryId)
+              setCurrentEntryId(null)
+              setHasSubmittedBefore(false)
+            } catch (err) {
+              console.warn('Failed to delete entry:', err)
+            }
+          }
+
+          // 3. 清理記憶體檔案
           DocumentHandler.clearAllMemoryFiles(msdsMemoryFiles)
           monthlyMemoryFiles.forEach(memFiles => {
             DocumentHandler.clearAllMemoryFiles(memFiles)
           })
 
-          // 原有的清除邏輯保持不變
+          // 4. 清除前端狀態
           setUnitCapacity(0)
           setCarbonRate(0)
           handleMsdsFilesChange([])
@@ -1017,12 +1069,11 @@ const WD40Page = () => {
             files: []
           })))
 
-          setHasSubmittedBefore(false)
           setError(null)
           setSuccess(null)
           setShowClearConfirmModal(false)
 
-          setSuccess('資料已清除')
+          setSuccess('資料已完全清除')
 
         } catch (error) {
           console.error('❌ [WD40Page] Clear operation failed:', error)
@@ -1102,12 +1153,12 @@ const WD40Page = () => {
         )}
 
         {!isReviewMode && approvalStatus.isPending && (
-          <div className="bg-yellow-100 border-l-4 border-yellow-500 text-yellow-700 p-4 mb-6 rounded-r-lg">
+          <div className="bg-blue-100 border-l-4 border-blue-500 text-blue-700 p-4 mb-6 rounded-r-lg">
             <div className="flex items-center">
-              <div className="text-2xl mr-3">⏳</div>
+              <div className="text-2xl mr-3">📝</div>
               <div>
-                <p className="font-bold text-lg">填報審核中</p>
-                <p className="text-sm mt-1">您的填報已提交，正在等待管理員審核。審核期間無法修改資料。</p>
+                <p className="font-bold text-lg">填報已提交</p>
+                <p className="text-sm mt-1">您的填報已提交，正在等待管理員審核。審核期間您仍可修改資料。</p>
               </div>
             </div>
           </div>
@@ -1210,8 +1261,8 @@ const WD40Page = () => {
                 onFilesChange={setMsdsFiles}
                 maxFiles={3}
                 kind="msds"
-                disabled={submitting || isReviewMode || approvalStatus.isApproved || approvalStatus.isPending}
-                mode={isReviewMode || approvalStatus.isApproved || approvalStatus.isPending ? "view" : "edit"}
+                disabled={submitting || isReviewMode || approvalStatus.isApproved}
+                mode={isReviewMode || approvalStatus.isApproved ? "view" : "edit"}
                 memoryFiles={msdsMemoryFiles}
                 onMemoryFilesChange={handleMsdsMemoryFilesChange}
               />
@@ -1236,17 +1287,17 @@ const WD40Page = () => {
                     const numValue = inputValue === '' ? 0 : parseFloat(inputValue)
                     setUnitCapacity(isNaN(numValue) ? 0 : numValue)
                   }}
-                  disabled={isReadOnly || isReviewMode || approvalStatus.isApproved || approvalStatus.isPending}
+                  disabled={isReviewMode || approvalStatus.isApproved}
                   className={`w-full px-4 py-3 border rounded-lg focus:outline-none focus:ring-2 focus:border-transparent transition-all ${
-                    isReadOnly ? 'bg-gray-100 cursor-not-allowed' : ''
+                    isReviewMode || approvalStatus.isApproved ? 'bg-gray-100 cursor-not-allowed' : ''
                   }`}
-                  style={{ 
+                  style={{
                     color: designTokens.colors.textPrimary,
                     borderColor: designTokens.colors.border,
                     borderRadius: designTokens.borderRadius.md
                   }}
                   onFocus={(e) => {
-                    if (editPermissions.canEdit) {
+                    if (!isReviewMode && !approvalStatus.isApproved) {
                       (e.target as HTMLInputElement).style.borderColor = designTokens.colors.accentPrimary;
                       (e.target as HTMLInputElement).style.boxShadow = `0 0 0 3px ${designTokens.colors.accentPrimary}20`
                     }
@@ -1258,10 +1309,10 @@ const WD40Page = () => {
                   placeholder="請輸入單位容量"
                 />
               </div>
-              
+
               <div>
-                <label 
-                  className="block text-base font-medium mb-2" 
+                <label
+                  className="block text-base font-medium mb-2"
                   style={{ color: designTokens.colors.textPrimary }}
                 >
                   含碳率 (%)
@@ -1277,17 +1328,17 @@ const WD40Page = () => {
                     const numValue = inputValue === '' ? 0 : parseFloat(inputValue)
                     setCarbonRate(isNaN(numValue) ? 0 : numValue)
                   }}
-                  disabled={isReadOnly || isReviewMode || approvalStatus.isApproved || approvalStatus.isPending}
+                  disabled={isReviewMode || approvalStatus.isApproved}
                   className={`w-full px-4 py-3 border rounded-lg focus:outline-none focus:ring-2 focus:border-transparent transition-all ${
-                    isReadOnly ? 'bg-gray-100 cursor-not-allowed' : ''
+                    isReviewMode || approvalStatus.isApproved ? 'bg-gray-100 cursor-not-allowed' : ''
                   }`}
-                  style={{ 
+                  style={{
                     color: designTokens.colors.textPrimary,
                     borderColor: designTokens.colors.border,
                     borderRadius: designTokens.borderRadius.md
                   }}
                   onFocus={(e) => {
-                    if (editPermissions.canEdit) {
+                    if (!isReviewMode && !approvalStatus.isApproved) {
                       (e.target as HTMLInputElement).style.borderColor = designTokens.colors.accentPrimary;
                       (e.target as HTMLInputElement).style.boxShadow = `0 0 0 3px ${designTokens.colors.accentPrimary}20`
                     }
@@ -1368,16 +1419,16 @@ const WD40Page = () => {
                         const numValue = inputValue === '' ? 0 : parseFloat(inputValue)
                         updateMonthData(index, 'quantity', isNaN(numValue) ? 0 : numValue)
                       }}
-                      disabled={isReadOnly || isReviewMode || approvalStatus.isApproved || approvalStatus.isPending}
+                      disabled={isReviewMode || approvalStatus.isApproved}
                       className={`w-full px-3 py-2 border rounded-md focus:outline-none focus:ring-2 focus:border-transparent transition-all ${
-                        isReadOnly ? 'bg-gray-100 cursor-not-allowed' : ''
+                        isReviewMode || approvalStatus.isApproved ? 'bg-gray-100 cursor-not-allowed' : ''
                       }`}
-                      style={{ 
+                      style={{
                         color: designTokens.colors.textPrimary,
                         borderColor: designTokens.colors.border
                       }}
                       onFocus={(e) => {
-                        if (editPermissions.canEdit) {
+                        if (!isReviewMode && !approvalStatus.isApproved) {
                           (e.target as HTMLInputElement).style.borderColor = designTokens.colors.accentPrimary;
                           (e.target as HTMLInputElement).style.boxShadow = `0 0 0 2px ${designTokens.colors.accentPrimary}20`
                         }
@@ -1404,8 +1455,8 @@ const WD40Page = () => {
                       onFilesChange={(files) => handleMonthFilesChange(data.month, files)}
                       maxFiles={3}
                       kind="usage_evidence"
-                      disabled={submitting || isReviewMode || approvalStatus.isApproved || approvalStatus.isPending}
-                      mode={isReviewMode || approvalStatus.isApproved || approvalStatus.isPending ? "view" : "edit"}
+                      disabled={submitting || isReviewMode || approvalStatus.isApproved}
+                      mode={isReviewMode || approvalStatus.isApproved ? "view" : "edit"}
                       memoryFiles={monthlyMemoryFiles[data.month - 1] || []}
                       onMemoryFilesChange={(files) => handleMonthMemoryFilesChange(data.month, files)}
                     />
@@ -1649,8 +1700,8 @@ const WD40Page = () => {
         </div>
       )}
 
-      {/* 底部操作欄 - 審核模式下隱藏，審核通過或待審核時也隱藏 */}
-      {!isReviewMode && !approvalStatus.isApproved && !approvalStatus.isPending && (
+      {/* 底部操作欄 - 審核模式下隱藏，審核通過時也隱藏 */}
+      {!isReviewMode && !approvalStatus.isApproved && (
         <BottomActionBar
         currentStatus={currentStatus}
         currentEntryId={currentEntryId}

@@ -164,13 +164,30 @@ export function useSubmissions(): UseSubmissionsState & UseSubmissionsActions {
     }
   }, [refreshData])
 
-  // 初始載入
+  // 初始載入 - 只執行一次
   useEffect(() => {
-    Promise.all([
-      fetchSubmissions(),
-      fetchStats()
-    ]).catch(console.error)
-  }, [fetchSubmissions, fetchStats])
+    let isMounted = true
+
+    const loadInitialData = async () => {
+      if (!isMounted) return
+
+      try {
+        await Promise.all([
+          fetchSubmissions(),
+          fetchStats()
+        ])
+      } catch (error) {
+        console.error('初始載入失敗:', error)
+      }
+    }
+
+    loadInitialData()
+
+    return () => {
+      isMounted = false
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []) // 空陣列 = 只在 mount 時執行一次
 
   return {
     ...state,
@@ -217,8 +234,20 @@ export function useUserSubmissions(userId: string | null) {
   }, [userId])
 
   useEffect(() => {
-    loadUserSubmissions()
-  }, [loadUserSubmissions])
+    let isMounted = true
+
+    const load = async () => {
+      if (!isMounted) return
+      await loadUserSubmissions()
+    }
+
+    load()
+
+    return () => {
+      isMounted = false
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [userId]) // 只在 userId 變化時重新載入
 
   return { submissions, isLoading, error, reload: loadUserSubmissions }
 }
