@@ -145,7 +145,8 @@
       "Bash(npm test:*)",
       "Bash(pkill:*)",
       "Bash(do)",
-      "Read(//c//**)"
+      "Read(//c//**)",
+      "Bash(test:*)"
     ],
     "deny": [],
     "ask": []
