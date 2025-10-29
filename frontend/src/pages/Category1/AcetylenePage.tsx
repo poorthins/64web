@@ -499,12 +499,13 @@ const AcetylenePage = () => {
           files: filesToUpload
         })
 
-        // 清空記憶體檔案
-        setUnitWeightMemoryFiles([])
-        setMonthlyMemoryFiles(Array.from({ length: 12 }, () => []))
 
         await reloadAndSync()
         reloadApprovalStatus()
+        // 清空記憶體檔案（在 reloadAndSync 之後，避免檔案暫時消失）
+        setUnitWeightMemoryFiles([])
+        setMonthlyMemoryFiles(Array.from({ length: 12 }, () => []))
+
         setToast({ message: '[SUCCESS] 儲存成功！資料已更新', type: 'success' })
         return
       }
