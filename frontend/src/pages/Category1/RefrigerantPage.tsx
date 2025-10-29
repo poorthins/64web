@@ -243,8 +243,12 @@ export default function RefrigerantPage() {
             const recordFiles = getRecordFiles(item.id, refrigerantFiles)
             return {
               ...item,
-              evidenceFiles: recordFiles,
-              memoryFiles: []  // ✅ 清空 memoryFiles，避免重複提交
+              evidenceFiles: recordFiles
+              // ✅ 不清空 memoryFiles - 讓新上傳的檔案保留
+              // memoryFiles 只在以下情況清空：
+              // 1. submit 成功後
+              // 2. clear 操作
+              // 3. 離開頁面 cleanup
             }
           })
           return withExampleFirst(updated)
