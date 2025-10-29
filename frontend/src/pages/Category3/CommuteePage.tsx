@@ -1,17 +1,25 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { Download, X, Eye } from 'lucide-react';
+import { Download, X, Eye, CheckCircle, Loader2, AlertCircle } from 'lucide-react';
 import StatusIndicator from '../../components/StatusIndicator';
 import { EntryStatus } from '../../components/StatusSwitcher';
 import BottomActionBar from '../../components/BottomActionBar';
 import { useEditPermissions } from '../../hooks/useEditPermissions';
+import { useGhostFileCleaner } from '../../hooks/useGhostFileCleaner';
 import { useFrontendStatus } from '../../hooks/useFrontendStatus';
-import { updateEntryStatus, getEntryByPageKeyAndYear, getEntryById, upsertEnergyEntry } from '../../api/entries';
+import { useEnergyData } from '../../hooks/useEnergyData';
+import { useEnergyClear } from '../../hooks/useEnergyClear';
+import { useSubmitGuard } from '../../hooks/useSubmitGuard';
+import { useApprovalStatus } from '../../hooks/useApprovalStatus';
+import { useStatusBanner, getBannerColorClasses } from '../../hooks/useStatusBanner';
+import { useRole } from '../../hooks/useRole';
+import { upsertEnergyEntry } from '../../api/entries';
+import { smartOverwriteFiles } from '../../api/smartFileOverwrite';
+import { supabase } from '../../lib/supabaseClient';
 import ReviewSection from '../../components/ReviewSection';
-import { uploadEvidenceWithEntry, EvidenceFile } from '../../api/files';
+import { EvidenceFile } from '../../api/files';
 import { designTokens } from '../../utils/designTokens';
 import EvidenceUpload, { MemoryFile } from '../../components/EvidenceUpload';
-import { DocumentHandler } from '../../services/documentHandler';
 
 export default function CommutePage() {
   const [searchParams] = useSearchParams();
@@ -26,33 +34,58 @@ export default function CommutePage() {
   const [initialStatus, setInitialStatus] = useState<EntryStatus>('submitted');
   const [currentEntryId, setCurrentEntryId] = useState<string | null>(null);
   const [hasSubmittedBefore, setHasSubmittedBefore] = useState(false);
-  const [submitting, setSubmitting] = useState(false);
-  const [employeeCount, setEmployeeCount] = useState<number>(0);
-  const [averageDistance, setAverageDistance] = useState<number>(0);
   const [excelFile, setExcelFile] = useState<EvidenceFile[]>([]);
   const [mapScreenshots, setMapScreenshots] = useState<EvidenceFile[]>([]);
-  const [excelMemoryFile, setExcelMemoryFile] = useState<MemoryFile | null>(null);
+  const [excelMemoryFiles, setExcelMemoryFiles] = useState<MemoryFile[]>([]);
   const [mapMemoryFiles, setMapMemoryFiles] = useState<MemoryFile[]>([]);
   const [enlargedExampleImage, setEnlargedExampleImage] = useState<string | null>(null);
+
+  // 防止重複提交
+  const { executeSubmit, submitting } = useSubmitGuard()
 
   // 前端狀態管理 Hook
   const frontendStatus = useFrontendStatus({
     initialStatus,
     entryId: currentEntryId,
-    onStatusChange: (newStatus) => {
-      console.log('Status changed to:', newStatus)
-    },
-    onError: (error) => console.error('Status error:', error),
-    onSuccess: (message) => console.log('Status success:', message)
+    onStatusChange: () => {},
+    onError: (error) => console.error('[CommuteePage] Status error:', error),
+    onSuccess: (message) => console.log('[CommuteePage] Status success:', message)
   })
 
   const { currentStatus, handleDataChanged, handleSubmitSuccess, isInitialLoad } = frontendStatus
-  
-  // 編輯權限控制
-  const editPermissions = useEditPermissions(currentStatus)
 
-  // 審核模式時為唯讀
-  const isReadOnly = isReviewMode
+  // 資料載入 Hook
+  const entryIdToLoad = isReviewMode && reviewEntryId ? reviewEntryId : undefined
+  const {
+    entry: loadedEntry,
+    files: loadedFiles,
+    loading: dataLoading,
+    error: dataError,
+    reload
+  } = useEnergyData(pageKey, year, entryIdToLoad)
+
+  // 審核狀態 Hook
+  const { reload: reloadApprovalStatus, ...approvalStatus } = useApprovalStatus(pageKey, year)
+
+  // 狀態橫幅 Hook
+  const banner = useStatusBanner(approvalStatus, isReviewMode)
+
+  // 清除 Hook
+  const {
+    clear,
+    clearing: clearLoading,
+    error: clearError
+  } = useEnergyClear(currentEntryId, currentStatus)
+
+  // 角色檢查 Hook
+  const { role } = useRole()
+  const isReadOnly = isReviewMode && role !== 'admin'
+
+  // 編輯權限控制
+  const editPermissions = useEditPermissions(currentStatus, isReadOnly)
+
+  // 幽靈檔案清理 Hook
+  const { cleanFiles } = useGhostFileCleaner()
   
   // 範例圖片 URL（需要放在 public 資料夾或使用實際 URL）
   const exampleImages = [
@@ -62,10 +95,9 @@ export default function CommutePage() {
 
   // 判斷是否有資料
   const hasAnyData = useMemo(() => {
-    return employeeCount > 0 || averageDistance > 0 || excelMemoryFile !== null || mapMemoryFiles.length > 0 || excelFile.length > 0 || mapScreenshots.length > 0
-  }, [employeeCount, averageDistance, excelMemoryFile, mapMemoryFiles, excelFile, mapScreenshots])
-
-  // 允許所有狀態編輯 (已在上方定義為審核模式控制)
+    return excelMemoryFiles.length > 0 || mapMemoryFiles.length > 0 ||
+           excelFile.length > 0 || mapScreenshots.length > 0
+  }, [excelMemoryFiles, mapMemoryFiles, excelFile, mapScreenshots])
 
   // 處理鍵盤事件 (ESC 關閉範例圖片)
   useEffect(() => {
@@ -85,136 +117,202 @@ export default function CommutePage() {
     return undefined
   }, [enlargedExampleImage])
 
-  // 載入現有記錄
+  // 載入 entry 資料
   useEffect(() => {
-    const loadData = async () => {
-      try {
-        setSubmitting(true)
+    if (loadedEntry && !dataLoading) {
+      setInitialStatus(loadedEntry.status as EntryStatus)
+      setCurrentEntryId(loadedEntry.id)
+      setHasSubmittedBefore(true)
 
-        // 檢查是否已有非草稿記錄
-        // 載入基本資料
-        let existingEntry
-        if (isReviewMode && reviewEntryId) {
-          console.log('🔍 [CommuteePage] 審核模式 - 載入特定記錄:', reviewEntryId)
-          existingEntry = await getEntryById(reviewEntryId)
-        } else {
-          console.log('🔍 [CommuteePage] 一般模式 - 載入用戶自己的記錄')
-          existingEntry = await getEntryByPageKeyAndYear(pageKey, year)
-        }
-        if (existingEntry && existingEntry.status !== 'draft') {
-          setInitialStatus(existingEntry.status as EntryStatus)
-          setCurrentEntryId(existingEntry.id)
-          setHasSubmittedBefore(true)
-
-          // 載入已提交的記錄數據供編輯
-          if (existingEntry.payload?.employeeCount) {
-            setEmployeeCount(existingEntry.payload.employeeCount)
-          }
-          if (existingEntry.payload?.averageDistance) {
-            setAverageDistance(existingEntry.payload.averageDistance)
-          }
-
-          // 檔案載入由 EvidenceFileManager 元件處理
-
-          // 處理狀態變更
-          handleDataChanged()
-        }
-        // 如果是草稿記錄或無記錄，保持表單空白狀態
-
-        isInitialLoad.current = false
-      } catch (error) {
-        console.error('Error loading commute data:', error)
-      } finally {
-        setSubmitting(false)
+      if (!isInitialLoad.current) {
+        handleDataChanged()
       }
+      isInitialLoad.current = false
+    } else if (loadedEntry === null && !dataLoading) {
+      // 無記錄，重置狀態
+      setCurrentEntryId(null)
+      setHasSubmittedBefore(false)
+      setInitialStatus('saved')
+      isInitialLoad.current = false
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loadedEntry, dataLoading])
 
-    loadData()
-  }, [isReviewMode, reviewEntryId, reviewUserId])
+  // 載入檔案
+  useEffect(() => {
+    if (loadedFiles.length > 0) {
+      const cleanAndAssignFiles = async () => {
+        const validFiles = await cleanFiles(loadedFiles)
+
+        // 分類檔案（簡化：所有 other 類型都是通勤相關）
+        const excelFiles = validFiles.filter(f => f.file_type === 'other' && f.file_name.includes('.xlsx'))
+        const mapFiles = validFiles.filter(f => f.file_type === 'other' && !f.file_name.includes('.xlsx'))
+
+        setExcelFile(excelFiles)
+        setMapScreenshots(mapFiles)
+      }
+      cleanAndAssignFiles()
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loadedFiles])
 
   const handleSubmit = async () => {
-    if (employeeCount <= 0 || averageDistance <= 0) {
-      alert('請填寫完整的員工人數和平均通勤距離');
-      return;
-    }
-    
-    setSubmitting(true);
-    try {
-      // 計算年度通勤碳排放（簡化計算，放在第1個月）
-      const annualCommuteEmission = employeeCount * averageDistance * 2 * 250 // 2倍(來回) * 250工作日
-
+    await executeSubmit(async () => {
       // 建立填報輸入資料
       const entryInput = {
         page_key: pageKey,
         period_year: year,
-        unit: 'km',
-        monthly: { '1': annualCommuteEmission }, // 放在第1個月
-        notes: `員工人數: ${employeeCount} 人, 平均通勤距離: ${averageDistance} 公里`,
-        payload: {
-          employeeCount: employeeCount,
-          averageDistance: averageDistance,
-          annualCommuteEmission: annualCommuteEmission
-        }
+        unit: '公里',
+        monthly: { '1': 0 }, // 只上傳檔案，不記錄數值
+        notes: '員工通勤資料',
+        payload: {}
       }
 
-      // 新增或更新 energy_entries
-      const { entry_id } = await upsertEnergyEntry(entryInput)
+      // 新增或更新 energy_entries（使用 false 避免 RLS 錯誤）
+      const { entry_id } = await upsertEnergyEntry(entryInput, false)
 
-      // 設置 entryId
       if (!currentEntryId) {
         setCurrentEntryId(entry_id)
       }
 
-      // 上傳 Excel 檔案
-      if (excelMemoryFile) {
-        await uploadEvidenceWithEntry(excelMemoryFile.file, {
-          entryId: entry_id,
-          pageKey: pageKey,
-          year: year,
-          category: 'other'
-        })
-      }
+      // 使用智慧型檔案覆蓋（累積模式：保留舊檔案 + 追加新檔案）
+      await smartOverwriteFiles([
+        {
+          itemKey: 'excel',
+          newFiles: excelMemoryFiles,
+          existingFiles: excelFile,
+          fileType: 'other' as const,
+          mode: 'append' as const  // 累積模式：保留舊檔案
+        },
+        {
+          itemKey: 'map',
+          newFiles: mapMemoryFiles,
+          existingFiles: mapScreenshots,
+          fileType: 'other' as const,
+          mode: 'append' as const  // 累積模式：保留舊檔案
+        }
+      ], {
+        entryId: entry_id,
+        pageKey,
+        year,
+        debug: true
+      })
 
-      // 上傳地圖截圖
-      for (const memFile of mapMemoryFiles) {
-        await uploadEvidenceWithEntry(memFile.file, {
-          entryId: entry_id,
-          pageKey: pageKey,
-          year: year,
-          category: 'other'
-        })
-      }
+      // 重新載入檔案
+      await reload()
 
-      // 清空 memory files
-      setExcelMemoryFile(null)
+      // 清空記憶體檔案
+      setExcelMemoryFiles([])
       setMapMemoryFiles([])
 
-      // 提交成功時自動更新狀態
+      // 提交成功
       await handleSubmitSuccess();
+
+      // 重新載入審核狀態，更新狀態橫幅
+      reloadApprovalStatus()
+
       setHasSubmittedBefore(true)
-      alert(`員工通勤數據已保存！\n員工人數：${employeeCount} 人\n平均通勤距離：${averageDistance} 公里\n年度總通勤距離：${annualCommuteEmission} 公里`);
-    } catch (error) {
-      console.error('Submit error:', error)
+      alert('員工通勤數據已保存！');
+    }).catch(error => {
+      console.error('[CommuteePage] Submit error:', error)
       alert(error instanceof Error ? error.message : '提交失敗，請重試');
-    } finally {
-      setSubmitting(false);
-    }
+    })
   };
 
-  // Excel 檔案變更處理（模擬自動解析）
+  const handleSave = async () => {
+    await executeSubmit(async () => {
+      // 建立填報輸入資料
+      const entryInput = {
+        page_key: pageKey,
+        period_year: year,
+        unit: '公里',
+        monthly: { '1': 0 }, // 只上傳檔案，不記錄數值
+        notes: '員工通勤資料',
+        payload: {}
+      }
+
+      // 📝 管理員審核模式：直接更新現有 entry
+      if (isReviewMode && reviewEntryId) {
+        console.log('📝 管理員審核模式：直接更新 entry', reviewEntryId)
+        const { error: updateError } = await supabase
+          .from('energy_entries')
+          .update({
+            unit: '公里',
+            amount: 0,
+            payload: {},
+            notes: '員工通勤資料',
+            updated_at: new Date().toISOString()
+          })
+          .eq('id', reviewEntryId)
+
+        if (updateError) {
+          throw new Error(`更新失敗：${updateError.message}`)
+        }
+
+        await reload()
+        reloadApprovalStatus()
+        alert('✅ 儲存成功！資料已更新')
+        return
+      }
+
+      // 新增或更新 energy_entries（使用 true 保持現有狀態）
+      const { entry_id } = await upsertEnergyEntry(entryInput, true)
+
+      if (!currentEntryId) {
+        setCurrentEntryId(entry_id)
+      }
+
+      // 使用智慧型檔案覆蓋（累積模式：保留舊檔案 + 追加新檔案）
+      await smartOverwriteFiles([
+        {
+          itemKey: 'excel',
+          newFiles: excelMemoryFiles,
+          existingFiles: excelFile,
+          fileType: 'other' as const,
+          mode: 'append' as const  // 累積模式：保留舊檔案
+        },
+        {
+          itemKey: 'map',
+          newFiles: mapMemoryFiles,
+          existingFiles: mapScreenshots,
+          fileType: 'other' as const,
+          mode: 'append' as const  // 累積模式：保留舊檔案
+        }
+      ], {
+        entryId: entry_id,
+        pageKey,
+        year,
+        debug: true
+      })
+
+      // 重新載入檔案
+      await reload()
+
+      // 清空記憶體檔案
+      setExcelMemoryFiles([])
+      setMapMemoryFiles([])
+
+      // 重新載入審核狀態，更新狀態橫幅
+      reloadApprovalStatus()
+
+      // 儲存成功訊息（不改變狀態）
+      alert('員工通勤數據已儲存！');
+    }).catch(error => {
+      console.error('[CommuteePage] Save error:', error)
+      alert(error instanceof Error ? error.message : '儲存失敗，請重試');
+    })
+  };
+
+  // Excel 檔案變更處理
   const handleExcelFilesChange = (files: EvidenceFile[]) => {
     setExcelFile(files)
-    // 模擬從 Excel 解析出的資料（實際需要後端解析）
-    if (files.length > 0) {
-      setEmployeeCount(25) // 示例：25 位員工
-      setAverageDistance(5.8) // 示例：平均通勤距離 5.8 公里
-    }
+    // 用戶需要手動輸入 employeeCount 和 averageDistance
   }
 
   // 下載範例檔案
   const downloadTemplate = () => {
     const link = document.createElement('a')
-    link.href = '/examples/commute-template.xlsx'  // 檔案路徑
+    link.href = '/examples/commute-template.xlsx'
     link.download = '員工通勤範例檔案.xlsx'
     document.body.appendChild(link)
     link.click()
@@ -222,44 +320,50 @@ export default function CommutePage() {
   }
 
   const handleClear = async () => {
-    console.log('🗑️ [CommutePage] ===== CLEAR BUTTON CLICKED =====')
+    try {
+      console.log('🗑️ [CommuteePage] ===== CLEAR BUTTON CLICKED =====')
 
-    const clearSuccess = DocumentHandler.handleClear({
-      currentStatus: currentStatus,
-      message: '確定要清除所有數據嗎？此操作無法復原。',
-      onClear: () => {
-        setSubmitting(true)
-        try {
-          console.log('🗑️ [CommutePage] Starting complete clear operation...')
+      // 收集所有檔案
+      const allFiles = [...excelFile, ...mapScreenshots]
+      const allMemoryFiles = [excelMemoryFiles, mapMemoryFiles]
 
-          // 清理記憶體檔案
-          if (excelMemoryFile) {
-            DocumentHandler.clearAllMemoryFiles([excelMemoryFile])
-          }
-          DocumentHandler.clearAllMemoryFiles(mapMemoryFiles)
+      // 使用 Hook 清除
+      await clear({
+        filesToDelete: allFiles,
+        memoryFilesToClean: allMemoryFiles
+      })
 
-          // 原有的清除邏輯保持不變
-          setEmployeeCount(0)
-          setAverageDistance(0)
-          setExcelMemoryFile(null)
-          setMapMemoryFiles([])
-          setHasSubmittedBefore(false)
+      // 重置前端狀態
+      setExcelMemoryFiles([])
+      setMapMemoryFiles([])
+      setExcelFile([])
+      setMapScreenshots([])
+      setCurrentEntryId(null)
+      setHasSubmittedBefore(false)
 
-          alert('資料已清除')
-
-        } catch (error) {
-          console.error('❌ [CommutePage] Clear operation failed:', error)
-          alert('清除操作失敗，請重試')
-        } finally {
-          console.log('🗑️ [CommutePage] Clear operation finished, resetting loading state')
-          setSubmitting(false)
-        }
-      }
-    })
-
-    if (!clearSuccess && currentStatus === 'approved') {
-      alert('已通過的資料無法清除')
+      alert('資料已完全清除')
+    } catch (error) {
+      console.error('❌ [CommuteePage] Clear operation failed:', error)
+      alert(error instanceof Error ? error.message : '清除失敗，請重試')
     }
+  }
+
+  // Loading 狀態
+  if (dataLoading) {
+    return (
+      <div
+        className="min-h-screen flex items-center justify-center"
+        style={{ backgroundColor: designTokens.colors.background }}
+      >
+        <div className="text-center">
+          <Loader2
+            className="w-12 h-12 animate-spin mx-auto mb-4"
+            style={{ color: designTokens.colors.accentPrimary }}
+          />
+          <p style={{ color: designTokens.colors.textPrimary }}>載入中...</p>
+        </div>
+      </div>
+    )
   }
 
   return (
@@ -267,28 +371,58 @@ export default function CommutePage() {
     <div className="min-h-screen bg-green-50">
       <div className="max-w-4xl mx-auto px-6 py-8 space-y-6">
 
-        {/* 頁面標題 - 無背景框 */}
+        {/* 頁面標題 */}
         <div className="text-center mb-8">
-          <h1 className="text-3xl font-bold text-center mb-2">
+          {/* 審核模式指示器 */}
+          {isReviewMode && (
+            <div className="mb-4 p-3 bg-orange-100 border-2 border-orange-300 rounded-lg">
+              <div className="flex items-center justify-center">
+                <Eye className="w-5 h-5 text-orange-600 mr-2" />
+                <span className="text-orange-800 font-medium">
+                  📋 審核模式 - 查看填報內容
+                </span>
+              </div>
+              <p className="text-sm text-orange-600 mt-1">
+                所有輸入欄位已鎖定，僅供審核查看
+              </p>
+            </div>
+          )}
+
+          <h1 className="text-4xl font-semibold mb-3" style={{ color: designTokens.colors.textPrimary }}>
             員工通勤 使用數量填報
           </h1>
-          <p className="text-lg text-center text-gray-600 mb-6">
-            請上傳 MSDS 文件並填入各月份使用數據進行碳排放計算
+          <p className="text-lg" style={{ color: designTokens.colors.textSecondary }}>
+            {isReviewMode
+              ? '管理員審核模式 - 檢視填報內容和相關檔案'
+              : '請上傳員工通勤資料和距離佐證文件'
+            }
           </p>
         </div>
 
-        {/* 說明區塊 */}
-        <div
-          className="rounded-lg p-4 border-l-4"
-          style={{
-            backgroundColor: '#f0f9ff',
-            borderColor: '#3b82f6'
-          }}
-        >
-          <p className="text-base text-blue-700">
-            請下載範例檔案，填寫員工通勤資料後上傳。系統將自動計算通勤產生的碳排放量。
-          </p>
-        </div>
+        {/* 審核狀態橫幅 - 統一管理 */}
+        {banner && (
+          <div className={`border-l-4 p-4 mb-6 rounded-r-lg ${getBannerColorClasses(banner.type)}`}>
+            <div className="flex items-center">
+              <div className="text-2xl mr-3">{banner.icon}</div>
+              <div className="flex-1">
+                <p className="font-bold text-lg">{banner.title}</p>
+                {banner.message && <p className="text-sm mt-1">{banner.message}</p>}
+                {banner.reason && (
+                  <div className="mt-3 p-3 bg-red-50 rounded-md border border-red-200">
+                    <p className="text-base font-bold text-red-800 mb-1">退回原因：</p>
+                    <p className="text-lg font-semibold text-red-900">{banner.reason}</p>
+                  </div>
+                )}
+                {banner.reviewedAt && (
+                  <p className="text-xs mt-2 opacity-75">
+                    {banner.type === 'rejected' ? '退回時間' : '審核完成時間'}：
+                    {new Date(banner.reviewedAt).toLocaleString()}
+                  </p>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* 步驟 1：下載範例檔案 */}
         <div
@@ -328,7 +462,7 @@ export default function CommutePage() {
           </div>
         </div>
 
-        {/* 步驟 2：上傳填寫完成的檔案 */}
+        {/* 步驟 2：上傳員工通勤資料 */}
         <div
           className="rounded-lg border p-6"
           style={{
@@ -344,26 +478,21 @@ export default function CommutePage() {
             <h2 className="text-2xl font-semibold">上傳員工通勤資料</h2>
           </div>
 
+          <p className="text-lg text-gray-600 mb-4">
+            請上傳填寫完成的員工通勤 Excel 檔案
+          </p>
+
           <EvidenceUpload
             pageKey={pageKey}
             files={excelFile}
             onFilesChange={handleExcelFilesChange}
-            memoryFiles={excelMemoryFile ? [excelMemoryFile] : []}
-            onMemoryFilesChange={(memFiles) => setExcelMemoryFile(memFiles[0] || null)}
+            memoryFiles={excelMemoryFiles}
+            onMemoryFilesChange={setExcelMemoryFiles}
             maxFiles={1}
             kind="other"
-            mode="edit"
-            currentStatus={currentStatus}
+            mode={isReadOnly || approvalStatus.isApproved ? "view" : "edit"}
+            disabled={submitting || isReadOnly || approvalStatus.isApproved || !editPermissions.canUploadFiles}
           />
-
-          {/* 顯示解析出的資料 */}
-          {employeeCount > 0 && averageDistance > 0 && (
-            <div className="mt-4 p-3 bg-green-50 rounded border">
-              <p className="text-base text-green-700">
-                已解析：{employeeCount} 位員工，平均通勤距離 {averageDistance} 公里
-              </p>
-            </div>
-          )}
         </div>
 
         {/* 步驟 3：上傳距離佐證 */}
@@ -425,8 +554,8 @@ export default function CommutePage() {
             onMemoryFilesChange={setMapMemoryFiles}
             maxFiles={10}
             kind="other"
-            mode="edit"
-            currentStatus={currentStatus}
+            mode={isReadOnly || approvalStatus.isApproved ? "view" : "edit"}
+            disabled={submitting || isReadOnly || approvalStatus.isApproved || !editPermissions.canUploadFiles}
           />
         </div>
 
@@ -435,30 +564,37 @@ export default function CommutePage() {
         <div className="h-20"></div>
       </div>
 
-      {/* 底部操作欄 - 審核模式下隱藏 */}
-      {!isReviewMode && (
+      {/* 底部操作欄 - 唯讀模式下隱藏，審核通過時也隱藏 */}
+      {!isReadOnly && !approvalStatus.isApproved && !isReviewMode && (
         <BottomActionBar
           currentStatus={currentStatus}
           currentEntryId={currentEntryId}
           isUpdating={false}
+          hasSubmittedBefore={hasSubmittedBefore}
+          hasAnyData={hasAnyData}
+          banner={banner}
           editPermissions={editPermissions}
           submitting={submitting}
+          saving={submitting}
           onSubmit={handleSubmit}
+          onSave={handleSave}
           onClear={handleClear}
-          hasAnyData={hasAnyData}
           designTokens={designTokens}
         />
       )}
 
       {/* 審核區塊 - 只在審核模式顯示 */}
-      {isReviewMode && currentEntryId && (
+      {isReviewMode && (
         <ReviewSection
-          entryId={reviewEntryId || currentEntryId}
+          entryId={reviewEntryId || currentEntryId || `employee_commute_${year}`}
           userId={reviewUserId || "current_user"}
           category="員工通勤"
           userName={reviewUserId || "用戶"}
-          amount={totalMiles}
-          unit="英里"
+          amount={0}
+          unit="公里"
+          role={role}
+          onSave={handleSave}
+          isSaving={submitting}
           onApprove={() => {
             console.log('✅ 員工通勤填報審核通過 - 由 ReviewSection 處理')
           }}

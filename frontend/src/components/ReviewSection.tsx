@@ -13,6 +13,10 @@ interface ReviewSectionProps {
   onApprove?: () => void
   onReject?: (reason: string) => void
   className?: string
+  // 管理員編輯相關
+  role?: string | null
+  onSave?: () => void
+  isSaving?: boolean
 }
 
 const ReviewSection: React.FC<ReviewSectionProps> = ({
@@ -24,7 +28,10 @@ const ReviewSection: React.FC<ReviewSectionProps> = ({
   unit,
   onApprove,
   onReject,
-  className = ''
+  className = '',
+  role,
+  onSave,
+  isSaving
 }) => {
   const [searchParams] = useSearchParams()
   const navigate = useNavigate()
@@ -59,10 +66,9 @@ const ReviewSection: React.FC<ReviewSectionProps> = ({
       // 清空評論
       setReviewComment('')
 
-      // 短暫延遲讓用戶看到訊息，然後返回列表頁面
+      // 短暫延遲讓用戶看到訊息，然後返回主儀表板
       setTimeout(() => {
-        // 返回列表頁面，保持在待審核標籤
-        navigate('/app/admin/submissions?view=pending')
+        navigate('/app/admin')
       }, 1000) // 1秒延遲
 
     } catch (error) {
@@ -98,10 +104,9 @@ const ReviewSection: React.FC<ReviewSectionProps> = ({
       // 清空評論
       setReviewComment('')
 
-      // 短暫延遲讓用戶看到訊息，然後返回列表頁面
+      // 短暫延遲讓用戶看到訊息，然後返回主儀表板
       setTimeout(() => {
-        // 返回列表頁面，保持在待審核標籤
-        navigate('/app/admin/submissions?view=pending')
+        navigate('/app/admin')
       }, 1000) // 1秒延遲
 
     } catch (error) {
@@ -186,6 +191,27 @@ const ReviewSection: React.FC<ReviewSectionProps> = ({
 
       {/* 操作按鈕 */}
       <div className="flex flex-col sm:flex-row gap-3">
+        {/* 管理員專用：儲存修改按鈕 */}
+        {role === 'admin' && onSave && (
+          <button
+            onClick={onSave}
+            disabled={isSaving}
+            className="flex-1 px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-200 flex items-center justify-center font-medium"
+          >
+            {isSaving ? (
+              <>
+                <div className="animate-spin rounded-full h-4 w-4 border-2 border-white border-t-transparent mr-2"></div>
+                儲存中...
+              </>
+            ) : (
+              <>
+                <span className="mr-2">💾</span>
+                儲存修改
+              </>
+            )}
+          </button>
+        )}
+
         <button
           onClick={handleApprove}
           disabled={isSubmitting}

@@ -9,10 +9,8 @@ from utils.auth import get_user_from_token
 load_dotenv()
 
 app = Flask(__name__)
-CORS(app, origins=[
-    os.getenv('ALLOW_ORIGIN', 'http://localhost:5173'),
-    'http://localhost:5175'  # 增加前端實際運行的端口
-])
+# 開發環境：允許所有來源（生產環境需要限制）
+CORS(app, resources={r"/api/*": {"origins": "*"}})
 
 @app.route('/api/health', methods=['GET'])
 def health_check():
@@ -241,45 +239,64 @@ def create_user():
         user = get_user_from_token(auth_header)
         if not user or user.get('role') != 'admin':
             return jsonify({"error": "Unauthorized"}), 403
-            
+
         data = request.get_json()
         email = data.get('email')
         display_name = data.get('displayName')
-        company = data.get('company', '')
         password = data.get('password', 'TempPassword123!')
-        
+
+        # ⭐ 接收完整欄位
+        company = data.get('company', '')
+        phone = data.get('phone', '')
+        job_title = data.get('job_title', '')
+        role = data.get('role', 'user')
+
+        # ⭐ 處理 filling_config
+        energy_categories = data.get('energy_categories', [])
+        target_year = data.get('target_year', datetime.now().year)
+        diesel_generator_version = data.get('diesel_generator_version', 'refuel')
+
         if not email or not display_name:
             return jsonify({"error": "email and displayName are required"}), 400
-            
+
         supabase = get_supabase_admin()
-        
+
         # 建立新用戶（使用 admin API）
         auth_result = supabase.auth.admin.create_user({
             "email": email,
             "password": password,
             "email_confirm": True
         })
-        
+
         if auth_result.user:
-            # 建立 profile 記錄
+            # ⭐ 建立 profile 記錄（包含所有欄位）
             profile_result = supabase.table('profiles').insert({
                 'id': auth_result.user.id,
                 'display_name': display_name,
-                'role': 'user',
+                'email': email,
+                'role': role,
                 'is_active': True,
-                'company': company
+                'company': company,
+                'phone': phone,
+                'job_title': job_title,
+                'filling_config': {
+                    'energy_categories': energy_categories,
+                    'target_year': target_year,
+                    'diesel_generator_mode': diesel_generator_version
+                }
             }).execute()
-            
+
+            # ⭐ 回傳完整 profile 資料
             return jsonify({
                 "success": True,
-                "user_id": auth_result.user.id,
-                "profile": profile_result.data[0]
+                "user": profile_result.data[0]
             })
         else:
             return jsonify({"error": "Failed to create user"}), 500
-            
+
     except Exception as e:
+        print(f"Error in create_user: {str(e)}")  # Debug log
         return jsonify({"error": str(e)}), 500
 
 if __name__ == '__main__':
-    app.run(debug=True, port=5000)
+    app.run(debug=True, port=5000, host='0.0.0.0')

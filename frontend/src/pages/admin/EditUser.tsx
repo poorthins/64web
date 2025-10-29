@@ -2,9 +2,6 @@ import React, { useState, useEffect, useMemo } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { energyCategories, scopeLabels, UserFormData } from './data/mockData'
 import { InputField, SelectField, validateUserForm, hasErrors, getFieldError } from './components/FormUtils'
-import { exportUserData, exportDepartmentData, demonstrateFileRenaming } from './utils/exportUtils'
-import UserExportModal, { ExportOptions } from './components/UserExportModal'
-import { exportSingleUser } from './utils/userExportUtils'
 import { EditUserSkeleton } from './components/EditUserSkeleton'
 import { PageHeader } from './components/PageHeader'
 import { ChangeSummary } from './components/ChangeIndicator'
@@ -13,7 +10,8 @@ import { useUnsavedChanges } from './hooks/useUnsavedChanges'
 import { useKeyboardShortcuts, createCommonShortcuts } from './hooks/useKeyboardShortcuts'
 import { useUsers, useUser } from './hooks/useUsers'
 import { useSubmissions } from './hooks/useSubmissions'
-import { type UserUpdateData } from '../../api/adminUsers'
+import { type UserUpdateData, getUserEnergyEntries } from '../../api/adminUsers'
+import { exportUserEntriesExcel } from './utils/exportUtils'
 
 const EditUser: React.FC = () => {
   const navigate = useNavigate()
@@ -28,8 +26,6 @@ const EditUser: React.FC = () => {
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [showSuccess, setShowSuccess] = useState(false)
   const [isExporting, setIsExporting] = useState(false)
-  const [showUserExportModal, setShowUserExportModal] = useState(false)
-  const [isUserExporting, setIsUserExporting] = useState(false)
 
   // 組合載入狀態和錯誤
   const isLoading = userLoading
@@ -295,68 +291,55 @@ const EditUser: React.FC = () => {
 
   useKeyboardShortcuts({ shortcuts })
 
-  // 匯出功能
+  // 匯出功能（ZIP：Excel + 佐證資料）
+  const [exportProgress, setExportProgress] = useState<{ status: string; current?: number; total?: number } | null>(null)
+
   const handleExportUser = async () => {
     if (!userId) return
 
     setIsExporting(true)
+    setExportProgress({ status: '正在載入填報記錄...' })
+
     try {
-      await exportUserData(userId)
-      console.log('✅ 個人資料匯出成功')
+      // 從 API 取得使用者的能源填報記錄
+      const entries = await getUserEnergyEntries(userId)
+
+      // 檢查是否有資料
+      if (!entries || entries.length === 0) {
+        alert('此使用者尚無填報資料')
+        setExportProgress(null)
+        return
+      }
+
+      // 使用完整匯出功能（Excel + 佐證資料）
+      const { exportUserEntriesWithFiles } = await import('./utils/exportUtils')
+      const result = await exportUserEntriesWithFiles(
+        userId,
+        formData.name || '未知用戶',
+        entries,
+        (status, current, total) => {
+          setExportProgress({ status, current, total })
+        }
+      )
+
+      setExportProgress(null)
+
+      if (result.failed === 0) {
+        alert(`✅ 下載完成！\n成功：${result.success} 個檔案`)
+      } else {
+        alert(`⚠️ 部分檔案失敗\n成功：${result.success}\n失敗：${result.failed}\n\n錯誤：\n${result.errors.join('\n')}`)
+      }
     } catch (error) {
       console.error('❌ 匯出失敗:', error)
-      alert('匯出失敗，請稍後再試')
+      const errorMessage = error instanceof Error ? error.message : '匯出失敗，請稍後再試'
+      alert(errorMessage)
+      setExportProgress(null)
     } finally {
       setIsExporting(false)
     }
   }
 
-  const handleExportDepartment = async () => {
-    if (!formData.company) return
-
-    setIsExporting(true)
-    try {
-      await exportDepartmentData(formData.company)
-      console.log('✅ 公司資料匯出成功')
-    } catch (error) {
-      console.error('❌ 匯出失敗:', error)
-      alert('匯出失敗，請稍後再試')
-    } finally {
-      setIsExporting(false)
-    }
-  }
-
-  const handleDemoFileRenaming = () => {
-    demonstrateFileRenaming()
-    alert('請查看控制台查看智慧檔案重新命名展示')
-  }
-
-  // 單一用戶匯出功能
-  const handleSingleUserExport = () => {
-    setShowUserExportModal(true)
-  }
-
-  const handleUserExportConfirm = async (options: ExportOptions) => {
-    if (!userId) return
-
-    setIsUserExporting(true)
-    try {
-      await exportSingleUser(userId, options)
-      setShowUserExportModal(false)
-      alert('匯出完成！請查看控制台查看詳細資訊。正式版本將下載 Excel 檔案。')
-    } catch (error) {
-      console.error('❌ 用戶匯出失敗:', error)
-      alert('匯出失敗，請稍後再試')
-    } finally {
-      setIsUserExporting(false)
-    }
-  }
-
-  const handleUserExportClose = () => {
-    if (!isUserExporting) {
-      setShowUserExportModal(false)
-    }
-  }
+  // 已刪除不需要的匯出功能
 
   if (isLoading) {
     return <EditUserSkeleton />
@@ -667,88 +650,62 @@ const EditUser: React.FC = () => {
             {/* 資料匯出 */}
             <div className="bg-gray-50 rounded-lg p-4">
               <h3 className="font-semibold text-gray-900 mb-3 flex items-center">
-                <span className="mr-2">📦</span>
-                資料匯出
+                <span className="mr-2">📥</span>
+                下載用戶資料
               </h3>
 
-              <div className="space-y-2">
-                <button
-                  onClick={handleExportUser}
-                  disabled={isExporting}
-                  className="w-full text-left px-3 py-2 text-sm text-blue-700 hover:bg-blue-50 rounded transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center"
-                >
+              <button
+                onClick={handleExportUser}
+                disabled={isExporting}
+                className="w-full px-4 py-3 text-left bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-between font-medium"
+              >
+                <div className="flex items-center">
                   {isExporting ? (
                     <>
-                      <div className="animate-spin rounded-full h-3 w-3 border border-blue-500 border-t-transparent mr-2"></div>
-                      匯出中...
+                      <div className="animate-spin rounded-full h-4 w-4 border-2 border-white border-t-transparent mr-3"></div>
+                      下載中...
                     </>
                   ) : (
                     <>
-                      👤 匯出個人資料 (.zip)
+                      <span className="text-xl mr-3">📦</span>
+                      下載 ZIP（Excel + 佐證資料）
                     </>
                   )}
-                </button>
-                <button
-                  onClick={handleExportDepartment}
-                  disabled={isExporting || !formData.company}
-                  className="w-full text-left px-3 py-2 text-sm text-green-700 hover:bg-green-50 rounded transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  🏢 匯出公司資料 (.zip)
-                </button>
-                <button
-                  onClick={handleDemoFileRenaming}
-                  className="w-full text-left px-3 py-2 text-sm text-purple-700 hover:bg-purple-50 rounded transition-colors"
-                >
-                  🔄 智慧命名展示
-                </button>
-              </div>
+                </div>
+              </button>
 
-              <div className="mt-3 p-2 bg-blue-50 rounded text-xs text-blue-700">
-                💡 智慧檔案重新命名：將亂碼檔名轉為規範化中文檔名
-              </div>
-            </div>
+              {exportProgress && (
+                <div className="mt-3 p-3 bg-blue-50 rounded-lg border border-blue-200">
+                  <div className="text-sm text-blue-800 mb-2">{exportProgress.status}</div>
+                  {exportProgress.total !== undefined && exportProgress.current !== undefined && (
+                    <div>
+                      <div className="flex justify-between text-xs text-blue-600 mb-1">
+                        <span>{exportProgress.current} / {exportProgress.total}</span>
+                        <span>{Math.round((exportProgress.current / exportProgress.total) * 100)}%</span>
+                      </div>
+                      <div className="w-full bg-blue-200 rounded-full h-2">
+                        <div
+                          className="bg-blue-600 h-2 rounded-full transition-all duration-300"
+                          style={{ width: `${(exportProgress.current / exportProgress.total) * 100}%` }}
+                        />
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
 
-            {/* 快速操作 */}
-            <div className="bg-gray-50 rounded-lg p-4">
-              <h3 className="font-semibold text-gray-900 mb-3 flex items-center">
-                <span className="mr-2">⚡</span>
-                快速操作
-              </h3>
-
-              <div className="space-y-2">
-                <button
-                  onClick={handleSingleUserExport}
-                  className="w-full text-left px-3 py-2 text-sm text-green-700 hover:bg-green-50 rounded transition-colors font-medium border border-green-200"
-                >
-                  📊 匯出用戶資料
-                </button>
-                <button className="w-full text-left px-3 py-2 text-sm text-gray-700 hover:bg-white rounded transition-colors">
-                  📧 發送重設密碼信
-                </button>
-                <button className="w-full text-left px-3 py-2 text-sm text-gray-700 hover:bg-white rounded transition-colors">
-                  📋 查看用戶記錄
-                </button>
-                <button className="w-full text-left px-3 py-2 text-sm text-gray-700 hover:bg-white rounded transition-colors">
-                  📊 查看詳細統計
-                </button>
-                <button className="w-full text-left px-3 py-2 text-sm text-red-600 hover:bg-red-50 rounded transition-colors">
-                  🗑️ 刪除用戶
-                </button>
+              <div className="mt-3 p-3 bg-gray-100 rounded text-xs text-gray-700">
+                <div className="font-semibold mb-1">📁 下載內容：</div>
+                <ul className="space-y-1">
+                  <li>• Excel 多工作表報表（所有能源類別）</li>
+                  <li>• 佐證資料檔案（自動重新命名）</li>
+                </ul>
               </div>
             </div>
           </div>
         </div>
       </div>
 
-      {/* 用戶匯出對話框 */}
-      <UserExportModal
-        isOpen={showUserExportModal}
-        onClose={handleUserExportClose}
-        onConfirm={handleUserExportConfirm}
-        userName={formData.name}
-        companyName={formData.company}
-        isExporting={isUserExporting}
-      />
     </div>
   )
 }

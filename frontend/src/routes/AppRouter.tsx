@@ -31,25 +31,12 @@ import AdminDashboard from '../pages/admin/AdminDashboard'
 import CreateUser from '../pages/admin/CreateUser'
 import EditUser from '../pages/admin/EditUser'
 import StatisticsDetail from '../pages/admin/StatisticsDetail'
-import APITest from '../pages/admin/APITest'
 import EnhancedSubmissionManagement from '../pages/admin/EnhancedSubmissionManagement'
-import SubmissionManagement from '../pages/admin/SubmissionManagement'
 import AdminRoute from '../components/AdminRoute'
 import UserRoute from '../components/UserRoute'
-import TestUserCheck from '../pages/TestUserCheck'
-import TestReviewAPI from '../pages/TestReviewAPI'
 import FixUserRoles from '../pages/FixUserRoles'
 import RoleBasedHomePage from '../components/RoleBasedHomePage'
 import '../utils/roleDebug' // 載入診斷工具
-import {
-  StatusFlowTest,
-  StatusSyncTest,
-  AdminDashboardPOC,
-  CreateUserPOC,
-  EditUserPOC,
-  StatisticsDetailPOC
-} from '../pages/admin/poc'
-import ReviewPage from '../pages/admin/poc/ReviewPage'
 
 function AppRouter() {
   return (
@@ -88,53 +75,6 @@ function AppRouter() {
               <Route path="admin/statistics" element={
                 <AdminRoute fallback={<DashboardPage />}>
                   <StatisticsDetail />
-                </AdminRoute>
-              } />
-              <Route path="admin/api-test" element={
-                <AdminRoute fallback={<DashboardPage />}>
-                  <APITest />
-                </AdminRoute>
-              } />
-              <Route path="admin/submissions" element={
-                <AdminRoute fallback={<DashboardPage />}>
-                  <SubmissionManagement />
-                </AdminRoute>
-              } />
-              <Route path="admin/status-flow-test" element={
-                <AdminRoute fallback={<DashboardPage />}>
-                  <StatusFlowTest />
-                </AdminRoute>
-              } />
-              <Route path="admin/status-sync-test" element={
-                <AdminRoute fallback={<DashboardPage />}>
-                  <StatusSyncTest />
-                </AdminRoute>
-              } />
-
-              {/* POC 管理員頁面 */}
-              <Route path="admin/poc" element={
-                <AdminRoute fallback={<DashboardPage />}>
-                  <AdminDashboardPOC />
-                </AdminRoute>
-              } />
-              <Route path="admin/poc/create" element={
-                <AdminRoute fallback={<DashboardPage />}>
-                  <CreateUserPOC />
-                </AdminRoute>
-              } />
-              <Route path="admin/poc/users/:userId" element={
-                <AdminRoute fallback={<DashboardPage />}>
-                  <EditUserPOC />
-                </AdminRoute>
-              } />
-              <Route path="admin/poc/users/:userId/review/:category" element={
-                <AdminRoute fallback={<DashboardPage />}>
-                  <ReviewPage />
-                </AdminRoute>
-              } />
-              <Route path="admin/poc/statistics" element={
-                <AdminRoute fallback={<DashboardPage />}>
-                  <StatisticsDetailPOC />
                 </AdminRoute>
               } />
 
@@ -238,8 +178,6 @@ function AppRouter() {
                 </UserRoute>
               } />
               <Route path="ping" element={<PingPage />} />
-              <Route path="test-users" element={<TestUserCheck />} />
-              <Route path="test-review-api" element={<TestReviewAPI />} />
               <Route path="fix-user-roles" element={<FixUserRoles />} />
             </Route>
           </Routes>

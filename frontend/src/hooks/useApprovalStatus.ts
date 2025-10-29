@@ -5,8 +5,9 @@ export interface ApprovalStatus {
   isApproved: boolean
   isRejected: boolean
   isPending: boolean
+  isSaved: boolean
   rejectionReason: string
-  status: 'draft' | 'submitted' | 'approved' | 'rejected' | null
+  status: 'saved' | 'submitted' | 'approved' | 'rejected' | null
   reviewNotes?: string
   reviewedAt?: string
   reviewerId?: string
@@ -17,6 +18,7 @@ export const useApprovalStatus = (pageKey: string, year: number) => {
     isApproved: false,
     isRejected: false,
     isPending: false,
+    isSaved: false,
     rejectionReason: '',
     status: null,
     reviewNotes: '',
@@ -25,6 +27,7 @@ export const useApprovalStatus = (pageKey: string, year: number) => {
   })
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [refreshTrigger, setRefreshTrigger] = useState(0)
 
   useEffect(() => {
     const checkApprovalStatus = async () => {
@@ -74,6 +77,7 @@ export const useApprovalStatus = (pageKey: string, year: number) => {
             isApproved: data.status === 'approved',
             isRejected: data.status === 'rejected',
             isPending: data.status === 'submitted',
+            isSaved: data.status === 'saved',
             rejectionReason: data.status === 'rejected' ? (data.review_notes || '') : '',
             status: data.status,
             reviewNotes: data.review_notes || '',
@@ -90,6 +94,7 @@ export const useApprovalStatus = (pageKey: string, year: number) => {
             isApproved: false,
             isRejected: false,
             isPending: false,
+            isSaved: false,
             rejectionReason: '',
             status: null,
             reviewNotes: '',
@@ -109,9 +114,13 @@ export const useApprovalStatus = (pageKey: string, year: number) => {
     if (pageKey && year) {
       checkApprovalStatus()
     }
-  }, [pageKey, year])
+  }, [pageKey, year, refreshTrigger])
 
-  return { ...status, loading, error }
+  const reload = () => {
+    setRefreshTrigger(prev => prev + 1)
+  }
+
+  return { ...status, loading, error, reload }
 }
 
 export default useApprovalStatus

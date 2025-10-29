@@ -290,7 +290,7 @@ export async function getRecentActivities(): Promise<RecentActivity[]> {
     }
 
     const statusMap: Record<string, string> = {
-      'draft': '草稿',
+      'saved': '已暫存',
       'submitted': '提交審核',
       'approved': '審核通過',
       'rejected': '審核退回',
@@ -380,10 +380,14 @@ export async function getRejectionReason(entryId: string): Promise<RejectionDeta
       .select('review_notes, updated_at, status')
       .eq('id', entryId)
       .eq('owner_id', user.id) // 確保資料安全
-      .single()
+      .maybeSingle()  // ✅ 使用 maybeSingle() 防止查詢失敗
 
     if (error) {
       throw handleAPIError(error, '取得退回原因失敗')
+    }
+
+    if (!entry) {
+      throw new Error('找不到對應的填報記錄或無權限查看')
     }
 
     return {

@@ -1,5 +1,9 @@
 import { supabase } from '../lib/supabaseClient'
 import { validateAuth, handleAPIError } from '../utils/authHelpers'
+import type { EnergyEntry } from './entries'
+
+// API Base URL（從環境變數取得，預設 localhost）
+const API_BASE_URL = import.meta.env.VITE_API_BASE || 'http://localhost:5000'
 
 // 前端 key 轉資料庫 key
 // Fixed: unified page_key to 'septic_tank'
@@ -419,60 +423,45 @@ export async function createUser(userData: CreateUserData): Promise<UserProfile>
     const authResult = await validateAuth()
     if (authResult.error) throw authResult.error
 
-    // 在 auth.users 表中建立使用者
-    const { data: authData, error: authError } = await supabase.auth.admin.createUser({
-      email: userData.email,
-      password: userData.password,
-      email_confirm: true
-    })
-
-    if (authError) {
-      console.error('Error creating user in auth:', authError)
-      throw handleAPIError(authError, '無法建立使用者帳號')
-    }
-
-    if (!authData.user) {
-      throw new Error('建立使用者失敗：未取得使用者資料')
-    }
-
-    // 轉換前端格式的能源類別為資料庫格式
+    // ⭐ 轉換前端格式的能源類別為資料庫格式
     const convertedEnergyCategories = userData.energy_categories
       ? convertFrontendKeysToDb(userData.energy_categories)
-      : [];
+      : []
 
-    // 在 profiles 表中建立使用者資料
-    const profileData = {
-      id: authData.user.id,
-      display_name: userData.display_name,
-      email: userData.email,
-      company: userData.company,
-      job_title: userData.job_title,
-      phone: userData.phone,
-      role: userData.role || 'user',
-      is_active: true,
-      filling_config: {
-        ...userData.filling_config,
-        diesel_generator_mode: userData.diesel_generator_version || userData.filling_config?.diesel_generator_mode || 'refuel',
-        // 將能源類別權限儲存在 filling_config 中，使用資料庫格式
+    // ⭐ 呼叫後端 API（後端有 service_role key 權限）
+    const response = await fetch(`${API_BASE_URL}/api/admin/create-user`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${authResult.session?.access_token}`
+      },
+      body: JSON.stringify({
+        email: userData.email,
+        password: userData.password,
+        displayName: userData.display_name,
+        company: userData.company,
+        phone: userData.phone,
+        job_title: userData.job_title,
+        role: userData.role || 'user',
         energy_categories: convertedEnergyCategories,
-        target_year: userData.target_year || new Date().getFullYear()
-      }
+        target_year: userData.target_year || new Date().getFullYear(),
+        diesel_generator_version: userData.diesel_generator_version || 'refuel'
+      })
+    })
+
+    const result = await response.json()
+
+    if (!response.ok) {
+      console.error('Error creating user via backend:', result)
+      throw new Error(result.error || '建立使用者失敗')
     }
 
-    const { data: profileResult, error: profileError } = await supabase
-      .from('profiles')
-      .insert(profileData)
-      .select()
-      .single()
-
-    if (profileError) {
-      console.error('Error creating user profile:', profileError)
-      // 如果 profile 建立失敗，應該刪除已建立的 auth 使用者
-      await supabase.auth.admin.deleteUser(authData.user.id)
-      throw handleAPIError(profileError, '無法建立使用者資料')
+    if (!result.user) {
+      throw new Error('建立使用者失敗：後端未回傳使用者資料')
     }
 
-    return profileResult
+    // ⭐ 後端已建立完整 profile，直接回傳
+    return result.user
   } catch (error) {
     console.error('Error in createUser:', error)
     if (error instanceof Error) {
@@ -644,5 +633,37 @@ export async function getUserWithPermissions(userId: string): Promise<UserProfil
       throw error
     }
     throw new Error('取得用戶資料時發生未知錯誤')
+  }
+}
+
+/**
+ * 取得用戶的所有能源填報記錄
+ * @param userId - 用戶 ID
+ * @returns Promise<EnergyEntry[]>
+ */
+export async function getUserEnergyEntries(userId: string): Promise<EnergyEntry[]> {
+  try {
+    const authResult = await validateAuth()
+    if (authResult.error) throw authResult.error
+
+    const { data, error } = await supabase
+      .from('energy_entries')
+      .select('*')
+      .eq('owner_id', userId)
+      .order('page_key', { ascending: true })
+      .order('created_at', { ascending: false })
+
+    if (error) {
+      console.error('Error fetching user energy entries:', error)
+      throw handleAPIError(error, '無法取得使用者填報記錄')
+    }
+
+    return data || []
+  } catch (error) {
+    console.error('Error in getUserEnergyEntries:', error)
+    if (error instanceof Error) {
+      throw error
+    }
+    throw new Error('取得使用者填報記錄時發生未知錯誤')
   }
 }

@@ -12,7 +12,8 @@ export interface FrontendStatusOptions {
 
 export interface FrontendStatusResult {
   currentStatus: EntryStatus
-  setFrontendStatus: (status: EntryStatus) => void
+  setCurrentStatus: (status: EntryStatus) => void  // 直接暴露內部 setter
+  setFrontendStatus: (status: EntryStatus) => void  // 向後相容
   handleDataChanged: () => void
   handleSubmitSuccess: () => Promise<void>
   isInitialLoad: React.MutableRefObject<boolean>
@@ -78,7 +79,8 @@ export function useFrontendStatus({
 
   return {
     currentStatus,
-    setFrontendStatus,
+    setCurrentStatus,  // 直接暴露內部 setter
+    setFrontendStatus,  // 向後相容
     handleDataChanged,
     handleSubmitSuccess,
     isInitialLoad

@@ -3,11 +3,12 @@ import { useSearchParams } from 'react-router-dom'
 import { Plus, Trash2, Calendar, Truck, AlertCircle, CheckCircle, Upload, Loader2, Eye } from 'lucide-react'
 import { useFrontendStatus } from '../../hooks/useFrontendStatus'
 import { useEditPermissions } from '../../hooks/useEditPermissions'
+import { useRole } from '../../hooks/useRole'
 import StatusIndicator from '../../components/StatusIndicator'
 import EvidenceUpload, { MemoryFile } from '../../components/EvidenceUpload'
 import BottomActionBar from '../../components/BottomActionBar'
 import { EntryStatus } from '../../components/StatusSwitcher'
-import { listMSDSFiles, listUsageEvidenceFiles, commitEvidence, deleteEvidence, deleteEvidenceFile, EvidenceFile, uploadEvidenceWithEntry } from '../../api/files'
+import { listMSDSFiles, listUsageEvidenceFiles, commitEvidence, deleteEvidence, deleteEvidenceFile, EvidenceFile, uploadEvidenceWithEntry, adminDeleteEvidence } from '../../api/files'
 import { upsertEnergyEntry, sumMonthly, UpsertEntryInput, updateEntryStatus, getEntryByPageKeyAndYear, getEntryById } from '../../api/entries'
 import ReviewSection from '../../components/ReviewSection'
 import { getEntryFiles } from '../../api/files'
@@ -86,6 +87,9 @@ export default function DieselGeneratorRefuelPage() {
   })
 
   const { currentStatus, handleSubmitSuccess, handleDataChanged, isInitialLoad } = frontendStatus
+
+  // u89d2u8272u6aa2u67e5
+  const { role } = useRole()
 
   const editPermissions = useEditPermissions(currentStatus || 'submitted')
 
@@ -234,8 +238,9 @@ export default function DieselGeneratorRefuelPage() {
             await uploadEvidenceWithEntry(memFile.file, {
               entryId: entry_id,
               pageKey: pageKey,
+              standard: '64',
               year: currentYear,
-              category: 'other'
+              fileType: 'other'
             })
           }
         }
@@ -335,7 +340,7 @@ export default function DieselGeneratorRefuelPage() {
   const handleStatusChange = async (newStatus: EntryStatus) => {
     try {
       if (currentEntryId) {
-        await updateEntryStatus(currentEntryId, newStatus)
+        await updateEntryStatus(currentEntryId, newStatus as 'draft' | 'submitted' | 'approved' | 'rejected')
       }
       frontendStatus.setFrontendStatus(newStatus)
     } catch (error) {
@@ -571,6 +576,7 @@ export default function DieselGeneratorRefuelPage() {
                 disabled={submitting || !editPermissions.canUploadFiles || isReadOnly}
                 kind="other"
                 mode="edit"
+                isAdminReviewMode={isReviewMode && role === 'admin'}
                 hideFileCount={true}
               />
             </div>
@@ -643,6 +649,7 @@ export default function DieselGeneratorRefuelPage() {
                     disabled={!editPermissions.canUploadFiles || isReadOnly}
                     kind="other"
                     mode="edit"
+                isAdminReviewMode={isReviewMode && role === 'admin'}
                     hideFileCount={true}
                   />
                 </div>

@@ -6,6 +6,7 @@ interface SmartOverwriteItem {
   newFiles: MemoryFile[]        // 新上傳的檔案
   existingFiles: EvidenceFile[] // 現有的檔案
   fileType?: 'msds' | 'usage_evidence' | 'other' // 明確指定檔案類型
+  mode?: 'replace' | 'append'   // 模式：replace=替換（刪除舊的），append=累積（保留舊的）
 }
 
 interface SmartOverwriteOptions {
@@ -58,17 +59,27 @@ export async function smartOverwriteFiles(
         console.log(`  現有: ${existingFiles.length} 個, 新增: ${newFiles.length} 個`)
       }
 
-      // 如果有新檔案，執行覆蓋
+      // 如果有新檔案，執行覆蓋或累積
       if (newFiles.length > 0) {
-        // 刪除舊檔案
-        for (const oldFile of existingFiles) {
-          try {
-            await deleteEvidenceFile(oldFile.id)
-            result.deleted++
-            if (debug) console.log(`  ✅ 刪除: ${oldFile.file_name}`)
-          } catch (error) {
-            console.error(`  ❌ 刪除失敗: ${oldFile.file_name}`)
-            // 刪除失敗但繼續處理
+        const mode = item.mode || 'replace'  // 預設為替換模式
+
+        if (mode === 'replace') {
+          // 替換模式：刪除舊檔案
+          for (const oldFile of existingFiles) {
+            try {
+              await deleteEvidenceFile(oldFile.id)
+              result.deleted++
+              if (debug) console.log(`  ✅ 刪除: ${oldFile.file_name}`)
+            } catch (error) {
+              console.error(`  ❌ 刪除失敗: ${oldFile.file_name}`)
+              // 刪除失敗但繼續處理
+            }
+          }
+        } else {
+          // 累積模式：保留舊檔案
+          result.kept = existingFiles.length
+          if (debug && existingFiles.length > 0) {
+            console.log(`  📌 保留 ${existingFiles.length} 個舊檔案 (累積模式)`)
           }
         }
 
@@ -92,7 +103,7 @@ export async function smartOverwriteFiles(
             await uploadEvidenceWithEntry(memFile.file, {
               entryId,
               pageKey,
-              year,
+              standard: '64',
               category,
               month
             })

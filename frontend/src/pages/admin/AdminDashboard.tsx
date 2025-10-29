@@ -5,7 +5,7 @@ import StatsCard from './components/StatsCard'
 import UserCard from './components/UserCard'
 import SearchBar from './components/SearchBar'
 import StatusFilter from './components/StatusFilter'
-import UserExportModal, { ExportOptions } from './components/UserExportModal'
+import UserExportModal from './components/UserExportModal'
 import { DashboardSkeleton } from './components/LoadingSkeleton'
 import { PageHeader } from './components/PageHeader'
 import RejectModal from './components/RejectModal'
@@ -67,6 +67,7 @@ const AdminDashboard: React.FC = () => {
   const [showUserExportModal, setShowUserExportModal] = useState(false)
   const [selectedUser, setSelectedUser] = useState<User | null>(null)
   const [isUserExporting, setIsUserExporting] = useState(false)
+  const [exportProgress, setExportProgress] = useState<{ status: string; current?: number; total?: number } | null>(null)
   const [lastUpdated, setLastUpdated] = useState<Date>(new Date())
   const [isRefreshing, setIsRefreshing] = useState(false)
   const [showCreateUserModal, setShowCreateUserModal] = useState(false)
@@ -336,17 +337,35 @@ const AdminDashboard: React.FC = () => {
     setShowUserExportModal(true)
   }
 
-  const handleUserExportConfirm = async (options: ExportOptions) => {
+  const handleUserExportConfirm = async () => {
     if (!selectedUser) return
 
     setIsUserExporting(true)
+    setExportProgress({ status: '正在準備...' })
+
     try {
-      await withRetry(() => exportSingleUser(selectedUser.id, options))
+      const result = await withRetry(() =>
+        exportSingleUser(
+          selectedUser.id,
+          selectedUser.name,
+          (status, current, total) => {
+            setExportProgress({ status, current, total })
+          }
+        )
+      )
+
       setShowUserExportModal(false)
-      toast.success('匯出完成！')
-    } catch (err) {
+      setExportProgress(null)
+
+      if (result.failed === 0) {
+        toast.success(`✅ 下載完成！成功：${result.success} 個檔案`)
+      } else {
+        toast.success(`⚠️ 部分檔案失敗\n成功：${result.success}\n失敗：${result.failed}`)
+      }
+    } catch (err: any) {
       const apiError = handleAPIError(err)
       showErrorToast(apiError)
+      setExportProgress(null)
     } finally {
       setIsUserExporting(false)
     }
@@ -356,6 +375,7 @@ const AdminDashboard: React.FC = () => {
     if (!isUserExporting) {
       setShowUserExportModal(false)
       setSelectedUser(null)
+      setExportProgress(null)
     }
   }
 
@@ -693,8 +713,9 @@ const AdminDashboard: React.FC = () => {
         onClose={handleUserExportClose}
         onConfirm={handleUserExportConfirm}
         userName={selectedUser?.name || ''}
-        companyName="示例科技有限公司"
+        companyName={selectedUser?.department || ''}
         isExporting={isUserExporting}
+        exportProgress={exportProgress}
       />
 
       {/* 退回對話框 */}

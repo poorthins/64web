@@ -6,9 +6,14 @@ import { getCategoryInfo } from '../utils/categoryConstants'
 
 export interface FileMetadata {
   pageKey: string
-  year: number
-  category: 'msds' | 'usage_evidence' | 'heat_value_evidence' | 'annual_evidence' | 'nameplate_evidence' | 'other'
+  standard: string  // ISO 標準代碼：'64' (ISO 14064) 或 '67' (ISO 14067)
+  year?: number  // 期間年份，預設為當前年份
   month?: number  // 僅用於 usage_evidence，表示月份 (1-12)
+  recordIndex?: number  // 用於多筆記錄頁面（如柴油），表示記錄索引 (0, 1, 2...) - 舊做法
+  recordId?: string  // 用於多筆記錄頁面，穩定的記錄 ID（如 "fire_extinguisher_123"）- 新做法
+  allRecordIds?: string[]  // ⭐ 群組的所有 recordId（用於 N:1 共享佐證）
+  fileType?: 'msds' | 'usage_evidence' | 'other' | 'heat_value_evidence' | 'annual_evidence' | 'nameplate_evidence'  // ⭐ 新增檔案類型欄位
+  category?: 'msds' | 'usage_evidence' | 'other' | 'heat_value_evidence' | 'annual_evidence' | 'nameplate_evidence'  // 向後相容（已廢棄）
 }
 
 export interface UploadOptions {
@@ -26,9 +31,12 @@ export interface EvidenceFile {
   created_at: string
   month?: number | null  // 月份欄位，NULL 表示 MSDS
   page_key?: string      // 頁面標識符
+  record_index?: number | null  // 記錄索引（用於多筆記錄頁面）- 舊做法
+  record_id?: string | null  // 記錄 ID（穩定 ID）- 舊做法
+  record_ids?: string[] | null  // 記錄 IDs（多對一關係）- 新做法
   file_type: 'msds' | 'usage_evidence' | 'other' | 'heat_value_evidence' | 'annual_evidence' | 'nameplate_evidence'  // 檔案類型欄位 (必填)
   // Join fields from energy_entries
-  status?: 'draft' | 'submitted' | 'approved' | 'rejected'  // From energy_entries
+  status?: 'saved' | 'submitted' | 'approved' | 'rejected'  // From energy_entries
   period_year?: number  // From energy_entries
 }
 
@@ -121,6 +129,9 @@ async function uploadEvidenceWithValidation(file: File, meta: FileMetadata & { e
     }
     const user = authResult.user
 
+    // 確保 year 有值，預設為當前年份
+    const currentYear = meta.year || new Date().getFullYear()
+
     // 驗證檔案類型
     const typeValidation = validateFileType(file)
     if (!typeValidation.valid) {
@@ -130,13 +141,15 @@ async function uploadEvidenceWithValidation(file: File, meta: FileMetadata & { e
     // 推斷正確的 MIME 類型
     const resolvedType = inferMimeType(file)
 
-    // Month 和 file_type 參數驗證
-    const expectedFileType = meta.category === 'msds' ? 'msds' :
+    // Month 和 file_type 參數驗證（優先使用 meta.fileType）
+    const expectedFileType = meta.fileType || (meta.category === 'msds' ? 'msds' :
                             meta.category === 'usage_evidence' ? 'usage_evidence' :
-                            meta.category === 'nameplate_evidence' ? 'nameplate_evidence' : 'other'
+                            meta.category === 'annual_evidence' ? 'annual_evidence' :
+                            meta.category === 'nameplate_evidence' ? 'nameplate_evidence' : 'other')
 
     console.log('🔍 [uploadEvidence] File type validation:', {
       file_name: file.name,
+      fileType: meta.fileType,
       category: meta.category,
       month_input: meta.month,
       expected_file_type: expectedFileType
@@ -234,13 +247,11 @@ async function uploadEvidenceWithValidation(file: File, meta: FileMetadata & { e
       safeName: safeName
     })
 
-    // 構造檔案路徑：{userId}/{pageKey}/{year}/{category}/{month?}/{filename}
-    const categoryPath = meta.category
-    const monthPath = meta.category === 'usage_evidence' && meta.month ? `/${meta.month}` : ''
-    const filePath = `${user.id}/${meta.pageKey}/${meta.year}/${categoryPath}${monthPath}/${fileName}`
+    // 構造檔案路徑：{userId}/{standard}/{pageKey}/{month?}/{filename}
+    const monthPath = meta.month ? `/${meta.month}` : ''
+    const filePath = `${user.id}/${meta.standard}/${meta.pageKey}${monthPath}/${fileName}`
 
     console.log('🔍 [DEBUG] Constructed file path:', {
-      categoryPath,
       monthPath,
       fullFilePath: filePath
     })
@@ -409,11 +420,12 @@ async function uploadEvidenceWithValidation(file: File, meta: FileMetadata & { e
       throw new Error('無法取得有效的能源記錄 ID')
     }
 
-    // 建立資料庫記錄
-    const monthValue = meta.category === 'usage_evidence' ? meta.month : null
-    const fileTypeValue = meta.category === 'msds' ? 'msds' :
+    // 建立資料庫記錄（優先使用 meta.fileType）
+    const monthValue = expectedFileType === 'usage_evidence' ? meta.month : null
+    const fileTypeValue = meta.fileType || (meta.category === 'msds' ? 'msds' :
                          meta.category === 'usage_evidence' ? 'usage_evidence' :
-                         meta.category === 'nameplate_evidence' ? 'nameplate_evidence' : 'other'
+                         meta.category === 'annual_evidence' ? 'annual_evidence' :
+                         meta.category === 'nameplate_evidence' ? 'nameplate_evidence' : 'other')
 
     const fileRecord = {
       owner_id: user.id,
@@ -424,11 +436,15 @@ async function uploadEvidenceWithValidation(file: File, meta: FileMetadata & { e
       file_size: file.size,
       page_key: meta.pageKey,
       month: monthValue,
-      file_type: fileTypeValue
+      file_type: fileTypeValue,
+      record_index: meta.recordIndex ?? null,  // 舊做法（向後相容）
+      record_id: meta.recordId ?? null,  // 舊做法（向後相容）
+      record_ids: meta.allRecordIds || (meta.recordId ? [meta.recordId] : null)  // ⭐ 優先使用 allRecordIds
     }
 
     console.log('💾 [uploadEvidence] Database record:', {
       file_name: file.name,
+      fileType_input: meta.fileType,
       category: meta.category,
       month_input: meta.month,
       final_month_value: monthValue,
@@ -756,18 +772,37 @@ export async function getFileUrl(filePath: string): Promise<string> {
       .createSignedUrl(filePath, 3600) // 1小時有效期
 
     if (error) {
-      console.error('❌ [getFileUrl] Supabase storage error:', {
-        message: error?.message,
+      // ✅ 改善錯誤序列化：提取所有可能的錯誤資訊
+      const errorInfo = {
+        message: error?.message || String(error),
+        name: error?.name,
         status: (error as any)?.status,
         statusText: (error as any)?.statusText,
-        error: (error as any)?.error,
+        statusCode: (error as any)?.statusCode,
         code: (error as any)?.code,
         hint: (error as any)?.hint,
         details: (error as any)?.details,
         filePath,
-        fullError: JSON.stringify(error, null, 2)
-      })
-      throw new Error(`Storage error: ${error.message || '未知錯誤'}`)
+        // ✅ 增加更詳細的錯誤物件檢查
+        errorKeys: Object.keys(error || {}),
+        errorType: typeof error,
+        errorConstructor: error?.constructor?.name,
+        errorString: String(error),
+        // 嘗試 JSON 序列化（可能失敗）
+        jsonAttempt: (() => {
+          try {
+            return JSON.stringify(error, null, 2)
+          } catch {
+            return '[JSON serialization failed]'
+          }
+        })()
+      }
+
+      console.error('❌ [getFileUrl] Supabase storage error:', errorInfo)
+
+      // ✅ 提供更有用的錯誤訊息
+      const errorMsg = error?.message || error?.name || `Storage 錯誤 (${typeof error})`
+      throw new Error(`Storage error: ${errorMsg}`)
     }
 
     if (!data?.signedUrl) {
@@ -980,7 +1015,7 @@ export async function getFileUrlForAdmin(
     console.log('📍 [getFileUrlForAdmin] Trying standard approach first...')
     const { data, error } = await supabase.storage
       .from('evidence')
-      .createSignedUrl(filePath, 3600) // 1小時有效期
+      .createSignedUrl(filePath, 60) // 60秒有效期（安全考量）
 
     if (!error && data?.signedUrl) {
       console.log('✅ [getFileUrlForAdmin] Standard approach succeeded')
@@ -1054,46 +1089,69 @@ export async function deleteEvidence(fileId: string): Promise<void> {
     }
     const user = authResult.user
 
-    // 先取得檔案資訊
+    console.log('🗑️ [deleteEvidence] Starting deletion:', { fileId, userId: user.id })
+
+    // 1. 先取得檔案資訊
     const { data: fileData, error: fetchError } = await supabase
       .from('entry_files')
       .select('file_path, owner_id')
       .eq('id', fileId)
       .eq('owner_id', user.id) // 確保只能刪除自己的檔案
-      .single()
+      .maybeSingle()  // ✅ 使用 maybeSingle() 允許 0 或 1 筆結果
 
     if (fetchError) {
-      console.error('Error fetching file data:', fetchError)
+      console.error('❌ [deleteEvidence] Error fetching file data:', fetchError)
       throw handleAPIError(fetchError, '取得檔案資訊失敗')
     }
 
     if (!fileData) {
-      throw new Error('檔案不存在或無權限刪除')
+      console.warn(`⚠️ [deleteEvidence] File ${fileId} not found or already deleted`)
+      return  // 靜默返回，視為檔案已被刪除
     }
 
-    // 從資料庫直接刪除記錄（而不是標記為已刪除，因為entry_files沒有status欄位）
-    const { error: deleteError } = await supabase
+    console.log('📂 [deleteEvidence] File info retrieved:', {
+      filePath: fileData.file_path,
+      ownerId: fileData.owner_id
+    })
+
+    // 2. ✅ 先從 Storage 刪除實體檔案（Linus 修正：先刪實體資源，再刪索引）
+    try {
+      console.log('🗑️ [deleteEvidence] Deleting from Storage...')
+      const { error: storageError } = await supabase.storage
+        .from('evidence')
+        .remove([fileData.file_path])
+
+      if (storageError) {
+        console.warn('⚠️ [deleteEvidence] Storage deletion failed (will continue):', {
+          error: storageError,
+          message: storageError.message,
+          filePath: fileData.file_path
+        })
+        // ✅ Storage 錯誤不拋出異常 - 檔案可能已不存在，繼續清理資料庫
+      } else {
+        console.log('✅ [deleteEvidence] Storage file deleted successfully')
+      }
+    } catch (storageError) {
+      console.warn('⚠️ [deleteEvidence] Storage deletion exception (will continue):', storageError)
+      // ✅ Storage 異常不應阻止資料庫清理
+    }
+
+    // 3. ✅ 再從資料庫刪除記錄（無論 Storage 是否成功）
+    console.log('🗑️ [deleteEvidence] Deleting database record...')
+    const { error: dbError } = await supabase
       .from('entry_files')
       .delete()
       .eq('id', fileId)
       .eq('owner_id', user.id)
 
-    if (deleteError) {
-      console.error('Error deleting file record:', deleteError)
-      throw handleAPIError(deleteError, '刪除檔案記錄失敗')
+    if (dbError) {
+      console.error('❌ [deleteEvidence] Database deletion failed:', dbError)
+      throw handleAPIError(dbError, '刪除檔案記錄失敗')
     }
 
-    // 從 Storage 刪除檔案（在資料庫更新後）
-    const { error: storageError } = await supabase.storage
-      .from('evidence')
-      .remove([fileData.file_path])
-
-    if (storageError) {
-      console.warn('Warning: File deleted from database but storage cleanup failed:', storageError)
-      // 不拋出錯誤，因為資料庫記錄已經標記為刪除
-    }
+    console.log('✅ [deleteEvidence] File deleted successfully:', fileId)
   } catch (error) {
-    console.error('Error in deleteEvidence:', error)
+    console.error('❌ [deleteEvidence] Error:', error)
     if (error instanceof Error) {
       throw error
     }
@@ -1101,6 +1159,99 @@ export async function deleteEvidence(fileId: string): Promise<void> {
   }
 }
 
+/**
+ * 管理員刪除證據檔案（不檢查 owner_id，需要管理員權限）
+ *
+ * 用途：管理員在審核模式下刪除用戶上傳的檔案
+ *
+ * @param fileId - 要刪除的檔案 ID
+ * @throws 如果非管理員呼叫，拋出權限錯誤
+ */
+export async function adminDeleteEvidence(fileId: string): Promise<void> {
+  try {
+    const authResult = await validateAuth()
+    if (authResult.error || !authResult.user) {
+      throw authResult.error || new Error('使用者未登入')
+    }
+    const user = authResult.user
+
+    console.log('🔐 [adminDeleteEvidence] Starting admin deletion:', { fileId, adminId: user.id })
+
+    // 1. 驗證管理員權限
+    const { data: profile, error: profileError } = await supabase
+      .from('profiles')
+      .select('role')
+      .eq('id', user.id)
+      .single()
+
+    if (profileError || profile?.role !== 'admin') {
+      console.error('❌ [adminDeleteEvidence] Permission denied:', { userId: user.id, role: profile?.role })
+      throw new Error('權限不足：僅管理員可執行此操作')
+    }
+
+    console.log('✅ [adminDeleteEvidence] Admin permission verified')
+
+    // 2. 查詢檔案資訊（不過濾 owner_id）
+    const { data: fileData, error: fetchError } = await supabase
+      .from('entry_files')
+      .select('file_path, owner_id')
+      .eq('id', fileId)
+      .maybeSingle()
+
+    if (fetchError) {
+      console.error('❌ [adminDeleteEvidence] Error fetching file:', fetchError)
+      throw handleAPIError(fetchError, '取得檔案資訊失敗')
+    }
+
+    if (!fileData) {
+      console.warn(`⚠️ [adminDeleteEvidence] File ${fileId} not found or already deleted`)
+      return  // 靜默返回，視為檔案已被刪除
+    }
+
+    console.log('📂 [adminDeleteEvidence] File info retrieved:', {
+      filePath: fileData.file_path,
+      ownerId: fileData.owner_id
+    })
+
+    // 3. 從 Storage 刪除實體檔案
+    try {
+      console.log('🗑️ [adminDeleteEvidence] Deleting from Storage...')
+      const { error: storageError } = await supabase.storage
+        .from('evidence')
+        .remove([fileData.file_path])
+
+      if (storageError) {
+        console.warn('⚠️ [adminDeleteEvidence] Storage deletion failed (will continue):', storageError)
+        // Storage 錯誤不拋出 - 檔案可能已不存在，繼續清理資料庫
+      } else {
+        console.log('✅ [adminDeleteEvidence] Storage file deleted')
+      }
+    } catch (storageError) {
+      console.warn('⚠️ [adminDeleteEvidence] Storage exception (will continue):', storageError)
+    }
+
+    // 4. 從資料庫刪除記錄（不過濾 owner_id）
+    console.log('🗑️ [adminDeleteEvidence] Deleting database record...')
+    const { error: dbError } = await supabase
+      .from('entry_files')
+      .delete()
+      .eq('id', fileId)
+      // ⭐ 不檢查 owner_id，允許管理員刪除任何檔案
+
+    if (dbError) {
+      console.error('❌ [adminDeleteEvidence] Database deletion failed:', dbError)
+      throw handleAPIError(dbError, '刪除檔案記錄失敗')
+    }
+
+    console.log('✅ [adminDeleteEvidence] Admin deletion completed:', fileId)
+  } catch (error) {
+    console.error('❌ [adminDeleteEvidence] Error:', error)
+    if (error instanceof Error) {
+      throw error
+    }
+    throw new Error('管理員刪除檔案時發生未知錯誤')
+  }
+}
 /**
  * 將草稿檔案提交（狀態改為 submitted）
  */
@@ -1325,6 +1476,123 @@ export { getCategoryFromPageKey }
 // Add missing function for WD40Page
 export async function debugDatabaseContent(): Promise<void> {
   console.log('Debug database content called')
+}
+
+/**
+ * 清理孤兒檔案記錄
+ * 刪除所有沒有對應 energy_entries 的 entry_files 記錄
+ *
+ * 使用場景:
+ * - 管理員工具
+ * - 定期維護任務
+ * - 解決「幽靈檔案」問題
+ *
+ * @returns Promise<{ deletedCount: number, errors: string[] }>
+ */
+export async function cleanOrphanFiles(): Promise<{ deletedCount: number, errors: string[] }> {
+  try {
+    console.group('🧹 [cleanOrphanFiles] Starting orphan file cleanup')
+
+    const authResult = await validateAuth()
+    if (authResult.error || !authResult.user) {
+      throw authResult.error || new Error('使用者未登入')
+    }
+
+    // 1. 查詢所有當前用戶的檔案記錄
+    const { data: allFiles, error: queryError } = await supabase
+      .from('entry_files')
+      .select('id, file_path, entry_id, created_at')
+      .eq('owner_id', authResult.user.id)
+
+    if (queryError) {
+      console.error('❌ [cleanOrphanFiles] Query error:', queryError)
+      throw handleAPIError(queryError, '查詢檔案記錄失敗')
+    }
+
+    if (!allFiles || allFiles.length === 0) {
+      console.log('ℹ️ [cleanOrphanFiles] No files found')
+      console.groupEnd()
+      return { deletedCount: 0, errors: [] }
+    }
+
+    console.log(`📊 [cleanOrphanFiles] Found ${allFiles.length} file records, checking for orphans...`)
+
+    // 2. 對每個檔案，檢查其 entry_id 是否對應有效的 energy_entries
+    const orphanFiles: typeof allFiles = []
+
+    for (const file of allFiles) {
+      const { data: entry } = await supabase
+        .from('energy_entries')
+        .select('id')
+        .eq('id', file.entry_id)
+        .maybeSingle()
+
+      if (!entry) {
+        console.log(`🔍 [cleanOrphanFiles] Found orphan file:`, {
+          fileId: file.id,
+          entryId: file.entry_id,
+          filePath: file.file_path
+        })
+        orphanFiles.push(file)
+      }
+    }
+
+    console.log(`🎯 [cleanOrphanFiles] Found ${orphanFiles.length} orphan files`)
+
+    if (orphanFiles.length === 0) {
+      console.groupEnd()
+      return { deletedCount: 0, errors: [] }
+    }
+
+    // 3. 刪除孤兒檔案
+    let deletedCount = 0
+    const errors: string[] = []
+
+    for (const orphan of orphanFiles) {
+      try {
+        // 先刪 Storage
+        try {
+          await supabase.storage
+            .from('evidence')
+            .remove([orphan.file_path])
+          console.log(`✅ [cleanOrphanFiles] Deleted storage file: ${orphan.file_path}`)
+        } catch (storageError) {
+          console.warn(`⚠️ [cleanOrphanFiles] Storage deletion failed (continuing):`, storageError)
+        }
+
+        // 再刪資料庫
+        const { error: dbError } = await supabase
+          .from('entry_files')
+          .delete()
+          .eq('id', orphan.id)
+
+        if (dbError) {
+          errors.push(`Failed to delete file ${orphan.id}: ${dbError.message}`)
+          console.error(`❌ [cleanOrphanFiles] DB deletion failed:`, dbError)
+        } else {
+          deletedCount++
+          console.log(`✅ [cleanOrphanFiles] Deleted orphan file: ${orphan.id}`)
+        }
+      } catch (error) {
+        const errorMsg = error instanceof Error ? error.message : String(error)
+        errors.push(`Error processing file ${orphan.id}: ${errorMsg}`)
+        console.error(`❌ [cleanOrphanFiles] Error:`, error)
+      }
+    }
+
+    console.log(`✅ [cleanOrphanFiles] Cleanup complete:`, {
+      totalOrphans: orphanFiles.length,
+      deletedCount,
+      errorCount: errors.length
+    })
+    console.groupEnd()
+
+    return { deletedCount, errors }
+  } catch (error) {
+    console.error('❌ [cleanOrphanFiles] Fatal error:', error)
+    console.groupEnd()
+    throw error instanceof Error ? error : new Error('清理孤兒檔案時發生未知錯誤')
+  }
 }
 
 /**

@@ -1,6 +1,6 @@
 import React from 'react'
 
-export type EntryStatus = 'submitted' | 'approved' | 'rejected'
+export type EntryStatus = 'saved' | 'submitted' | 'approved' | 'rejected'
 
 interface StatusSwitcherProps {
   currentStatus: EntryStatus
@@ -10,6 +10,12 @@ interface StatusSwitcherProps {
 }
 
 const statusConfig = {
+  saved: {
+    label: '已暫存',
+    color: 'bg-blue-100 text-blue-700 border-blue-300',
+    hoverColor: 'hover:bg-blue-200',
+    description: '可編輯，按鈕顯示「提交填報」'
+  },
   rejected: {
     label: '已駁回',
     color: 'bg-red-100 text-red-700 border-red-300',
@@ -17,9 +23,9 @@ const statusConfig = {
     description: '可編輯，按鈕顯示「重新提交」'
   },
   submitted: {
-    label: '已提交',
-    color: 'bg-blue-100 text-blue-700 border-blue-300',
-    hoverColor: 'hover:bg-blue-200',
+    label: '待審核',
+    color: 'bg-yellow-100 text-yellow-700 border-yellow-300',
+    hoverColor: 'hover:bg-yellow-200',
     description: '可編輯，按鈕顯示「更新提交」'
   },
   approved: {
@@ -97,6 +103,8 @@ export function isReadOnly(status: EntryStatus): boolean {
 // 輔助函數：根據狀態取得按鈕文字
 export function getButtonText(status: EntryStatus): string {
   switch (status) {
+    case 'saved':
+      return '提交填報'
     case 'rejected':
       return '重新提交'
     case 'submitted':

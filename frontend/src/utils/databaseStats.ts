@@ -194,7 +194,7 @@ export async function getSubmissionStats(): Promise<{
 
     // 查詢各狀態的填報數
     const statusCounts = await Promise.all([
-      supabase.from('energy_entries').select('*', { count: 'exact', head: true }).eq('status', 'draft'),
+      supabase.from('energy_entries').select('*', { count: 'exact', head: true }).eq('status', 'saved'),
       supabase.from('energy_entries').select('*', { count: 'exact', head: true }).eq('status', 'submitted'),
       supabase.from('energy_entries').select('*', { count: 'exact', head: true }).eq('status', 'approved'),
       supabase.from('energy_entries').select('*', { count: 'exact', head: true }).eq('status', 'rejected')

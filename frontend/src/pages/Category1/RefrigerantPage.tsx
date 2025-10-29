@@ -1,20 +1,33 @@
 import { useState, useEffect, useMemo, useCallback } from 'react';
-import { AlertCircle, X, Trash2 } from 'lucide-react'
+import { useNavigate, useSearchParams } from 'react-router-dom'
+import { AlertCircle, X, Trash2, Eye, Loader2, CheckCircle } from 'lucide-react'
 import EvidenceUpload from '../../components/EvidenceUpload';
 import { MemoryFile } from '../../components/EvidenceUpload';
 import { EntryStatus } from '../../components/StatusSwitcher';
 import BottomActionBar from '../../components/BottomActionBar';
+import ReviewSection from '../../components/ReviewSection'
 import { useEditPermissions } from '../../hooks/useEditPermissions';
 import { useFrontendStatus } from '../../hooks/useFrontendStatus';
-import { updateEntryStatus, getEntryByPageKeyAndYear, upsertEnergyEntry } from '../../api/entries';
-import { getEntryFiles, EvidenceFile, uploadEvidenceWithEntry, updateFileEntryAssociation, getFileUrl, deleteEvidenceFile } from '../../api/files';
+import { useApprovalStatus } from '../../hooks/useApprovalStatus';
+import { useEnergyData } from '../../hooks/useEnergyData'
+import { useMultiRecordSubmit } from '../../hooks/useMultiRecordSubmit'
+import { useEnergyClear } from '../../hooks/useEnergyClear'
+import { useSubmitGuard } from '../../hooks/useSubmitGuard'
+import { useGhostFileCleaner } from '../../hooks/useGhostFileCleaner'
+import { useRecordFileMapping } from '../../hooks/useRecordFileMapping'
+import { useSubmissions } from '../admin/hooks/useSubmissions'
+import { useRole } from '../../hooks/useRole'
+import { useAdminSave } from '../../hooks/useAdminSave'
+import { updateEntryStatus, getEntryByPageKeyAndYear, upsertEnergyEntry, deleteEnergyEntry } from '../../api/entries';
+import { getEntryFiles, EvidenceFile, uploadEvidenceWithEntry, updateFileEntryAssociation, deleteEvidenceFile } from '../../api/files';
 import { supabase } from '../../lib/supabaseClient';
 import { designTokens } from '../../utils/designTokens';
 import { DocumentHandler } from '../../services/documentHandler';
+import Toast, { ToastType } from '../../components/Toast';
 
 
 interface RefrigerantData {
-  id: number;
+  id: string;  // ⭐ 改用 string（穩定的 recordId）
   brandName: string;      // 廠牌名稱
   modelNumber: string;    // 型號
   equipmentLocation: string;
@@ -31,7 +44,7 @@ interface RefrigerantData {
 
 // 固定的「範例列」，會放在第一列、不可編輯/不可刪除/不參與送出
 const EXAMPLE_ROW: RefrigerantData = {
-  id: -1,
+  id: 'example',  // ⭐ 字串 ID
   brandName: '三洋',
   modelNumber: 'SR-480BV5',
   equipmentLocation: 'A棟5樓529辦公室',
@@ -49,134 +62,105 @@ const withExampleFirst = (rows: RefrigerantData[]) => {
 };
 
 export default function RefrigerantPage() {
-  console.log('🔄 RefrigerantPage: Component started rendering')
+  const navigate = useNavigate()
+  const [searchParams] = useSearchParams()
+
+  // 審核模式檢測
+  const isReviewMode = searchParams.get('mode') === 'review'
+  const reviewEntryId = searchParams.get('entryId')
+  const reviewUserId = searchParams.get('userId')
+
   const pageKey = 'refrigerant'
   const [year] = useState(new Date().getFullYear())
   const [initialStatus, setInitialStatus] = useState<EntryStatus>('submitted')
   const [currentEntryId, setCurrentEntryId] = useState<string | null>(null)
-  const [submitting, setSubmitting] = useState(false)
+  const { executeSubmit, submitting } = useSubmitGuard()
   const [hasSubmittedBefore, setHasSubmittedBefore] = useState(false)
+  const [showSuccessModal, setShowSuccessModal] = useState(false)
   const [showClearConfirmModal, setShowClearConfirmModal] = useState(false)
-  const EMPTY_FILES = useMemo(() => [], []);   // 穩定的空陣列（避免每次都是新的 []）
-  const NOOP = useCallback(() => {}, []);   // 穩定的空函式（避免每次都是新的 ()=>{}）
 
   // 圖片放大 lightbox
   const [lightboxSrc, setLightboxSrc] = useState<string | null>(null);
-  const [fileUrls, setFileUrls] = useState<Record<string, string>>({});
+  const [error, setError] = useState<string | null>(null);
+  const [success, setSuccess] = useState<string | null>(null);
+
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setLightboxSrc(null) }
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, []);
 
+  // 前端狀態管理 Hook
+  const frontendStatus = useFrontendStatus({
+    initialStatus,
+    entryId: currentEntryId,
+    onStatusChange: () => {},
+    onError: (error) => setError(error),
+    onSuccess: (message) => setSuccess(message)
+  })
 
+  const { currentStatus, setCurrentStatus, handleDataChanged, handleSubmitSuccess, isInitialLoad } = frontendStatus
 
+  // 角色檢查 Hook
+  const { role } = useRole()
+  const isReadOnly = isReviewMode && role !== 'admin'
 
+  // 管理員審核儲存 Hook
+  const { save: adminSave, saving: adminSaving } = useAdminSave(pageKey, reviewEntryId)
 
+  const editPermissions = useEditPermissions(currentStatus, isReadOnly)
 
-  // 修正後的檔案預覽URL函數 - 使用 signed URL
-  const getFilePreviewUrl = (memoryFile?: MemoryFile, evidenceFile?: EvidenceFile): string => {
-    try {
-      // 優先使用已上傳的 Supabase 檔案 - 使用 signed URL
-      if (evidenceFile?.file_path) {
-        // 確保不是誤存的 blob URL
-        if (evidenceFile.file_path.startsWith('blob:')) {
-          console.warn('❌ 檔案路徑錯誤：不應該是 blob URL', {
-            fileId: evidenceFile.id,
-            filePath: evidenceFile.file_path
-          })
-          return ''
-        }
+  // 資料載入 Hook
+  const entryIdToLoad = isReviewMode && reviewEntryId ? reviewEntryId : undefined
+  const {
+    entry: loadedEntry,
+    files: loadedFiles,
+    loading: dataLoading,
+    error: dataError,
+    reload
+  } = useEnergyData(pageKey, year, entryIdToLoad)
 
-        // 使用預先載入的 signed URL
-        if (fileUrls[evidenceFile.id]) {
-          console.log('📂 使用已載入的 signed URL:', {
-            fileId: evidenceFile.id,
-            fileName: evidenceFile.file_name,
-            hasUrl: !!fileUrls[evidenceFile.id]
-          })
-          return fileUrls[evidenceFile.id]
-        }
+  // 審核狀態 Hook
+  const { reload: reloadApprovalStatus, ...approvalStatus } = useApprovalStatus(pageKey, year)
 
-        console.log('⏳ Signed URL 尚未載入:', {
-          fileId: evidenceFile.id,
-          fileName: evidenceFile.file_name
-        })
-        return '' // 等待 signed URL 載入
-      }
+  // 審核 API hook
+  const { reviewSubmission } = useSubmissions()
 
-      // 記憶體檔案（尚未上傳）
-      if (memoryFile) {
-        // 如果已有 preview URL，直接使用
-        if (memoryFile.preview) {
-          console.log('🖼️ 使用記憶體檔案 preview URL:', {
-            fileName: memoryFile.file_name,
-            preview: memoryFile.preview
-          })
-          return memoryFile.preview
-        }
+  // 提交 Hook（多記錄專用）
+  const {
+    submit,
+    save,
+    submitting: submitLoading,
+    error: submitError,
+    success: submitSuccess,
+    clearError: clearSubmitError,
+    clearSuccess: clearSubmitSuccess
+  } = useMultiRecordSubmit(pageKey, year)
 
-        // 否則從 File 物件建立
-        if (memoryFile.file && memoryFile.file instanceof File) {
-          const blobUrl = URL.createObjectURL(memoryFile.file)
-          console.log('🔗 建立新的 blob URL:', {
-            fileName: memoryFile.file_name,
-            blobUrl
-          })
-          return blobUrl
-        }
-      }
+  // 清除 Hook
+  const {
+    clear,
+    clearing: clearLoading,
+    error: clearError,
+    clearError: clearClearError
+  } = useEnergyClear(currentEntryId, currentStatus)
 
-      return ''
-    } catch (error) {
-      console.error('❌ 取得預覽 URL 失敗:', {
-        error,
-        memoryFile: memoryFile?.file_name,
-        evidenceFile: evidenceFile?.file_name
-      })
-      return ''
-    }
-  }
+  // 幽靈檔案清理 Hook
+  const { cleanFiles } = useGhostFileCleaner()
 
-  const getFirstFile = (data: RefrigerantData) => {
-    const memoryFile = data.memoryFiles?.[0]
-    const evidenceFile = data.evidenceFiles?.[0]
-    return { memoryFile, evidenceFile }
-  }
-
-  // 取得檔案資訊的輔助函數
-  const getFileInfo = (memoryFile?: MemoryFile, evidenceFile?: EvidenceFile) => {
-    if (evidenceFile) {
-      return {
-        name: evidenceFile.file_name,
-        type: evidenceFile.mime_type,
-        size: evidenceFile.file_size
-      }
-    }
-    if (memoryFile) {
-      return {
-        name: memoryFile.file_name,
-        type: memoryFile.mime_type,
-        size: memoryFile.file?.size
-      }
-    }
-    return null
-  }
-
-  // 檢查檔案是否為圖片
-  const isImageFile = (memoryFile?: MemoryFile, evidenceFile?: EvidenceFile): boolean => {
-    const mimeType = memoryFile?.mime_type || evidenceFile?.mime_type || ''
-    const fileName = memoryFile?.file_name || evidenceFile?.file_name || ''
-
-    return mimeType.startsWith('image/') ||
-           /\.(jpg|jpeg|png|gif|bmp|webp)$/i.test(fileName)
-  }
-
+  // 檔案映射 Hook
+  const {
+    uploadRecordFiles,
+    getRecordFiles,
+    loadFileMapping,
+    getFileMappingForPayload,
+    removeRecordMapping
+  } = useRecordFileMapping(pageKey, currentEntryId)
 
   const [refrigerantData, setRefrigerantData] = useState<RefrigerantData[]>(
     withExampleFirst([
       {
-        id: 1,
+        id: `${pageKey}_${Date.now()}`,  // ⭐ 穩定的 recordId
         brandName: '',
         modelNumber: '',
         equipmentLocation: '',
@@ -189,25 +173,6 @@ export default function RefrigerantPage() {
     ])
   );
 
-
-  // 前端狀態管理 Hook
-  console.log('🔄 RefrigerantPage: About to initialize useFrontendStatus')
-  const frontendStatus = useFrontendStatus({
-    initialStatus,
-    entryId: currentEntryId,
-    onStatusChange: () => {},
-    onError: (error) => {
-      console.error('❌ RefrigerantPage: Status error:', error)
-    },
-    onSuccess: () => {}
-  })
-  console.log('✅ RefrigerantPage: useFrontendStatus initialized:', frontendStatus)
-
-  const { currentStatus, handleDataChanged, handleSubmitSuccess, isInitialLoad } = frontendStatus
-  console.log('🔄 RefrigerantPage: About to initialize useEditPermissions, currentStatus:', currentStatus)
-  const editPermissions = useEditPermissions(currentStatus)
-  console.log('✅ RefrigerantPage: useEditPermissions initialized:', editPermissions)
-
   // 只看「非範例」列是否有資料
   const hasAnyData = useMemo(() => {
     const userRows = refrigerantData.filter(r => !r.isExample)
@@ -215,196 +180,89 @@ export default function RefrigerantPage() {
       r.brandName.trim() !== '' ||
       r.modelNumber.trim() !== '' ||
       r.equipmentLocation.trim() !== '' ||
-      r.refrigerantType.trim() !== '' ||
       r.fillAmount > 0 ||
       (r.memoryFiles && r.memoryFiles.length > 0)
     )
   }, [refrigerantData])
-  
-  const isReadOnly = false
 
-  // 載入現有記錄
+  // 第一步：載入設備資料（不等檔案）
   useEffect(() => {
-    console.log('🔄 RefrigerantPage: useEffect loadData started')
-    const loadData = async () => {
-      try {
-        // ========== 診斷 Supabase Storage 問題 ==========
-        console.log('🔍 ===== Supabase Storage 診斷開始 =====')
+    if (loadedEntry && !dataLoading) {
+      const entryStatus = loadedEntry.status as EntryStatus
+      setInitialStatus(entryStatus)
+      setCurrentStatus(entryStatus)  // 同步前端狀態
+      setCurrentEntryId(loadedEntry.id)
+      setHasSubmittedBefore(true)
 
-        // 1. 檢查 Supabase 設定
-        console.log('📍 Supabase 專案 URL:', (supabase as any).supabaseUrl || 'URL無法取得')
-        console.log('📍 Storage URL:', (supabase.storage as any).url || 'Storage URL無法取得')
+      // 從 payload 取得冷媒設備資料
+      if (loadedEntry.payload?.refrigerantData) {
+        // 先載入設備資料，檔案欄位暫時為空（不阻塞顯示）
+        const updated = loadedEntry.payload.refrigerantData.map((item: any) => ({
+          ...item,
+          id: String(item.id),  // ⭐ 強制轉換成 string（向後相容舊資料）
+          evidenceFiles: [],  // 先空著，稍後由檔案載入 useEffect 分配
+          memoryFiles: [],
+          proofFile: null
+        }))
 
-        // 2. 測試 Storage 連線
-        const { data: buckets, error: bucketsError } = await supabase.storage.listBuckets()
-        console.log('🗂️ Buckets 列表:', buckets?.map(b => b.name))
-        if (bucketsError) console.error('❌ 無法列出 buckets:', bucketsError)
+        const withExample = withExampleFirst(updated.filter((r: RefrigerantData) => !r.isExample))
+        setRefrigerantData(withExample)  // 立即顯示設備資料
 
-        // 3. 測試 evidence bucket
-        const { data: testList, error: listError } = await supabase.storage
-          .from('evidence')
-          .list()
-        console.log('📁 Evidence bucket 根目錄:', testList ? '可訪問' : '無法訪問')
-        if (listError) console.error('❌ Evidence bucket 錯誤:', listError)
+        // ⭐ 載入 fileMapping（還原檔案映射表）
+        loadFileMapping(loadedEntry.payload)
+      }
 
-        // 4. 測試特定路徑
-        const testPath = '14aa8e2d-ff2f-4163-8c3d-d3f893a9127c/refrigerant/2025/other'
-        const { data: files, error: filesError } = await supabase.storage
-          .from('evidence')
-          .list(testPath)
-        console.log(`📂 路徑 ${testPath}:`, files?.length || 0, '個檔案')
-        if (files && files.length > 0) {
-          console.log('檔案列表:', files.map(f => f.name))
+      if (!isInitialLoad.current) {
+        handleDataChanged()
+      }
+      isInitialLoad.current = false
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loadedEntry, dataLoading])
 
-          // 5. 測試取得檔案 URL
-          const testFile = files[0]
-          const { data: urlData } = supabase.storage
-            .from('evidence')
-            .getPublicUrl(`${testPath}/${testFile.name}`)
-          console.log('🔗 測試檔案 URL:', urlData.publicUrl)
+  // 第二步：檔案載入後分配到設備（不阻塞）
+  useEffect(() => {
+    // ⭐ 防止 Race Condition：等待檔案載入完成
+    if (dataLoading) {
+      console.log('🔍 [RefrigerantPage] 等待檔案載入中...')
+      return
+    }
 
-          // 6. 測試 URL 是否可訪問
-          try {
-            const response = await fetch(urlData.publicUrl)
-            console.log('🌐 URL 訪問結果:', response.status, response.statusText)
-          } catch (fetchError) {
-            console.error('❌ 無法訪問 URL:', fetchError)
-          }
-        }
+    if (loadedFiles.length > 0 && refrigerantData.length > 1) {
+      // 檔案過濾：只取 file_type='other' 的檔案
+      const refrigerantFiles = loadedFiles.filter(f =>
+        f.file_type === 'other' && f.page_key === pageKey
+      )
 
-        console.log('🔍 ===== Supabase Storage 診斷結束 =====')
-        // ========== 診斷程式碼結束 ==========
+      if (refrigerantFiles.length > 0) {
+        // ✅ 先清理幽靈檔案，再分配
+        const cleanAndAssignFiles = async () => {
+          const validFiles = await cleanFiles(refrigerantFiles)
+          console.log('✅ [RefrigerantPage] Valid files after cleanup:', validFiles.length)
 
-        // 原本的 loadData 程式碼繼續...
-        console.log('🔄 RefrigerantPage: loadData executing, pageKey:', pageKey, 'year:', year)
-        setSubmitting(true)
-        console.log('🔄 RefrigerantPage: About to call getEntryByPageKeyAndYear')
-        const existingEntry = await getEntryByPageKeyAndYear(pageKey, year)
-        console.log('✅ RefrigerantPage: getEntryByPageKeyAndYear completed:', existingEntry)
-
-        if (existingEntry) {
-          setInitialStatus(existingEntry.status as EntryStatus)
-          setCurrentEntryId(existingEntry.id)
-          setHasSubmittedBefore(true)
-
-          if (existingEntry.payload?.refrigerantData) {
-            let updated = existingEntry.payload.refrigerantData
-
-            updated = updated.map((item: any) => {
-              if (item.equipmentType && !item.brandName && !item.modelNumber) {
-                const parts = item.equipmentType.split('/')
-                return {
-                  ...item,
-                  brandName: parts[0] || '',
-                  modelNumber: parts[1] || '',
-                  equipmentType: undefined
-                }
+          setRefrigerantData(prev => {
+            const userRows = prev.filter(r => !r.isExample)
+            // ⭐ 使用 recordId 查詢檔案（不再用陣列索引）
+            const updated = userRows.map((item) => {
+              const recordFiles = getRecordFiles(item.id, validFiles)
+              return {
+                ...item,
+                evidenceFiles: recordFiles,
+                memoryFiles: []  // ✅ 清空 memoryFiles，避免重複提交
               }
-              return item
             })
-
-            if (existingEntry.id) {
-              try {
-                const files = await getEntryFiles(existingEntry.id)
-                console.log('🔄 RefrigerantPage: Filtering files for refrigerant, total files:', files.length)
-                const refrigerantFiles = files.filter(f =>
-                  f.file_type === 'other' && f.page_key === pageKey
-                )
-                console.log('✅ RefrigerantPage: Found refrigerant files:', refrigerantFiles.length)
-
-                // 按順序將檔案分配給設備項目
-                updated = updated.map((item: any, index: number) => {
-                  // 簡單按索引順序分配檔案
-                  const assignedFile = refrigerantFiles[index] || null
-
-                  console.log(`📁 設備 ${index + 1} 分配檔案:`, assignedFile?.file_name || '無')
-
-                  return {
-                    ...item,
-                    evidenceFiles: assignedFile ? [assignedFile] : [],
-                    memoryFiles: [],
-                    proofFile: null
-                  }
-                })
-              } catch (e) {
-                console.error('❌ RefrigerantPage: Failed to load files:', e)
-                // 載入檔案失敗時，確保資料結構完整
-                updated = updated.map((item: any) => ({
-                  ...item,
-                  evidenceFiles: [],
-                  proofFile: null
-                }))
-              }
-            }
-
-            const withExample = withExampleFirst(updated.filter((r: RefrigerantData) => !r.isExample))
-            setRefrigerantData(withExample)
-          }
-
-          handleDataChanged()
+            return withExampleFirst(updated)
+          })
         }
 
-        isInitialLoad.current = false
-      } catch (error) {
-        console.error('❌ RefrigerantPage: 載入資料失敗:', error)
-        // 即使載入失敗也要設置基礎狀態，避免無限載入
-        setSubmitting(false)
-        // 確保有基本的空白資料
-        const emptyData = withExampleFirst([{
-          id: 1,
-          brandName: '',
-          modelNumber: '',
-          equipmentLocation: '',
-          refrigerantType: '',
-          fillAmount: 0,
-          unit: 'kg',
-          proofFile: null,
-          memoryFiles: []
-        }])
-        setRefrigerantData(emptyData)
-      } finally {
-        setSubmitting(false)
+        cleanAndAssignFiles()
       }
     }
-    loadData()
-  }, [])
-
-  // 載入已上傳檔案的 signed URLs
-  useEffect(() => {
-    const loadFileUrls = async () => {
-      console.log('🔗 開始載入檔案 signed URLs...')
-      const urls: Record<string, string> = {}
-
-      for (const item of refrigerantData) {
-        if (item.evidenceFiles && item.evidenceFiles.length > 0) {
-          for (const file of item.evidenceFiles) {
-            try {
-              console.log(`🔗 載入檔案 ${file.file_name} 的 signed URL...`)
-              const url = await getFileUrl(file.file_path)
-              urls[file.id] = url
-              console.log(`✅ 成功載入 ${file.file_name} 的 signed URL`)
-            } catch (error) {
-              console.error(`❌ 載入檔案 ${file.file_name} 的 URL 失敗:`, error)
-            }
-          }
-        }
-      }
-
-      console.log(`🔗 完成載入 ${Object.keys(urls).length} 個檔案的 signed URLs`)
-      setFileUrls(urls)
-    }
-
-    const hasEvidenceFiles = refrigerantData.some(item => item.evidenceFiles && item.evidenceFiles.length > 0)
-    if (hasEvidenceFiles) {
-      loadFileUrls()
-    } else {
-      console.log('🔗 無需載入檔案 URLs - 沒有已上傳的檔案')
-    }
-  }, [refrigerantData])
+  }, [loadedFiles, pageKey, dataLoading, cleanFiles, getRecordFiles])
 
   const addNewEntry = () => {
     const newEntry: RefrigerantData = {
-      id: Date.now(),
+      id: `${pageKey}_${Date.now()}`,  // ⭐ 穩定的 recordId
       brandName: '',
       modelNumber: '',
       equipmentLocation: '',
@@ -417,16 +275,18 @@ export default function RefrigerantPage() {
     setRefrigerantData(prev => withExampleFirst([...prev.filter(r => !r.isExample), newEntry]));
   };
 
-  const removeEntry = (id: number) => {
+  const removeEntry = (id: string) => {  // ⭐ 改成 string
     const row = refrigerantData.find(r => r.id === id)
     if (row?.isExample) return; // 範例不可刪
     const others = refrigerantData.filter(r => !r.isExample)
     if (others.length > 1) {
       setRefrigerantData(withExampleFirst(others.filter(r => r.id !== id)))
+      // ⭐ 清理映射表
+      removeRecordMapping(id)
     }
   };
 
-  const updateEntry = useCallback((id: number, field: keyof RefrigerantData, value: any) => {
+  const updateEntry = useCallback((id: string, field: keyof RefrigerantData, value: any) => {  // ⭐ 改成 string
     setRefrigerantData(prev => {
       const target = prev.find(r => r.id === id);
       if (target?.isExample) return prev;
@@ -440,7 +300,7 @@ export default function RefrigerantPage() {
   }, []);
 
   // 為每個設備項目建立穩定的 callback
-  const handleMemoryFilesChange = useCallback((id: number) => {
+  const handleMemoryFilesChange = useCallback((id: string) => {  // ⭐ 改成 string
     return (files: MemoryFile[]) => updateEntry(id, 'memoryFiles', files);
   }, [updateEntry]);
 
@@ -454,113 +314,194 @@ export default function RefrigerantPage() {
       if (!data.equipmentLocation.trim()) errors.push(`第${index + 1}項設備位置不能為空`);
       if (!data.refrigerantType.trim()) errors.push(`第${index + 1}項冷媒類型不能為空`);
       if (data.fillAmount <= 0) errors.push(`第${index + 1}項填充量必須大於0`);
-      const hasFiles = data.memoryFiles && data.memoryFiles.length > 0
-      if (!hasFiles) errors.push(`第${index + 1}項未上傳佐證資料`);
+
+      const hasMemoryFiles = data.memoryFiles && data.memoryFiles.length > 0
+      const hasEvidenceFiles = data.evidenceFiles && data.evidenceFiles.length > 0
+      if (!hasMemoryFiles && !hasEvidenceFiles) errors.push(`第${index + 1}項未上傳佐證資料`);
     });
 
     if (errors.length > 0) {
-      alert('請修正以下問題：\n' + errors.join('\n'));
+      setError('請修正以下問題：\n' + errors.join('\n'));
       return;
     }
 
-    setSubmitting(true);
-    try {
+    await executeSubmit(async () => {
       const totalFillAmount = userRows.reduce((sum, item) => {
         const amountInKg = item.unit === 'gram' ? item.fillAmount / 1000 : item.fillAmount
         return sum + amountInKg
       }, 0)
 
-      const entryInput = {
-        page_key: pageKey,
-        period_year: year,
-        unit: 'kg',
-        monthly: { '1': totalFillAmount },
-        extraPayload: {
-          refrigerantData: userRows,
-          totalFillAmount: totalFillAmount,
-          notes: `冷媒設備共 ${userRows.length} 台`
-        }
-      }
+      const cleanedData = userRows.map(r => ({
+        id: r.id,
+        brandName: r.brandName,
+        modelNumber: r.modelNumber,
+        equipmentLocation: r.equipmentLocation,
+        refrigerantType: r.refrigerantType,
+        fillAmount: r.fillAmount,
+        unit: r.unit
+      }))
 
-      const { entry_id } = await upsertEnergyEntry(entryInput, true)
-      if (!currentEntryId) setCurrentEntryId(entry_id)
-
-      // 上傳前先刪除舊的冷媒檔案
-      if (hasSubmittedBefore && currentEntryId) {
-        try {
-          console.log('🗑️ [RefrigerantPage] 刪除舊檔案開始')
-          // 取得舊檔案
-          const oldFiles = await getEntryFiles(currentEntryId)
-          const oldRefrigerantFiles = oldFiles.filter(f =>
-            f.file_type === 'other' && f.page_key === pageKey
-          )
-
-          console.log(`🗑️ [RefrigerantPage] 找到 ${oldRefrigerantFiles.length} 個舊檔案需要刪除`)
-
-          // 刪除 Storage 和資料庫記錄
-          for (const oldFile of oldRefrigerantFiles) {
-            try {
-              // 刪除 Storage 檔案
-              const { error: storageError } = await supabase.storage
-                .from('evidence')
-                .remove([oldFile.file_path])
-
-              if (storageError) {
-                console.warn('❌ [RefrigerantPage] Storage 刪除失敗:', storageError)
-              } else {
-                console.log('✅ [RefrigerantPage] Storage 檔案刪除成功:', oldFile.file_name)
-              }
-
-              // 刪除資料庫記錄
-              await deleteEvidenceFile(oldFile.id)
-              console.log('✅ [RefrigerantPage] 資料庫記錄刪除成功:', oldFile.file_name)
-            } catch (fileError) {
-              console.warn('❌ [RefrigerantPage] 刪除單個檔案失敗:', oldFile.file_name, fileError)
-            }
+      // ⭐ 使用 hook 的 submit 函數
+      await submit({
+        entryInput: {
+          page_key: pageKey,
+          period_year: year,
+          unit: 'kg',
+          monthly: { '1': totalFillAmount },
+          notes: `冷媒設備共 ${userRows.length} 台`,
+          extraPayload: {
+            refrigerantData: cleanedData
           }
-        } catch (error) {
-          console.warn('❌ [RefrigerantPage] 刪除舊檔案失敗:', error)
-          // 繼續執行上傳，不因為刪除失敗而中止
-        }
-      }
-
-      // 上傳新檔案
-      const uploadedFiles: EvidenceFile[] = []
-      for (const [index, item] of userRows.entries()) {
-        if (item.memoryFiles && item.memoryFiles.length > 0) {
-          for (const memoryFile of item.memoryFiles) {
-            try {
-              const uploadedFile = await uploadEvidenceWithEntry(memoryFile.file, {
-                entryId: entry_id,
-                pageKey: pageKey,
-                year: year,
-                category: 'other'
-              })
-              uploadedFiles.push(uploadedFile)
-              console.log(`✅ [RefrigerantPage] 設備 ${index + 1} 檔案上傳成功:`, uploadedFile.file_name)
-            } catch (uploadError) {
-              throw new Error(`上傳第 ${index + 1} 項設備檔案失敗: ${uploadError instanceof Error ? uploadError.message : '未知錯誤'}`)
+        },
+        recordData: userRows,
+        uploadRecordFiles,
+        onSuccess: async (entry_id) => {
+          // 第二次儲存含 fileMapping
+          await upsertEnergyEntry({
+            page_key: pageKey,
+            period_year: year,
+            unit: 'kg',
+            monthly: { '1': totalFillAmount },
+            notes: `冷媒設備共 ${userRows.length} 台`,
+            extraPayload: {
+              refrigerantData: cleanedData,
+              fileMapping: getFileMappingForPayload()
             }
-          }
-        }
-      }
+          }, true)
 
-      setRefrigerantData(prev => {
-        const updated = prev.map(item => {
-          if (item.isExample) return item
-          return { ...item, proofFile: null, memoryFiles: [] }
-        })
-        return updated
+          setCurrentEntryId(entry_id)
+          await reload()
+          setHasSubmittedBefore(true)
+        }
       })
 
       await handleSubmitSuccess();
-      setHasSubmittedBefore(true)
-      alert('冷媒設備資料已保存！');
-    } catch (error) {
-      alert(error instanceof Error ? error.message : '提交失敗，請重試');
-    } finally {
-      setSubmitting(false);
-    }
+
+      // 重新載入審核狀態，更新狀態橫幅
+      reloadApprovalStatus()
+
+      setSuccess('冷媒設備資料已保存！');
+      setShowSuccessModal(true)
+    }).catch(error => {
+      setError(error instanceof Error ? error.message : '提交失敗，請重試');
+    })
+  };
+
+  const handleSave = async () => {
+    await executeSubmit(async () => {
+      setError(null)
+      setSuccess(null)
+
+      const userRows = refrigerantData.filter(r => !r.isExample)
+      const totalFillAmount = userRows.reduce((sum, item) => {
+        const amountInKg = item.unit === 'gram' ? item.fillAmount / 1000 : item.fillAmount
+        return sum + amountInKg
+      }, 0)
+
+      const cleanedData = userRows.map(r => ({
+        id: r.id,
+        brandName: r.brandName,
+        modelNumber: r.modelNumber,
+        equipmentLocation: r.equipmentLocation,
+        refrigerantType: r.refrigerantType,
+        fillAmount: r.fillAmount,
+        unit: r.unit
+      }))
+
+      // 📝 管理員審核模式：使用 useAdminSave hook
+      if (isReviewMode && reviewEntryId) {
+        console.log('📝 管理員審核模式：使用 useAdminSave hook', reviewEntryId)
+
+        // 準備檔案列表
+        const filesToUpload: Array<{
+          file: File
+          metadata: {
+            recordIndex: number
+            fileType: 'usage_evidence' | 'msds' | 'other'
+          }
+        }> = []
+
+        // 收集每筆設備的銘牌檔案
+        userRows.forEach((record, recordIndex) => {
+          if (record.memoryFiles && record.memoryFiles.length > 0) {
+            record.memoryFiles.forEach(mf => {
+              filesToUpload.push({
+                file: mf.file,
+                metadata: {
+                  recordIndex,
+                  fileType: 'other' as const
+                }
+              })
+            })
+          }
+        })
+
+        await adminSave({
+          updateData: {
+            unit: 'kg',
+            amount: totalFillAmount,
+            payload: {
+              refrigerantData: cleanedData,
+              fileMapping: getFileMappingForPayload()
+            }
+          },
+          files: filesToUpload
+        })
+
+        // 清空記憶體檔案
+        setRefrigerantData(prev => {
+          const userRows = prev.filter(r => !r.isExample)
+          const cleared = userRows.map(r => ({ ...r, memoryFiles: [] }))
+          return withExampleFirst(cleared)
+        })
+
+        await reload()
+        reloadApprovalStatus()
+        setSuccess('✅ 儲存成功！資料已更新')
+        return
+      }
+
+      // ⭐ 使用 hook 的 save 函數（跳過驗證）
+      await save({
+        entryInput: {
+          page_key: pageKey,
+          period_year: year,
+          unit: 'kg',
+          monthly: { '1': totalFillAmount },
+          notes: `冷媒設備共 ${userRows.length} 台`,
+          extraPayload: {
+            refrigerantData: cleanedData
+          }
+        },
+        recordData: userRows,
+        uploadRecordFiles,
+        onSuccess: async (entry_id) => {
+          await upsertEnergyEntry({
+            page_key: pageKey,
+            period_year: year,
+            unit: 'kg',
+            monthly: { '1': totalFillAmount },
+            notes: `冷媒設備共 ${userRows.length} 台`,
+            extraPayload: {
+              refrigerantData: cleanedData,
+              fileMapping: getFileMappingForPayload()
+            }
+          }, true)
+
+          setCurrentEntryId(entry_id)
+          await reload()
+          setHasSubmittedBefore(true)
+        }
+      })
+
+      // 重新載入審核狀態，更新狀態橫幅
+      reloadApprovalStatus()
+
+      setSuccess('暫存成功！資料已儲存')
+    }).catch(error => {
+      console.error('❌ 暫存失敗:', error)
+      setError(error instanceof Error ? error.message : '暫存失敗')
+    })
   };
 
   const handleClear = () => {
@@ -568,76 +509,159 @@ export default function RefrigerantPage() {
   };
 
   const handleClearConfirm = async () => {
-    console.log('🗑️ [RefrigerantPage] ===== CLEAR BUTTON CLICKED =====')
+    try {
+      // 收集所有檔案和記憶體檔案（排除範例列）
+      const allFiles = refrigerantData
+        .filter(r => !r.isExample)
+        .flatMap(r => r.evidenceFiles || [])
 
-    const clearSuccess = DocumentHandler.handleClear({
-      currentStatus: currentStatus,
-      title: '冷媒資料清除',
-      message: '確定要清除所有冷媒使用資料嗎？此操作無法復原。',
-      onClear: () => {
-        setSubmitting(true)
-        try {
-          console.log('🗑️ [RefrigerantPage] Starting complete clear operation...')
+      const allMemoryFiles = refrigerantData
+        .filter(r => !r.isExample)
+        .map(r => r.memoryFiles || [])
 
-          // 清理記憶體檔案
-          refrigerantData.forEach(item => {
-            if (item.memoryFiles) {
-              DocumentHandler.clearAllMemoryFiles(item.memoryFiles)
-            }
-          })
+      // 使用 Hook 清除
+      await clear({
+        filesToDelete: allFiles,
+        memoryFilesToClean: allMemoryFiles
+      })
 
-          // 原有的清除邏輯保持不變
-          setRefrigerantData(withExampleFirst([{
-            id: 1,
-            brandName: '',
-            modelNumber: '',
-            equipmentLocation: '',
-            refrigerantType: '',
-            fillAmount: 0,
-            unit: 'kg',
-            proofFile: null,
-            memoryFiles: []
-          }]))
-          setHasSubmittedBefore(false)
-          setShowClearConfirmModal(false)
-
-          // 成功訊息需要設定到適當的狀態管理中
-
-        } catch (error) {
-          console.error('❌ [RefrigerantPage] Clear operation failed:', error)
-          // 錯誤訊息需要設定到適當的狀態管理中
-        } finally {
-          console.log('🗑️ [RefrigerantPage] Clear operation finished, resetting loading state')
-          setSubmitting(false)
-        }
-      }
-    })
-
-    if (!clearSuccess && currentStatus === 'approved') {
-      // 錯誤訊息需要設定到適當的狀態管理中
+      // 重置前端狀態
+      setRefrigerantData(withExampleFirst([{
+        id: `${pageKey}_${Date.now()}`,  // ⭐ 穩定的 recordId
+        brandName: '',
+        modelNumber: '',
+        equipmentLocation: '',
+        refrigerantType: '',
+        fillAmount: 0,
+        unit: 'kg',
+        proofFile: null,
+        memoryFiles: []
+      }]))
+      setCurrentEntryId(null)
+      setHasSubmittedBefore(false)
+      setShowClearConfirmModal(false)
+      setSuccess('資料已完全清除')
+    } catch (error) {
+      setError(error instanceof Error ? error.message : '清除失敗，請重試')
     }
   };
 
   const handleStatusChange = async (newStatus: EntryStatus) => {
     try {
-      if (currentEntryId) await updateEntryStatus(currentEntryId, newStatus)
+      if (currentEntryId) await updateEntryStatus(currentEntryId, newStatus as 'draft' | 'submitted' | 'approved' | 'rejected')
       frontendStatus.setFrontendStatus(newStatus)
     } catch (error) {
       console.error('Status update failed:', error)
     }
   }
 
+  // Loading 狀態
+  if (dataLoading) {
+    return (
+      <div
+        className="min-h-screen flex items-center justify-center"
+        style={{ backgroundColor: designTokens.colors.background }}
+      >
+        <div className="text-center">
+          <Loader2
+            className="w-12 h-12 animate-spin mx-auto mb-4"
+            style={{ color: designTokens.colors.accentPrimary }}
+          />
+          <p style={{ color: designTokens.colors.textPrimary }}>載入中...</p>
+        </div>
+      </div>
+    )
+  }
+
   return (
     <div className="min-h-screen bg-green-50">
       <div className="px-6 py-8">
         <div className="text-center mb-8">
+          {/* 審核模式指示器 */}
+          {isReviewMode && (
+            <div className="mb-4 p-3 bg-orange-100 border-2 border-orange-300 rounded-lg max-w-4xl mx-auto">
+              <div className="flex items-center justify-center">
+                <Eye className="w-5 h-5 text-orange-600 mr-2" />
+                <span className="text-orange-800 font-medium">
+                  📋 審核模式 - 查看填報內容
+                </span>
+              </div>
+              <p className="text-sm text-orange-600 mt-1">
+                所有輸入欄位已鎖定，僅供審核查看
+              </p>
+            </div>
+          )}
+
           <h1 className="text-3xl font-semibold mb-3" style={{ color: designTokens.colors.textPrimary }}>
             冷媒使用量填報
           </h1>
           <p className="text-base" style={{ color: designTokens.colors.textSecondary }}>
-            請上傳設備後方的銘牌做為佐證文件，並完整填寫冷媒種類與填充量等設備資料
+            {isReviewMode
+              ? '管理員審核模式 - 檢視填報內容和相關檔案'
+              : '請上傳設備後方的銘牌做為佐證文件，並完整填寫冷媒種類與填充量等設備資料'
+            }
           </p>
         </div>
+
+        {/* 審核狀態橫幅 */}
+        {!isReviewMode && approvalStatus.isSaved && (
+          <div className="bg-blue-100 border-l-4 border-blue-500 text-blue-700 p-4 mb-6 rounded-r-lg max-w-4xl mx-auto">
+            <div className="flex items-center">
+              <div className="text-2xl mr-3">💾</div>
+              <div>
+                <p className="font-bold text-lg">資料已暫存</p>
+                <p className="text-sm mt-1">您的資料已儲存，可隨時修改後提交審核。</p>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {!isReviewMode && approvalStatus.isApproved && (
+          <div className="bg-green-100 border-l-4 border-green-500 text-green-700 p-4 mb-6 rounded-r-lg max-w-4xl mx-auto">
+            <div className="flex items-center">
+              <div className="text-2xl mr-3">🎉</div>
+              <div>
+                <p className="font-bold text-lg">恭喜您已審核通過！</p>
+                <p className="text-sm mt-1">此填報已完成審核，資料已鎖定無法修改。</p>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {!isReviewMode && approvalStatus.isRejected && (
+          <div className="bg-red-100 border-l-4 border-red-500 text-red-700 p-4 mb-6 rounded-r-lg max-w-4xl mx-auto">
+            <div className="flex items-start">
+              <div className="text-2xl mr-3 mt-0.5">⚠️</div>
+              <div className="flex-1">
+                <p className="font-bold text-lg">填報已被退回</p>
+                <p className="text-sm mt-2">
+                  <span className="font-semibold">退回原因：</span>
+                  {approvalStatus.reviewNotes || '無'}
+                </p>
+                {approvalStatus.reviewedAt && (
+                  <p className="text-xs mt-1 text-red-600">
+                    退回時間：{new Date(approvalStatus.reviewedAt).toLocaleString('zh-TW')}
+                  </p>
+                )}
+                <p className="text-sm mt-2 text-red-600">
+                  請修正後重新提交
+                </p>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {!isReviewMode && approvalStatus.isPending && (
+          <div className="bg-blue-100 border-l-4 border-blue-500 text-blue-700 p-4 mb-6 rounded-r-lg max-w-4xl mx-auto">
+            <div className="flex items-center">
+              <div className="text-2xl mr-3">📋</div>
+              <div>
+                <p className="font-bold text-lg">等待審核中</p>
+                <p className="text-sm mt-1">您的填報已提交，請等待管理員審核。</p>
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* 外層白色卡片：置中 + 自動包住內容寬度 */}
         <div className="flex justify-center">
@@ -705,7 +729,10 @@ export default function RefrigerantPage() {
                           type="text"
                           value={data.brandName}
                           onChange={(e) => updateEntry(data.id, 'brandName', e.target.value)}
-                          className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500 hover:border-brand-300 transition-colors duration-200"
+                          disabled={isReadOnly || approvalStatus.isApproved}
+                          className={`w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500 hover:border-brand-300 transition-colors duration-200 ${
+                            isReviewMode || approvalStatus.isApproved ? 'bg-gray-100 cursor-not-allowed' : ''
+                          }`}
                         />
                       </td>
                       <td className="px-3 py-4 break-words">
@@ -713,7 +740,10 @@ export default function RefrigerantPage() {
                           type="text"
                           value={data.modelNumber}
                           onChange={(e) => updateEntry(data.id, 'modelNumber', e.target.value)}
-                          className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500 hover:border-brand-300 transition-colors duration-200"
+                          disabled={isReadOnly || approvalStatus.isApproved}
+                          className={`w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500 hover:border-brand-300 transition-colors duration-200 ${
+                            isReviewMode || approvalStatus.isApproved ? 'bg-gray-100 cursor-not-allowed' : ''
+                          }`}
                         />
                       </td>
                       <td className="px-3 py-4 break-words">
@@ -721,7 +751,10 @@ export default function RefrigerantPage() {
                           type="text"
                           value={data.equipmentLocation}
                           onChange={(e) => updateEntry(data.id, 'equipmentLocation', e.target.value)}
-                          className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500 hover:border-brand-300 transition-colors duration-200"
+                          disabled={isReadOnly || approvalStatus.isApproved}
+                          className={`w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500 hover:border-brand-300 transition-colors duration-200 ${
+                            isReviewMode || approvalStatus.isApproved ? 'bg-gray-100 cursor-not-allowed' : ''
+                          }`}
                         />
                       </td>
                       <td className="px-3 py-4 break-words">
@@ -729,7 +762,10 @@ export default function RefrigerantPage() {
                           type="text"
                           value={data.refrigerantType}
                           onChange={(e) => updateEntry(data.id, 'refrigerantType', e.target.value)}
-                          className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500 hover:border-brand-300 transition-colors duration-200"
+                          disabled={isReadOnly || approvalStatus.isApproved}
+                          className={`w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500 hover:border-brand-300 transition-colors duration-200 ${
+                            isReviewMode || approvalStatus.isApproved ? 'bg-gray-100 cursor-not-allowed' : ''
+                          }`}
                         />
                       </td>
                       <td className="px-3 py-4">
@@ -739,14 +775,20 @@ export default function RefrigerantPage() {
                           step="0.01"
                           value={data.fillAmount || ''}
                           onChange={(e) => updateEntry(data.id, 'fillAmount', parseFloat(e.target.value) || 0)}
-                          className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500 hover:border-brand-300 transition-colors duration-200"
+                          disabled={isReadOnly || approvalStatus.isApproved}
+                          className={`w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500 hover:border-brand-300 transition-colors duration-200 ${
+                            isReviewMode || approvalStatus.isApproved ? 'bg-gray-100 cursor-not-allowed' : ''
+                          }`}
                         />
                       </td>
                       <td className="px-3 py-4">
                         <select
                           value={data.unit}
                           onChange={(e) => updateEntry(data.id, 'unit', e.target.value as 'gram' | 'kg')}
-                          className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500 hover:border-brand-300 transition-colors duration-200 bg-white"
+                          disabled={isReadOnly || approvalStatus.isApproved}
+                          className={`w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500 hover:border-brand-300 transition-colors duration-200 bg-white ${
+                            isReviewMode || approvalStatus.isApproved ? 'bg-gray-100 cursor-not-allowed' : ''
+                          }`}
                         >
                           <option value="kg">公斤</option>
                           <option value="gram">公克</option>
@@ -765,124 +807,19 @@ export default function RefrigerantPage() {
                             />
                           </div>
                         ) : (
-                          // 一般列：檔案顯示區域
-                          <div className="w-36 mx-auto">
-                            {(() => {
-                              const { memoryFile, evidenceFile } = getFirstFile(data)
-                              const hasFile = memoryFile || evidenceFile
-                              const fileInfo = getFileInfo(memoryFile, evidenceFile)
-                              const previewUrl = getFilePreviewUrl(memoryFile, evidenceFile)
-                              const isImage = fileInfo?.type?.startsWith('image/') ||
-                                             (fileInfo?.name && /\.(jpg|jpeg|png|gif|bmp|webp)$/i.test(fileInfo.name))
-
-                              if (hasFile) {
-                                return (
-                                  <div className="rounded-lg border border-gray-200 overflow-hidden w-36 mx-auto">
-                                    {/* 圖片預覽區 */}
-                                    <div className="p-2 bg-gray-50">
-                                      {isImage && previewUrl ? (
-                                        <img
-                                          src={previewUrl}
-                                          alt={fileInfo?.name || '設備照片'}
-                                          className="w-full h-24 object-cover rounded cursor-pointer hover:opacity-90"
-                                          onClick={() => {
-                                            // 根據檔案類型使用不同的 URL 策略
-                                            if (evidenceFile && fileUrls[evidenceFile.id]) {
-                                              // 已上傳的檔案：使用 signed URL
-                                              setLightboxSrc(fileUrls[evidenceFile.id])
-                                            } else if (memoryFile && memoryFile.preview) {
-                                              // 記憶體檔案：使用 preview URL
-                                              setLightboxSrc(memoryFile.preview)
-                                            } else if (previewUrl) {
-                                              // 備用：使用原本的 preview URL
-                                              setLightboxSrc(previewUrl)
-                                            }
-                                          }}
-                                          onError={(e) => {
-                                            console.error('❌ 圖片載入失敗:', {
-                                              src: previewUrl,
-                                              fileName: fileInfo?.name,
-                                              evidenceFileId: evidenceFile?.id,
-                                              hasSignedUrl: evidenceFile ? !!fileUrls[evidenceFile.id] : false
-                                            })
-                                            // 載入失敗時顯示占位圖
-                                            const imgElement = e.currentTarget
-                                            const container = imgElement.parentElement
-                                            if (container) {
-                                              container.innerHTML = `
-                                                <div class="w-full h-24 bg-red-50 rounded flex flex-col items-center justify-center text-red-500 text-xs">
-                                                  <svg class="w-8 h-8 mb-1" fill="currentColor" viewBox="0 0 20 20">
-                                                    <path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7 4a1 1 0 11-2 0 1 1 0 012 0zm-1-9a1 1 0 00-1 1v4a1 1 0 102 0V6a1 1 0 00-1-1z" clip-rule="evenodd"/>
-                                                  </svg>
-                                                  <span>載入失敗</span>
-                                                </div>
-                                              `
-                                            }
-                                          }}
-                                        />
-                                      ) : isImage && !previewUrl ? (
-                                        // 圖片載入中
-                                        <div className="w-full h-24 bg-blue-50 rounded flex items-center justify-center">
-                                          <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-blue-600"></div>
-                                        </div>
-                                      ) : (
-                                        // 非圖片檔案顯示圖標
-                                        <div className="w-full h-24 bg-blue-50 rounded flex items-center justify-center">
-                                          <svg className="w-10 h-10 text-blue-400" fill="currentColor" viewBox="0 0 20 20">
-                                            <path d="M9 2a2 2 0 00-2 2v8a2 2 0 002 2h6a2 2 0 002-2V6.414A2 2 0 0016.414 5L14 2.586A2 2 0 0012.586 2H9z"/>
-                                          </svg>
-                                        </div>
-                                      )}
-                                    </div>
-
-                                    {/* 檔案資訊 */}
-                                    <div className="px-2 py-1 bg-white border-t">
-                                      <p className="text-xs text-gray-700 truncate" title={fileInfo?.name}>
-                                        {fileInfo?.name || '未知檔案'}
-                                      </p>
-                                      <p className="text-xs text-gray-500">
-                                        {fileInfo?.size ? `${Math.round(fileInfo.size / 1024)} KB` : ''}
-                                      </p>
-                                    </div>
-
-                                    {/* 刪除按鈕 */}
-                                    <button
-                                      className="w-full py-1.5 text-xs text-red-600 hover:bg-red-50 border-t border-gray-200 flex items-center justify-center space-x-1 transition-colors"
-                                      onClick={() => {
-                                        if (memoryFile) {
-                                          updateEntry(data.id, 'memoryFiles', [])
-                                        }
-                                        if (evidenceFile) {
-                                          updateEntry(data.id, 'evidenceFiles', [])
-                                        }
-                                      }}
-                                    >
-                                      <Trash2 className="h-3 w-3" />
-                                      <span>移除</span>
-                                    </button>
-                                  </div>
-                                )
-                              } else {
-                                // 沒有檔案時，顯示上傳區域
-                                return (
-                                  <EvidenceUpload
-                                    key={`upload-${data.id}`}
-                                    pageKey={pageKey}
-                                    month={index}  // 使用實際索引作為月份識別符
-                                    files={data.evidenceFiles || EMPTY_FILES}
-                                    onFilesChange={(files) => updateEntry(data.id, 'evidenceFiles', files)}
-                                    memoryFiles={data.memoryFiles || []}
-                                    onMemoryFilesChange={handleMemoryFilesChange(data.id)}
-                                    maxFiles={1}
-                                    kind="other"
-                                    disabled={submitting}
-                                    mode="edit"
-                                    hideFileCount={true}
-                                  />
-                                )
-                              }
-                            })()}
-                          </div>
+                          <EvidenceUpload
+                            key={`upload-${data.id}`}
+                            pageKey={`${pageKey}_device_${data.id}`}
+                            files={data.evidenceFiles || []}
+                            onFilesChange={(files) => updateEntry(data.id, 'evidenceFiles', files)}
+                            memoryFiles={data.memoryFiles || []}
+                            onMemoryFilesChange={handleMemoryFilesChange(data.id)}
+                            maxFiles={1}
+                            kind="other"
+                            disabled={submitting || !editPermissions.canUploadFiles}
+                            mode={isReadOnly || approvalStatus.isApproved ? "view" : "edit"}
+                            isAdminReviewMode={isReviewMode && role === 'admin'}
+                          />
                         )}
                       </td>
                       <td className="px-3 py-4">
@@ -890,7 +827,10 @@ export default function RefrigerantPage() {
                           {refrigerantData.filter(r => !r.isExample).length > 1 && (
                             <button
                               onClick={() => removeEntry(data.id)}
-                              className="text-red-500 hover:text-red-700 p-1 rounded-lg hover:bg-red-50 transition-colors duration-200"
+                              disabled={isReadOnly || approvalStatus.isApproved}
+                              className={`text-red-500 hover:text-red-700 p-1 rounded-lg hover:bg-red-50 transition-colors duration-200 ${
+                                isReviewMode || approvalStatus.isApproved ? 'opacity-50 cursor-not-allowed' : ''
+                              }`}
                               title="刪除此項目"
                             >
                               <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -910,7 +850,10 @@ export default function RefrigerantPage() {
             <div className="mt-6">
               <button
                 onClick={addNewEntry}
-                className="w-full py-3 bg-green-500 hover:bg-green-600 text-white rounded-lg font-medium transition-colors"
+                disabled={isReadOnly || approvalStatus.isApproved}
+                className={`w-full py-3 bg-green-500 hover:bg-green-600 text-white rounded-lg font-medium transition-colors ${
+                  isReviewMode || approvalStatus.isApproved ? 'opacity-50 cursor-not-allowed bg-gray-400 hover:bg-gray-400' : ''
+                }`}
               >
                 + 新增設備
               </button>
@@ -919,21 +862,53 @@ export default function RefrigerantPage() {
           </div>
         </div>
 
+        {/* 審核區塊 - 只在審核模式顯示 */}
+        {isReviewMode && (
+          <div className="max-w-4xl mx-auto mt-8">
+            <ReviewSection
+              entryId={reviewEntryId || currentEntryId || `refrigerant_${year}`}
+              userId={reviewUserId || "current_user"}
+              category="冷媒"
+              userName="填報用戶"
+              amount={refrigerantData
+                .filter(r => !r.isExample)
+                .reduce((sum, item) => {
+                  const amountInKg = item.unit === 'gram' ? item.fillAmount / 1000 : item.fillAmount
+                  return sum + amountInKg
+                }, 0)}
+              unit="kg"
+              role={role}
+              onSave={handleSave}
+              isSaving={submitting}
+              onApprove={() => {
+                // ReviewSection 會處理 API 呼叫和導航
+              }}
+              onReject={(reason) => {
+                // ReviewSection 會處理 API 呼叫和導航
+              }}
+            />
+          </div>
+        )}
+
         <div className="h-20"></div>
       </div>
 
-      <BottomActionBar
-        currentStatus={currentStatus}
-        currentEntryId={currentEntryId}
-        isUpdating={false}
-        hasSubmittedBefore={hasSubmittedBefore}
-        hasAnyData={hasAnyData}
-        editPermissions={editPermissions}
-        submitting={submitting}
-        onSubmit={handleSubmit}
-        onClear={handleClear}
-        designTokens={designTokens}
-      />
+      {!isReadOnly && !approvalStatus.isApproved && !isReviewMode && (
+        <BottomActionBar
+          currentStatus={currentStatus}
+          currentEntryId={currentEntryId}
+          isUpdating={false}
+          hasSubmittedBefore={hasSubmittedBefore}
+          hasAnyData={hasAnyData}
+          editPermissions={editPermissions}
+          submitting={submitting}
+          saving={submitting}
+          onSubmit={handleSubmit}
+          onSave={handleSave}
+          onClear={handleClear}
+          designTokens={designTokens}
+        />
+      )}
 
       {/* 清除確認模態框 */}
       {showClearConfirmModal && (
@@ -981,16 +956,21 @@ export default function RefrigerantPage() {
                 </button>
                 <button
                   onClick={handleClearConfirm}
-                  className="px-4 py-2 text-white rounded-lg transition-colors font-medium"
-                  style={{ backgroundColor: designTokens.colors.error }}
-                  onMouseEnter={(e) => {
-                    (e.target as HTMLButtonElement).style.backgroundColor = '#dc2626';
-                  }}
-                  onMouseLeave={(e) => {
-                    (e.target as HTMLButtonElement).style.backgroundColor = designTokens.colors.error;
+                  disabled={clearLoading}
+                  className="px-4 py-2 text-white rounded-lg transition-colors flex items-center justify-center"
+                  style={{
+                    backgroundColor: clearLoading ? '#9ca3af' : designTokens.colors.error,
+                    opacity: clearLoading ? 0.7 : 1
                   }}
                 >
-                  確定清除
+                  {clearLoading ? (
+                    <>
+                      <Loader2 className="w-4 h-4 animate-spin mr-2" />
+                      清除中...
+                    </>
+                  ) : (
+                    '確定清除'
+                  )}
                 </button>
               </div>
             </div>
@@ -1017,6 +997,106 @@ export default function RefrigerantPage() {
           >
             <X className="w-8 h-8" />
           </button>
+        </div>
+      )}
+
+      {/* Toast 訊息 */}
+      {error && (
+        <Toast
+          message={error}
+          type="error"
+          onClose={() => setError(null)}
+        />
+      )}
+
+      {success && (
+        <Toast
+          message={success}
+          type="success"
+          onClose={() => setSuccess(null)}
+        />
+      )}
+
+      {/* 提交成功彈窗 */}
+      {showSuccessModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50 p-4">
+          <div className="bg-white rounded-lg shadow-lg max-w-md w-full">
+            <div className="p-6">
+              {/* 關閉按鈕 */}
+              <div className="flex justify-end mb-2">
+                <button
+                  onClick={() => setShowSuccessModal(false)}
+                  className="text-gray-400 hover:text-gray-600 transition-colors"
+                  aria-label="關閉"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              {/* 內容區 */}
+              <div className="text-center">
+                {/* 成功圖示 */}
+                <div
+                  className="w-12 h-12 mx-auto rounded-full mb-4 flex items-center justify-center"
+                  style={{ backgroundColor: designTokens.colors.success }}
+                >
+                  <CheckCircle className="h-6 w-6 text-white" />
+                </div>
+
+                {/* 標題 */}
+                <h3
+                  className="text-lg font-medium mb-2"
+                  style={{ color: designTokens.colors.textPrimary }}
+                >
+                  提交成功！
+                </h3>
+
+                {/* 成功訊息 */}
+                <p
+                  className="mb-4"
+                  style={{ color: designTokens.colors.textSecondary }}
+                >
+                  {success}
+                </p>
+
+                {/* 提示資訊卡片 */}
+                <div
+                  className="rounded-lg p-4 mb-4 text-left"
+                  style={{ backgroundColor: designTokens.colors.accentLight }}
+                >
+                  <p
+                    className="text-base mb-2 font-medium"
+                    style={{ color: designTokens.colors.textPrimary }}
+                  >
+                    您的資料已成功儲存，您可以：
+                  </p>
+                  <ul
+                    className="text-base space-y-1"
+                    style={{ color: designTokens.colors.textSecondary }}
+                  >
+                    <li>• 隨時回來查看或修改資料</li>
+                    <li>• 重新上傳新的證明文件</li>
+                    <li>• 更新月份使用量數據</li>
+                  </ul>
+                </div>
+
+                {/* 確認按鈕 */}
+                <button
+                  onClick={() => setShowSuccessModal(false)}
+                  className="w-full py-2 rounded-lg text-white font-medium transition-colors"
+                  style={{ backgroundColor: designTokens.colors.primary }}
+                  onMouseEnter={(e) => {
+                    (e.target as HTMLButtonElement).style.backgroundColor = '#10b981';
+                  }}
+                  onMouseLeave={(e) => {
+                    (e.target as HTMLButtonElement).style.backgroundColor = designTokens.colors.primary;
+                  }}
+                >
+                  確認
+                </button>
+              </div>
+            </div>
+          </div>
         </div>
       )}
     </div>

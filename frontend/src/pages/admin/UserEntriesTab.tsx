@@ -126,27 +126,27 @@ const UserEntriesTab: React.FC<UserEntriesTabProps> = ({ userId, userName, onBac
     )[0]
 
     const statusConfig = {
-      approved: { 
-        status: '已核准', 
-        note: latest.note, 
+      approved: {
+        status: '已核准',
+        note: latest.review_notes,
         icon: <CheckCircle className="h-4 w-4 text-green-500" />,
         color: 'text-green-800 bg-green-100'
       },
-      needs_fix: { 
-        status: '需修正', 
-        note: latest.note, 
+      needs_fix: {
+        status: '需修正',
+        note: latest.review_notes,
         icon: <XCircle className="h-4 w-4 text-red-500" />,
         color: 'text-red-800 bg-red-100'
       },
-      pending: { 
-        status: '待審核', 
-        note: '', 
+      pending: {
+        status: '待審核',
+        note: '',
         icon: <AlertTriangle className="h-4 w-4 text-yellow-500" />,
         color: 'text-yellow-800 bg-yellow-100'
       }
     }
 
-    return statusConfig[latest.status as keyof typeof statusConfig] || statusConfig.pending
+    return statusConfig[latest.new_status as keyof typeof statusConfig] || statusConfig.pending
   }
 
   const exportToCSV = () => {
@@ -503,23 +503,20 @@ const UserEntriesTab: React.FC<UserEntriesTabProps> = ({ userId, userName, onBac
                             <div key={review.id} className="border rounded-lg p-3 bg-gray-50">
                               <div className="flex items-center justify-between">
                                 <div className="flex items-center gap-2">
-                                  {review.status === 'approved' && <CheckCircle className="h-4 w-4 text-green-500" />}
-                                  {review.status === 'needs_fix' && <XCircle className="h-4 w-4 text-red-500" />}
-                                  {review.status === 'pending' && <AlertTriangle className="h-4 w-4 text-yellow-500" />}
+                                  {review.new_status === 'approved' && <CheckCircle className="h-4 w-4 text-green-500" />}
+                                  {review.new_status === 'needs_fix' && <XCircle className="h-4 w-4 text-red-500" />}
+                                  {review.new_status === 'pending' && <AlertTriangle className="h-4 w-4 text-yellow-500" />}
                                   <span className="text-sm font-medium">
-                                    {review.status === 'approved' ? '已核准' : review.status === 'needs_fix' ? '需修正' : '待審核'}
+                                    {review.new_status === 'approved' ? '已核准' : review.new_status === 'needs_fix' ? '需修正' : '待審核'}
                                   </span>
                                 </div>
                                 <span className="text-xs text-gray-500">
                                   {new Date(review.created_at).toLocaleString()}
                                 </span>
                               </div>
-                              {review.note && (
-                                <p className="text-sm text-gray-600 mt-1">{review.note}</p>
+                              {review.review_notes && (
+                                <p className="text-sm text-gray-600 mt-1">{review.review_notes}</p>
                               )}
-                              <p className="text-xs text-gray-500 mt-1">
-                                審核者：{review.reviewer_profiles?.display_name || 'N/A'}
-                              </p>
                             </div>
                           ))}
                         </div>

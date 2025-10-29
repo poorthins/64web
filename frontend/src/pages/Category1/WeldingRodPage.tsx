@@ -1,26 +1,28 @@
 import { useState, useEffect } from 'react'
-import { useNavigate } from 'react-router-dom'
-import { Upload, AlertCircle, CheckCircle, Loader2, X, Trash2 } from 'lucide-react'
+import { useNavigate, useSearchParams } from 'react-router-dom'
+import { Upload, AlertCircle, CheckCircle, Loader2, X, Trash2, Eye } from 'lucide-react'
+import ReviewSection from '../../components/ReviewSection'
 import EvidenceUpload, { MemoryFile } from '../../components/EvidenceUpload'
-import { DocumentHandler } from '../../services/documentHandler'
 import StatusSwitcher, { EntryStatus, canEdit, canUploadFiles, getButtonText } from '../../components/StatusSwitcher'
-import StatusIndicator from '../../components/StatusIndicator'
 import Toast, { ToastType } from '../../components/Toast'
 import BottomActionBar from '../../components/BottomActionBar'
 import { useEditPermissions } from '../../hooks/useEditPermissions'
 import { useFrontendStatus } from '../../hooks/useFrontendStatus'
+import { useApprovalStatus } from '../../hooks/useApprovalStatus'
+import { useEnergyData } from '../../hooks/useEnergyData'
+import { useEnergySubmit } from '../../hooks/useEnergySubmit'
+import { useEnergyClear } from '../../hooks/useEnergyClear'
+import { useSubmitGuard } from '../../hooks/useSubmitGuard'
+import { useGhostFileCleaner } from '../../hooks/useGhostFileCleaner'
+import { useReloadWithFileSync } from '../../hooks/useReloadWithFileSync'
+import { useSubmissions } from '../admin/hooks/useSubmissions'
 import { listMSDSFiles, listUsageEvidenceFiles, commitEvidence, deleteEvidence, EvidenceFile, uploadEvidenceWithEntry } from '../../api/files'
 import { upsertEnergyEntry, sumMonthly, UpsertEntryInput, updateEntryStatus, getEntryByPageKeyAndYear } from '../../api/entries'
-import { getEntryFiles } from '../../api/files'
-import { supabase } from '../../lib/supabaseClient'
 import { designTokens } from '../../utils/designTokens'
-import { debugRLSOperation, diagnoseAuthState } from '../../utils/authDiagnostics'
-import { logDetailedAuthStatus } from '../../utils/authHelpers'
 
 interface MonthData {
   month: number
   quantity: number      // 使用數量 (支)
-  totalWeight: number   // 總重量 (KG)
   files: EvidenceFile[]
   memoryFiles: MemoryFile[]
 }
@@ -29,38 +31,22 @@ const createInitialMonthlyData = (): MonthData[] => {
   return Array.from({ length: 12 }, (_, i) => ({
     month: i + 1,
     quantity: 0,
-    totalWeight: 0,
     files: [],
     memoryFiles: []
   }))
 }
 
-const loadMSDSFiles = async (pageKey: string) => {
-  return await listMSDSFiles(pageKey)
-}
-
-const loadExistingEntry = async (pageKey: string, year: number) => {
-  const existingEntry = await getEntryByPageKeyAndYear(pageKey, year)
-  return existingEntry
-}
-
-const loadMonthlyFiles = async (existingEntry: any) => {
-  if (!existingEntry?.id) return createInitialMonthlyData()
-
-  const files = await getEntryFiles(existingEntry.id)
-  const monthlyFiles = files.filter(f => f.month && f.file_type === 'usage_evidence')
-
-  return createInitialMonthlyData().map(data => ({
-    ...data,
-    files: monthlyFiles.filter(f => f.month === data.month) as EvidenceFile[]
-  }))
-}
-
 const WeldingRodPage = () => {
   const navigate = useNavigate()
+  const [searchParams] = useSearchParams()
+
+  // 審核模式檢測
+  const isReviewMode = searchParams.get('mode') === 'review'
+  const reviewEntryId = searchParams.get('entryId')
+  const reviewUserId = searchParams.get('userId')
+
   const [loading, setLoading] = useState(true)
-  const [clearLoading, setClearLoading] = useState(false)
-  const [submitting, setSubmitting] = useState(false)
+  const { executeSubmit, submitting } = useSubmitGuard()
   const [error, setError] = useState<string | null>(null)
   const [success, setSuccess] = useState<string | null>(null)
   const [hasSubmittedBefore, setHasSubmittedBefore] = useState(false)
@@ -98,75 +84,142 @@ const WeldingRodPage = () => {
   const pageKey = 'welding_rod'
   
   // 編輯權限控制
-  const editPermissions = useEditPermissions(frontendCurrentStatus || 'submitted')
+  const editPermissions = useEditPermissions(frontendCurrentStatus || 'submitted', isReviewMode)
 
   const monthNames = [
     '1月', '2月', '3月', '4月', '5月', '6月',
     '7月', '8月', '9月', '10月', '11月', '12月'
   ]
 
-  // 載入記錄與檔案
+  // 審核模式資料載入
+  const entryIdToLoad = isReviewMode && reviewEntryId ? reviewEntryId : undefined
+
+  // 使用 useEnergyData Hook 載入資料
+  const {
+    entry: loadedEntry,
+    files: loadedFiles,
+    loading: dataLoading,
+    error: dataError,
+    reload
+  } = useEnergyData(pageKey, year, entryIdToLoad)
+
+  // 審核狀態檢查 Hook
+  const approvalStatus = useApprovalStatus(pageKey, year)
+
+  // 審核 API hook
+  const { reviewSubmission } = useSubmissions()
+
+  // 幽靈檔案清理 Hook - 必須在使用它的 useEffect 之前宣告
+  const { cleanFiles } = useGhostFileCleaner()
+
+  // Reload 同步 Hook
+  const { reloadAndSync } = useReloadWithFileSync(reload)
+
+  // 同步 loading 狀態
   useEffect(() => {
-    const loadData = async () => {
-      try {
-        setLoading(true)
-        setError(null)
+    setLoading(dataLoading)
+  }, [dataLoading])
 
-        // 檢查是否已有非草稿記錄
-        const existingEntry = await loadExistingEntry(pageKey, year)
-        if (existingEntry && existingEntry.status !== 'draft') {
-          setInitialStatus(existingEntry.status as EntryStatus)
-          setCurrentEntryId(existingEntry.id)
-          setHasSubmittedBefore(true)
+  // 同步 error 狀態
+  useEffect(() => {
+    if (dataError) {
+      setError(dataError)
+    }
+  }, [dataError])
 
-          // 載入該記錄的所有檔案（支援審核模式）
-          try {
-            const allFiles = await getEntryFiles(existingEntry.id)
-            const msdsFilesFromEntry = allFiles.filter(f =>
-              f.file_type === 'msds' && f.page_key === pageKey
-            )
-            setMsdsFiles(msdsFilesFromEntry)
-          } catch (fileError) {
-            console.error('Failed to load MSDS files for existing entry:', fileError)
-            setMsdsFiles([])
-          }
+  // 處理載入的 entry 資料
+  useEffect(() => {
+    if (loadedEntry?.payload) {
+      // 新格式：從 extraPayload 讀取
+      // 前端變數：unitWeight, carbonContent
+      // 後端欄位：unitCapacity, carbonRate（提交時對應）
+      if (loadedEntry.payload.unitCapacity !== undefined) {
+        setUnitWeight(loadedEntry.payload.unitCapacity || 0)
+        setCarbonContent(loadedEntry.payload.carbonRate || 0)
+      } else if (loadedEntry.payload.unitWeight !== undefined) {
+        // 向後相容：舊的 unitWeight/carbonContent 格式
+        setUnitWeight(loadedEntry.payload.unitWeight || 0)
+        setCarbonContent(loadedEntry.payload.carbonContent || 0)
+      } else if (loadedEntry.payload.notes) {
+        // 向後相容：從 notes 解析（最舊資料格式）
+        const entryUnitWeight = loadedEntry.payload.notes?.match(/單位重量: ([\d.]+)/)?.[1]
+        const entryCarbonContent = loadedEntry.payload.notes?.match(/含碳率: ([\d.]+)/)?.[1]
+        if (entryUnitWeight) setUnitWeight(parseFloat(entryUnitWeight))
+        if (entryCarbonContent) setCarbonContent(parseFloat(entryCarbonContent))
+      }
 
-          // 載入已提交記錄的表單數據
-          if (existingEntry.payload?.monthly) {
-            const entryUnitWeight = existingEntry.payload.notes?.match(/單位重量: ([\d.]+)/)?.[1]
-            const entryCarbonContent = existingEntry.payload.notes?.match(/含碳率: ([\d.]+)/)?.[1]
+      // 設定狀態
+      const newStatus = loadedEntry.status as EntryStatus
+      setCurrentEntryId(loadedEntry.id)
+      setHasSubmittedBefore(loadedEntry.status !== 'draft')
+      setInitialStatus(newStatus)
+      frontendStatus.setFrontendStatus(newStatus)  // 同步前端狀態
 
-            if (entryUnitWeight) setUnitWeight(parseFloat(entryUnitWeight))
-            if (entryCarbonContent) setCarbonContent(parseFloat(entryCarbonContent))
-          }
-        } else {
-          // 新記錄：設為空狀態，不載入任何檔案（因為還沒有記錄）
-          setMsdsFiles([])
-        }
+      isInitialLoad.current = false
+    } else if (loadedEntry === null && !dataLoading) {
+      // 新記錄：重置狀態
+      setHasSubmittedBefore(false)
+      setCurrentEntryId(null)
+      setInitialStatus('draft' as EntryStatus)
+      frontendStatus.setFrontendStatus('draft' as EntryStatus)  // 同步前端狀態
+      setUnitWeight(0)
+      setCarbonContent(0)
+      isInitialLoad.current = false
+    }
+  }, [loadedEntry, dataLoading])
+
+  // 處理載入的檔案
+  useEffect(() => {
+    if (loadedFiles.length > 0) {
+      // ✅ 先清理幽靈檔案，再分類
+      const cleanAndAssignFiles = async () => {
+        const validFiles = await cleanFiles(loadedFiles)
+        console.log('✅ [WeldingRodPage] Valid files after cleanup:', validFiles.length)
+
+        // 分類檔案：MSDS 和月份檔案
+        const msdsFilesFromLoad = validFiles.filter(f => f.file_type === 'msds')
+        setMsdsFiles(msdsFilesFromLoad)
 
         // 載入各月份使用證明檔案
-        try {
-          const monthlyDataWithFiles = await loadMonthlyFiles(existingEntry)
-          setMonthlyData(monthlyDataWithFiles)
-          if (existingEntry?.id) {
-            handleDataChanged()
+        const monthlyDataWithFiles = createInitialMonthlyData().map(monthData => {
+          const monthFiles = validFiles.filter(f =>
+            f.file_type === 'usage_evidence' && f.month === monthData.month
+          )
+
+          // 從資料庫讀取該月份的數量
+          let quantity = 0
+
+          // 優先從 monthlyQuantity 讀取（新格式，直接存數量）
+          if (loadedEntry?.payload?.monthlyQuantity?.[monthData.month.toString()]) {
+            quantity = loadedEntry.payload.monthlyQuantity[monthData.month.toString()]
+          } else if (loadedEntry?.payload?.monthly?.[monthData.month.toString()]) {
+            // 向後相容：舊資料只有 monthly（totalWeight），需要反推 quantity
+            const totalWeight = loadedEntry.payload.monthly[monthData.month.toString()]
+            quantity = unitWeight > 0 ? Math.round(totalWeight / unitWeight) : 0
           }
-        } catch (fileError) {
-          console.error('Failed to load files for welding rod records:', fileError)
-          setMonthlyData(createInitialMonthlyData())
+
+          return {
+            ...monthData,
+            quantity,
+            files: monthFiles
+          }
+        })
+
+        setMonthlyData(monthlyDataWithFiles)
+
+        if (loadedEntry?.id) {
+          handleDataChanged()
         }
-
-        isInitialLoad.current = false
-      } catch (error) {
-        console.error('Error loading data:', error)
-        setError(error instanceof Error ? error.message : '載入資料失敗')
-      } finally {
-        setLoading(false)
       }
-    }
 
-    loadData()
-  }, [])
+      cleanAndAssignFiles()
+    } else if (!dataLoading && loadedEntry === null) {
+      // 新記錄：清空檔案
+      setMsdsFiles([])
+      setMonthlyData(createInitialMonthlyData())
+    }
+  }, [loadedFiles, loadedEntry, dataLoading, cleanFiles])
+
 
   // 監聽表單變更
   useEffect(() => {
@@ -175,26 +228,14 @@ const WeldingRodPage = () => {
     }
   }, [unitWeight, carbonContent, monthlyData, msdsFiles, hasSubmittedBefore])
 
-  // 依單位重量自動計算各月總重量
-  useEffect(() => {
-    setMonthlyData(prev => 
-      prev.map(data => ({
-        ...data,
-        totalWeight: data.quantity * unitWeight
-      }))
-    )
-  }, [unitWeight])
-
   const updateMonthData = (index: number, field: 'quantity', value: number) => {
     setMonthlyData(prev => {
       const newData = [...prev]
       const safeValue = isNaN(value) ? 0 : value
-      const safeUnitWeight = isNaN(unitWeight) ? 0 : unitWeight
-      
-      newData[index] = { 
-        ...newData[index], 
-        [field]: safeValue,
-        totalWeight: field === 'quantity' ? safeValue * safeUnitWeight : newData[index].totalWeight
+
+      newData[index] = {
+        ...newData[index],
+        [field]: safeValue
       }
       return newData
     })
@@ -217,7 +258,7 @@ const WeldingRodPage = () => {
   }
 
   const getTotalWeight = () => {
-    return monthlyData.reduce((sum, data) => sum + data.totalWeight, 0)
+    return monthlyData.reduce((sum, data) => sum + (data.quantity * unitWeight), 0)
   }
 
   const getTotalQuantity = () => {
@@ -253,95 +294,55 @@ const WeldingRodPage = () => {
     return errors
   }
 
+
+  // 使用 useEnergySubmit Hook
+  const { submit, save, submitting: hookSubmitting, error: submitError, success: submitSuccess } = useEnergySubmit(pageKey, year)
+
+  // 使用 useEnergyClear Hook
+  const { clear, clearing } = useEnergyClear(currentEntryId, frontendCurrentStatus)
+
+  // 提交處理函式
   const handleSubmit = async () => {
-    console.log('=== 焊條提交除錯開始 ===')
-    
     const errors = validateData()
     if (errors.length > 0) {
-      setError('請修正以下問題：\n' + errors.join('\n'))
+      setError('請修正以下問題:\n' + errors.join('\n'))
       return
     }
 
-    setSubmitting(true)
-    setError(null)
-    setSuccess(null)
+    await executeSubmit(async () => {
+      setError(null)
+      setSuccess(null)
 
-    try {
-      // 步驟1：詳細認證狀態診斷
-      console.log('🔍 執行詳細認證診斷...')
-      await logDetailedAuthStatus()
-      
-      const authDiagnosis = await diagnoseAuthState()
-      if (!authDiagnosis.isAuthenticated) {
-        console.error('❌ 認證診斷失敗:', authDiagnosis)
-        throw new Error(`認證失效: ${authDiagnosis.userError?.message || authDiagnosis.sessionError?.message || '未知原因'}`)
-      }
-
-      // 步驟2：準備每月數據 (以重量為單位)
+      // 準備每月數據 (以重量為單位)
       const monthly: Record<string, number> = {}
+      const monthlyQuantity: Record<string, number> = {}
       monthlyData.forEach(data => {
         if (data.quantity > 0) {
-          monthly[data.month.toString()] = data.totalWeight
+          monthly[data.month.toString()] = data.quantity * unitWeight  // 即時計算總重量
+          monthlyQuantity[data.month.toString()] = data.quantity
         }
       })
 
-      // 步驟3：建立填報輸入資料
-      const entryInput: UpsertEntryInput = {
-        page_key: pageKey,
-        period_year: year,
-        unit: 'KG',
-        monthly: monthly,
-        notes: `單位重量: ${unitWeight} KG/支, 含碳率: ${carbonContent}%`
-      }
+      // 分開 MSDS 檔案和月份檔案
+      const monthlyFiles: MemoryFile[][] = monthlyData.map(m => m.memoryFiles || [])
 
-      // 步驟4：使用診斷包裝執行關鍵操作
-      const { entry_id } = await debugRLSOperation(
-        '新增或更新能源填報記錄',
-        async () => await upsertEnergyEntry(entryInput, true)
-      )
+      // 使用 Hook 提交（符合 Hook 的參數格式）
+      await submit({
+        formData: {
+          unit: 'KG',
+          monthly: monthly,
+          monthlyQuantity: monthlyQuantity,
+          unitCapacity: unitWeight,      // 將 unitWeight 對應到 unitCapacity
+          carbonRate: carbonContent      // 將 carbonContent 對應到 carbonRate
+        },
+        msdsFiles: msdsMemoryFiles,
+        monthlyFiles: monthlyFiles
+      })
 
-      // 步驟5：設置 entryId（如果是新建的記錄）
-      if (!currentEntryId) {
-        setCurrentEntryId(entry_id)
-      }
 
-      // 步驟6：上傳記憶體檔案
-      // 上傳銲條檢驗報告
-      for (const memFile of msdsMemoryFiles) {
-        await uploadEvidenceWithEntry(memFile.file, {
-          entryId: entry_id,
-          pageKey: pageKey,
-          year: year,
-          category: 'msds'
-        })
-      }
-
-      // 上傳各月份使用證明
-      for (const monthData of monthlyData) {
-        if (monthData.memoryFiles && monthData.memoryFiles.length > 0) {
-          for (const memFile of monthData.memoryFiles) {
-            await uploadEvidenceWithEntry(memFile.file, {
-              entryId: entry_id,
-              pageKey: pageKey,
-              year: year,
-              category: 'usage_evidence',
-              month: monthData.month
-            })
-          }
-        }
-      }
-
-      // 步驟7：提交所有檔案
-      await debugRLSOperation(
-        '提交證明檔案',
-        async () => await commitEvidence({
-          entryId: entry_id,
-          pageKey: pageKey
-        })
-      )
-
-      // 步驟8：處理狀態轉換
+      // 提交成功後處理
       await handleSubmitSuccess()
+      await reloadAndSync()  // 重新載入資料並等待同步完成
 
       // 清空 memory files
       setMsdsMemoryFiles([])
@@ -354,82 +355,99 @@ const WeldingRodPage = () => {
       const totalQuantity = getTotalQuantity()
       setSuccess(`年度總使用量：${totalQuantity} 支 (${totalWeight.toFixed(2)} KG)`)
       setShowSuccessModal(true)
-      
-      console.log('=== ✅ 焊條提交成功完成 ===')
-
-    } catch (error) {
-      console.error('=== ❌ 焊條提交失敗 ===')
-      console.error('錯誤訊息:', error instanceof Error ? error.message : String(error))
+    }).catch(error => {
+      console.error('焊條提交失敗:', error)
       setError(error instanceof Error ? error.message : '提交失敗')
-    } finally {
-      setSubmitting(false)
-    }
+    })
   }
 
-  const handleStatusChange = async (newStatus: EntryStatus) => {
-    try {
-      if (currentEntryId) {
-        await updateEntryStatus(currentEntryId, newStatus)
-      }
-      frontendStatus.setFrontendStatus(newStatus)
-    } catch (error) {
-      setError(error instanceof Error ? error.message : '狀態更新失敗')
-    }
+  // 暫存處理函式（不驗證）
+  const handleSave = async () => {
+    await executeSubmit(async () => {
+      setError(null)
+      setSuccess(null)
+
+      // 準備每月數據 (以重量為單位)
+      const monthly: Record<string, number> = {}
+      const monthlyQuantity: Record<string, number> = {}
+      monthlyData.forEach(data => {
+        if (data.quantity > 0) {
+          monthly[data.month.toString()] = data.quantity * unitWeight
+          monthlyQuantity[data.month.toString()] = data.quantity
+        }
+      })
+
+      // 分開 MSDS 檔案和月份檔案
+      const monthlyFiles: MemoryFile[][] = monthlyData.map(m => m.memoryFiles || [])
+
+      // 使用 Hook 暫存
+      const entry_id = await save({
+        formData: {
+          unit: 'KG',
+          monthly: monthly,
+          monthlyQuantity: monthlyQuantity,
+          unitCapacity: unitWeight,
+          carbonRate: carbonContent
+        },
+        msdsFiles: msdsMemoryFiles,
+        monthlyFiles: monthlyFiles
+      })
+
+      // 設定 entry ID
+      setCurrentEntryId(entry_id)
+      await reloadAndSync()
+
+      // 清空 memory files
+      setMsdsMemoryFiles([])
+      setMonthlyData(prev => prev.map(data => ({ ...data, memoryFiles: [] })))
+
+      setToast({
+        message: '暫存成功！資料已儲存',
+        type: 'success'
+      })
+    }).catch(error => {
+      console.error('❌ 暫存失敗:', error)
+      setError(error instanceof Error ? error.message : '暫存失敗')
+    })
   }
 
   const handleClear = async () => {
-    console.log('🗑️ [WeldingRodPage] ===== CLEAR BUTTON CLICKED =====')
-
-    const clearSuccess = DocumentHandler.handleClear({
-      currentStatus: frontendCurrentStatus,
-      title: '焊條資料清除',
-      message: '確定要清除所有焊條使用資料嗎？此操作無法復原。',
-      onClear: () => {
-        setClearLoading(true)
-        try {
-          console.log('🗑️ [WeldingRodPage] Starting complete clear operation...')
-
-          // 清理記憶體檔案
-          DocumentHandler.clearAllMemoryFiles(msdsMemoryFiles)
-          monthlyData.forEach(monthData => {
-            DocumentHandler.clearAllMemoryFiles(monthData.memoryFiles)
-          })
-
-          // 清除前端狀態
-          console.log('🧹 [WeldingRodPage] Clearing frontend states...')
-          setUnitWeight(0)
-          setCarbonContent(0)
-          setMsdsFiles([])
-          setMsdsMemoryFiles([])
-          setMonthlyData(createInitialMonthlyData())
-
-          setHasChanges(false)
-          setError(null)
-          setSuccess(null)
-          setShowClearConfirmModal(false)
-
-          console.log('✅ [WeldingRodPage] Clear operation completed successfully')
-          setToast({
-            message: '資料已清除',
-            type: 'success'
-          })
-
-        } catch (error) {
-          console.error('❌ [WeldingRodPage] Clear operation failed:', error)
-          setError('清除操作失敗，請重試')
-          setShowClearConfirmModal(false)
-        } finally {
-          console.log('🗑️ [WeldingRodPage] Clear operation finished, resetting loading state')
-          setClearLoading(false)
-        }
-      }
-    })
-
-    if (!clearSuccess && frontendCurrentStatus === 'approved') {
-      setToast({
-        message: '已通過的資料無法清除',
-        type: 'error'
+    try {
+      // 收集所有要刪除的檔案
+      const allFiles = [...msdsFiles]
+      monthlyData.forEach(data => {
+        allFiles.push(...data.files)
       })
+
+      // 收集所有記憶體檔案
+      const allMemoryFiles = [msdsMemoryFiles, ...monthlyData.map(d => d.memoryFiles)]
+
+      // 使用 Hook 清除
+      await clear({
+        filesToDelete: allFiles,
+        memoryFilesToClean: allMemoryFiles
+      })
+
+      // 清除前端狀態
+      setUnitWeight(0)
+      setCarbonContent(0)
+      setMsdsFiles([])
+      setMsdsMemoryFiles([])
+      setMonthlyData(createInitialMonthlyData())
+      setHasChanges(false)
+      setCurrentEntryId(null)
+      setHasSubmittedBefore(false)
+
+      // 關閉確認模態框
+      setShowClearConfirmModal(false)
+
+      setToast({
+        message: '資料已清除',
+        type: 'success'
+      })
+    } catch (error) {
+      console.error('清除失敗:', error)
+      setError(error instanceof Error ? error.message : '清除失敗')
     }
   }
 
@@ -453,20 +471,98 @@ const WeldingRodPage = () => {
   return (
     <div className="min-h-screen bg-green-50">
       <div className="max-w-4xl mx-auto px-6 py-8 space-y-6">
-        
+
+        {/* 審核狀態通知 */}
+        {!isReviewMode && approvalStatus.isSaved && (
+          <div className="bg-blue-100 border-l-4 border-blue-500 text-blue-700 p-4 mb-6 rounded-r-lg max-w-4xl mx-auto">
+            <div className="flex items-center">
+              <div className="text-2xl mr-3">💾</div>
+              <div>
+                <p className="font-bold text-lg">資料已暫存</p>
+                <p className="text-sm mt-1">您的資料已儲存，可隨時修改後提交審核。</p>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {!isReviewMode && approvalStatus.isApproved && (
+          <div className="bg-green-100 border-l-4 border-green-500 text-green-700 p-4 mb-6 rounded-r-lg">
+            <div className="flex items-center">
+              <div className="text-2xl mr-3">🎉</div>
+              <div>
+                <p className="font-bold text-lg">恭喜您已審核通過！</p>
+                <p className="text-sm mt-1">此填報已完成審核，資料已鎖定無法修改。</p>
+                {approvalStatus.reviewedAt && (
+                  <p className="text-xs mt-2 opacity-75">
+                    審核完成時間：{new Date(approvalStatus.reviewedAt).toLocaleString()}
+                  </p>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {!isReviewMode && approvalStatus.isRejected && (
+          <div className="bg-red-100 border-l-4 border-red-500 text-red-700 p-4 mb-6 rounded-r-lg">
+            <div className="flex items-center">
+              <div className="text-2xl mr-3">⚠️</div>
+              <div className="flex-1">
+                <p className="font-bold text-lg">填報已被退回</p>
+                <p className="text-sm mt-1 font-medium">退回原因：{approvalStatus.rejectionReason}</p>
+                <p className="text-xs mt-2">請根據上述原因修正後重新提交。修正完成後，資料將重新進入審核流程。</p>
+                {approvalStatus.reviewedAt && (
+                  <p className="text-xs mt-2 opacity-75">
+                    退回時間：{new Date(approvalStatus.reviewedAt).toLocaleString()}
+                  </p>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {!isReviewMode && approvalStatus.isPending && (
+          <div className="bg-green-100 border-l-4 border-green-500 text-green-700 p-4 mb-6 rounded-r-lg max-w-4xl mx-auto">
+            <div className="flex items-center">
+              <div className="text-2xl mr-3">📋</div>
+              <div>
+                <p className="font-bold text-lg">等待審核中</p>
+                <p className="text-sm mt-1">您的填報已提交，請等待管理員審核。</p>
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* 頁面標題 */}
         <div className="text-center mb-8">
-          <h1 
-            className="text-3xl font-semibold mb-3" 
+          {/* 審核模式指示器 */}
+          {isReviewMode && (
+            <div className="mb-4 p-3 bg-orange-100 border-2 border-orange-300 rounded-lg">
+              <div className="flex items-center justify-center">
+                <Eye className="w-5 h-5 text-orange-600 mr-2" />
+                <span className="text-orange-800 font-medium">
+                  📋 審核模式 - 查看填報內容
+                </span>
+              </div>
+              <p className="text-sm text-orange-600 mt-1">
+                所有輸入欄位已鎖定，僅供審核查看
+              </p>
+            </div>
+          )}
+
+          <h1
+            className="text-3xl font-semibold mb-3"
             style={{ color: designTokens.colors.textPrimary }}
           >
             焊條使用量填報
           </h1>
-          <p 
-            className="text-base" 
+          <p
+            className="text-base"
             style={{ color: designTokens.colors.textSecondary }}
           >
-            請上傳 <b>銲條檢驗報告</b> 並填入各月份焊條使用數據進行碳排放計算
+            {isReviewMode
+              ? '管理員審核模式 - 檢視填報內容和相關檔案'
+              : '請填寫焊條使用量及上傳相關檢驗報告'
+            }
           </p>
         </div>
 
@@ -538,10 +634,11 @@ const WeldingRodPage = () => {
                     const numValue = inputValue === '' ? 0 : parseFloat(inputValue)
                     setUnitWeight(isNaN(numValue) ? 0 : numValue)
                   }}
+                  disabled={isReviewMode || approvalStatus.isApproved || submitting || !editPermissions.canEdit}
                   className={`w-full px-4 py-3 border rounded-lg focus:outline-none focus:ring-2 focus:border-transparent transition-all ${
-                    !editPermissions.canEdit ? 'bg-gray-100 cursor-not-allowed' : ''
+                    isReviewMode || approvalStatus.isApproved ? 'bg-gray-100 cursor-not-allowed' : ''
                   }`}
-                  style={{ 
+                  style={{
                     color: designTokens.colors.textPrimary,
                     borderColor: designTokens.colors.border,
                     borderRadius: designTokens.borderRadius.md
@@ -557,7 +654,6 @@ const WeldingRodPage = () => {
                     (e.target as HTMLInputElement).style.boxShadow = 'none'
                   }}
                   placeholder="請輸入單位重量"
-                  disabled={submitting || !editPermissions.canEdit}
                 />
               </div>
               
@@ -566,7 +662,7 @@ const WeldingRodPage = () => {
                   className="block text-sm font-medium mb-2" 
                   style={{ color: designTokens.colors.textPrimary }}
                 >
-                  含碳率 (%)
+                  含碳率(如無檢驗報告請填100)
                 </label>
                 <input
                   type="number"
@@ -579,10 +675,11 @@ const WeldingRodPage = () => {
                     const numValue = inputValue === '' ? 0 : parseFloat(inputValue)
                     setCarbonContent(isNaN(numValue) ? 0 : numValue)
                   }}
+                  disabled={isReviewMode || approvalStatus.isApproved || submitting || !editPermissions.canEdit}
                   className={`w-full px-4 py-3 border rounded-lg focus:outline-none focus:ring-2 focus:border-transparent transition-all ${
-                    !editPermissions.canEdit ? 'bg-gray-100 cursor-not-allowed' : ''
+                    isReviewMode || approvalStatus.isApproved ? 'bg-gray-100 cursor-not-allowed' : ''
                   }`}
-                  style={{ 
+                  style={{
                     color: designTokens.colors.textPrimary,
                     borderColor: designTokens.colors.border,
                     borderRadius: designTokens.borderRadius.md
@@ -598,7 +695,6 @@ const WeldingRodPage = () => {
                     (e.target as HTMLInputElement).style.boxShadow = 'none'
                   }}
                   placeholder="請輸入含碳率"
-                  disabled={submitting || !editPermissions.canEdit}
                 />
               </div>
             </div>
@@ -609,7 +705,7 @@ const WeldingRodPage = () => {
                 className="block text-sm font-medium mb-3" 
                 style={{ color: designTokens.colors.textPrimary }}
               >
-                銲條檢驗報告上傳
+                銲條單位重量佐證與檢驗報告上傳
               </label>
               <EvidenceUpload
                 pageKey={pageKey}
@@ -620,7 +716,7 @@ const WeldingRodPage = () => {
                 maxFiles={3}
                 disabled={submitting || !editPermissions.canUploadFiles}
                 kind="msds"  // 維持後端型別，僅前端顯示改名
-                mode="edit"
+                mode={isReviewMode || approvalStatus.isApproved ? "view" : "edit"}
               />
             </div>
           </div>
@@ -697,15 +793,15 @@ const WeldingRodPage = () => {
                   >
                     {monthNames[index]}
                   </h3>
-                  {data.totalWeight > 0 && (
-                    <span 
+                  {data.quantity > 0 && (
+                    <span
                       className="text-sm font-medium px-2 py-1 rounded"
-                      style={{ 
+                      style={{
                         color: designTokens.colors.accentSecondary,
                         backgroundColor: designTokens.colors.accentLight
                       }}
                     >
-                      重量：{data.totalWeight.toFixed(2)} KG
+                      重量：{(data.quantity * unitWeight).toFixed(2)} KG
                     </span>
                   )}
                 </div>
@@ -728,10 +824,11 @@ const WeldingRodPage = () => {
                         const numValue = inputValue === '' ? 0 : parseInt(inputValue)
                         updateMonthData(index, 'quantity', isNaN(numValue) ? 0 : numValue)
                       }}
+                      disabled={isReviewMode || approvalStatus.isApproved || submitting || !editPermissions.canEdit}
                       className={`w-full px-3 py-2 border rounded-md focus:outline-none focus:ring-2 focus:border-transparent transition-all ${
-                        !editPermissions.canEdit ? 'bg-gray-100 cursor-not-allowed' : ''
+                        isReviewMode || approvalStatus.isApproved ? 'bg-gray-100 cursor-not-allowed' : ''
                       }`}
-                      style={{ 
+                      style={{
                         color: designTokens.colors.textPrimary,
                         borderColor: designTokens.colors.border
                       }}
@@ -746,7 +843,6 @@ const WeldingRodPage = () => {
                         (e.target as HTMLInputElement).style.boxShadow = 'none'
                       }}
                       placeholder="0"
-                      disabled={submitting || !editPermissions.canEdit}
                     />
                   </div>
 
@@ -767,7 +863,7 @@ const WeldingRodPage = () => {
                       maxFiles={3}
                       disabled={submitting || !editPermissions.canUploadFiles}
                       kind="usage_evidence"
-                      mode="edit"
+                      mode={isReviewMode || approvalStatus.isApproved ? "view" : "edit"}
                     />
                   </div>
                 </div>
@@ -775,6 +871,26 @@ const WeldingRodPage = () => {
             ))}
           </div>
         </div>
+
+        {/* 審核區塊 - 只在審核模式顯示 */}
+        {isReviewMode && (
+          <ReviewSection
+            entryId={reviewEntryId || currentEntryId || `welding_rod_${year}`}
+            userId={reviewUserId || "current_user"}
+            category="焊條"
+            userName="填報用戶" // 可以從用戶資料獲取
+            amount={getTotalQuantity()}
+            unit="支"
+            onApprove={() => {
+              // ReviewSection 會處理 API 呼叫和導航
+              // 這裡可以加入額外的本地狀態處理（如果需要）
+            }}
+            onReject={(reason) => {
+              // ReviewSection 會處理 API 呼叫和導航
+              // 這裡可以加入額外的本地狀態處理（如果需要）
+            }}
+          />
+        )}
 
         {/* 底部空間 */}
         <div className="h-20"></div>
@@ -898,7 +1014,7 @@ const WeldingRodPage = () => {
 
       {/* 清除確認模態框 */}
       {showClearConfirmModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg黑 bg-opacity-50 p-4">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50 p-4">
           <div 
             className="bg-white rounded-lg shadow-lg max-w-md w-full"
             style={{ borderRadius: designTokens.borderRadius.lg }}
@@ -942,24 +1058,24 @@ const WeldingRodPage = () => {
                 </button>
                 <button
                   onClick={handleClear}
-                  disabled={clearLoading}
+                  disabled={clearing}
                   className="px-4 py-2 text-white rounded-lg transition-colors font-medium flex items-center justify-center"
                   style={{
-                    backgroundColor: clearLoading ? '#9ca3af' : designTokens.colors.error,
-                    opacity: clearLoading ? 0.7 : 1
+                    backgroundColor: clearing ? '#9ca3af' : designTokens.colors.error,
+                    opacity: clearing ? 0.7 : 1
                   }}
                   onMouseEnter={(e) => {
-                    if (!clearLoading) {
+                    if (!clearing) {
                       (e.target as HTMLButtonElement).style.backgroundColor = '#dc2626';
                     }
                   }}
                   onMouseLeave={(e) => {
-                    if (!clearLoading) {
+                    if (!clearing) {
                       (e.target as HTMLButtonElement).style.backgroundColor = designTokens.colors.error;
                     }
                   }}
                 >
-                  {clearLoading ? (
+                  {clearing ? (
                     <>
                       <Loader2 className="w-4 h-4 animate-spin mr-2" />
                       清除中...
@@ -974,18 +1090,22 @@ const WeldingRodPage = () => {
         </div>
       )}
 
-      {/* 底部操作欄 */}
-      <BottomActionBar
-        currentStatus={frontendCurrentStatus || 'submitted'}
-        currentEntryId={currentEntryId}
-        isUpdating={false}
-        editPermissions={editPermissions}
-        submitting={submitting}
-        onSubmit={handleSubmit}
-        onClear={() => setShowClearConfirmModal(true)}
-        designTokens={designTokens}
-        hasSubmittedBefore={hasSubmittedBefore}
-      />
+      {/* 底部操作欄 - 審核模式下隱藏，審核通過時也隱藏 */}
+      {!isReviewMode && !approvalStatus.isApproved && (
+        <BottomActionBar
+          currentStatus={frontendCurrentStatus || 'submitted'}
+          currentEntryId={currentEntryId}
+          isUpdating={false}
+          editPermissions={editPermissions}
+          submitting={submitting}
+          saving={submitting}
+          onSubmit={handleSubmit}
+          onSave={handleSave}
+          onClear={() => setShowClearConfirmModal(true)}
+          designTokens={designTokens}
+          hasSubmittedBefore={hasSubmittedBefore}
+        />
+      )}
 
       {/* Toast 通知 */}
       {toast && (

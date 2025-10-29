@@ -1,38 +1,56 @@
-import { useState, useCallback, useEffect, useRef } from 'react'
-import { useSearchParams } from 'react-router-dom'
-import { Plus, Trash2, Calendar, Truck, AlertCircle, CheckCircle, Upload, Loader2, Eye } from 'lucide-react'
-import { useFrontendStatus } from '../../hooks/useFrontendStatus'
-import { useEditPermissions } from '../../hooks/useEditPermissions'
-import StatusIndicator from '../../components/StatusIndicator'
-import EvidenceUpload, { MemoryFile } from '../../components/EvidenceUpload'
-import BottomActionBar from '../../components/BottomActionBar'
-import { EntryStatus } from '../../components/StatusSwitcher'
-import { listMSDSFiles, listUsageEvidenceFiles, commitEvidence, deleteEvidence, deleteEvidenceFile, EvidenceFile, uploadEvidenceWithEntry } from '../../api/files'
-import { upsertEnergyEntry, sumMonthly, UpsertEntryInput, updateEntryStatus, getEntryByPageKeyAndYear, getEntryById } from '../../api/entries'
+/**
+ * DieselPage - 柴油使用量填報頁面
+ *
+ * 檔案儲存架構：
+ * - Supabase Storage 路徑：other/2025/diesel/
+ * - 資料庫記錄識別：page_key = 'diesel' + record_index = 0/1/2/3
+ * - 單一統一資料夾，使用 record_index 欄位區分不同記錄的檔案
+ *
+ * 與其他頁面不同：
+ * - 其他頁面：單筆記錄 → page_key 唯一識別
+ * - 柴油頁面：多筆記錄 → page_key + record_index 組合識別
+ */
+
+import { useState, useEffect, useMemo, useCallback } from 'react';
+import { useNavigate, useSearchParams } from 'react-router-dom'
+import { AlertCircle, X, Trash2, Eye, Loader2, CheckCircle, Download } from 'lucide-react'
+import EvidenceUpload from '../../components/EvidenceUpload';
+import { MemoryFile } from '../../components/EvidenceUpload';
+import { EntryStatus } from '../../components/StatusSwitcher';
+import BottomActionBar from '../../components/BottomActionBar';
 import ReviewSection from '../../components/ReviewSection'
-import { getEntryFiles } from '../../api/files'
-import { designTokens } from '../../utils/designTokens'
-import { debugRLSOperation, diagnoseAuthState } from '../../utils/authDiagnostics'
-import { logDetailedAuthStatus } from '../../utils/authHelpers'
-import { DocumentHandler } from '../../services/documentHandler'
+import { useEditPermissions } from '../../hooks/useEditPermissions';
+import { useFrontendStatus } from '../../hooks/useFrontendStatus';
+import { useApprovalStatus } from '../../hooks/useApprovalStatus';
+import { useEnergyData } from '../../hooks/useEnergyData'
+import { useMultiRecordSubmit } from '../../hooks/useMultiRecordSubmit'
+import { useEnergyClear } from '../../hooks/useEnergyClear'
+import { useSubmitGuard } from '../../hooks/useSubmitGuard'
+import { useGhostFileCleaner } from '../../hooks/useGhostFileCleaner'
+import { useRecordFileMapping } from '../../hooks/useRecordFileMapping'
+import { useSubmissions } from '../admin/hooks/useSubmissions'
+import { useRole } from '../../hooks/useRole'
+import { useAdminSave } from '../../hooks/useAdminSave'
+import { updateEntryStatus, getEntryByPageKeyAndYear, upsertEnergyEntry, deleteEnergyEntry } from '../../api/entries';
+import { getEntryFiles, EvidenceFile, uploadEvidenceWithEntry, updateFileEntryAssociation, deleteEvidenceFile, adminDeleteEvidence, getFileUrl } from '../../api/files';
+import { supabase } from '../../lib/supabaseClient';
+import { designTokens } from '../../utils/designTokens';
+import { DocumentHandler } from '../../services/documentHandler';
+import Toast, { ToastType } from '../../components/Toast';
+import { generateRecordId } from '../../utils/idGenerator';
+
 
 interface DieselRecord {
-  id: string
-  date: string           // 使用日期 YYYY-MM-DD
-  quantity: number       // 使用量 (L)
-  files: EvidenceFile[]  // 佐證檔案
-  memoryFiles: MemoryFile[]  // 新增記憶檔案
-  recordKey?: string     // 用於檔案關聯的唯一識別碼
+  id: string;  // ⭐ 改為 string 型別（穩定的 recordId）
+  date: string;              // 使用日期
+  quantity: number;          // 使用量(L)
+  evidenceFiles?: EvidenceFile[];
+  memoryFiles?: MemoryFile[];
+  groupId?: string;          // ⭐ 群組 ID（undefined = 未上傳區）
 }
-
-interface DieselData {
-  year: number
-  records: DieselRecord[]
-  totalQuantity: number  // 總使用量
-}
-
 
 export default function DieselPage() {
+  const navigate = useNavigate()
   const [searchParams] = useSearchParams()
 
   // 審核模式檢測
@@ -40,405 +58,689 @@ export default function DieselPage() {
   const reviewEntryId = searchParams.get('entryId')
   const reviewUserId = searchParams.get('userId')
 
-  const currentYear = new Date().getFullYear()
-  const [loading, setLoading] = useState(true)
-  const [activeTab, setActiveTab] = useState<'usage'>('usage')
-  
-  // 狀態管理
-  const [hasSubmittedBefore, setHasSubmittedBefore] = useState(false)
-  const [currentEntryId, setCurrentEntryId] = useState<string | null>(null)
-  const [initialStatus, setInitialStatus] = useState<EntryStatus>('submitted')
-  const [hasChanges, setHasChanges] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-  const [success, setSuccess] = useState<string | null>(null)
-  
-  const [data, setData] = useState<DieselData>({
-    year: currentYear,
-    records: [],
-    totalQuantity: 0
-  })
-
-  const [newRecord, setNewRecord] = useState<Omit<DieselRecord, 'id'>>({
-    date: '',
-    quantity: 0,
-    files: [],
-    memoryFiles: []
-  })
-
-  const [showSuccess, setShowSuccess] = useState(false)
-  const [showError, setShowError] = useState(false)
-  const [errorMessage, setErrorMessage] = useState('')
-  const [submitting, setSubmitting] = useState(false)
-  const [showClearConfirmModal, setShowClearConfirmModal] = useState(false)
-  const [clearLoading, setClearLoading] = useState(false)
-
   const pageKey = 'diesel'
-  
+  const [year] = useState(new Date().getFullYear())
+  const [initialStatus, setInitialStatus] = useState<EntryStatus>('submitted')
+  const [currentEntryId, setCurrentEntryId] = useState<string | null>(null)
+  const { executeSubmit, submitting } = useSubmitGuard()
+  const [hasSubmittedBefore, setHasSubmittedBefore] = useState(false)
+  const [showSuccessModal, setShowSuccessModal] = useState(false)
+  const [showClearConfirmModal, setShowClearConfirmModal] = useState(false)
+
+  // 圖片放大 lightbox
+  const [lightboxSrc, setLightboxSrc] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [success, setSuccess] = useState<string | null>(null);
+  const [thumbnails, setThumbnails] = useState<{ [key: string]: string }>({});  // ⭐ 檔案縮圖 URL
+  const [downloadingFileId, setDownloadingFileId] = useState<string | null>(null); // 下載中的檔案 ID
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setLightboxSrc(null) }
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
+
   // 前端狀態管理 Hook
   const frontendStatus = useFrontendStatus({
     initialStatus,
     entryId: currentEntryId,
-    onStatusChange: (newStatus) => {
-      console.log('Status changed to:', newStatus)
-    },
+    onStatusChange: () => {},
     onError: (error) => setError(error),
     onSuccess: (message) => setSuccess(message)
   })
 
-  const { currentStatus, handleSubmitSuccess, handleDataChanged, isInitialLoad } = frontendStatus
-  
-  const editPermissions = useEditPermissions(currentStatus || 'submitted')
+  const { currentStatus, setCurrentStatus, handleSubmitSuccess, handleDataChanged, isInitialLoad } = frontendStatus
 
-  // 審核模式時為唯讀
-  const isReadOnly = isReviewMode
+  // 角色檢查
+  const { role } = useRole()
 
-  const calculateTotals = useCallback((records: DieselRecord[]) => {
-    const totalQuantity = records.reduce((sum, record) => sum + record.quantity, 0)
-    return { totalQuantity }
-  }, [])
+  // 審核模式下只有管理員可編輯
+  const isReadOnly = isReviewMode && role !== 'admin'
 
-  const addRecord = useCallback(() => {
-    if (!newRecord.date || newRecord.quantity <= 0) {
-      setErrorMessage('請填寫完整的使用記錄資訊')
-      setShowError(true)
+  const editPermissions = useEditPermissions(currentStatus, isReadOnly)
+
+  // 資料載入 Hook
+  const entryIdToLoad = isReviewMode && reviewEntryId ? reviewEntryId : undefined
+  const {
+    entry: loadedEntry,
+    files: loadedFiles,
+    loading: dataLoading,
+    error: dataError,
+    reload
+  } = useEnergyData(pageKey, year, entryIdToLoad)
+
+  // 審核狀態 Hook
+  const { reload: reloadApprovalStatus, ...approvalStatus } = useApprovalStatus(pageKey, year)
+
+  // 審核 API hook
+  const { reviewSubmission } = useSubmissions()
+
+  // 管理員儲存 Hook
+  const { save: adminSave, saving: adminSaving } = useAdminSave(pageKey, reviewEntryId)
+
+  // 提交 Hook（多記錄專用）
+  const {
+    submit,
+    save,
+    submitting: submitLoading,
+    error: submitError,
+    success: submitSuccess,
+    clearError: clearSubmitError,
+    clearSuccess: clearSubmitSuccess
+  } = useMultiRecordSubmit(pageKey, year)
+
+  // 清除 Hook
+  const {
+    clear,
+    clearing: clearLoading,
+    error: clearError,
+    clearError: clearClearError
+  } = useEnergyClear(currentEntryId, currentStatus)
+
+  // 幽靈檔案清理 Hook
+  const { cleanFiles } = useGhostFileCleaner()
+
+  // 檔案映射 Hook
+  const {
+    uploadRecordFiles,
+    getRecordFiles,
+    loadFileMapping,
+    getFileMappingForPayload,
+    removeRecordMapping
+  } = useRecordFileMapping(pageKey, currentEntryId)
+
+  // ⭐ 初始化時給一個 groupId
+  const [initialGroupId] = useState(generateRecordId())
+  const [dieselData, setDieselData] = useState<DieselRecord[]>([
+    {
+      id: generateRecordId(),
+      date: '',
+      quantity: 0,
+      evidenceFiles: [],
+      memoryFiles: [],
+      groupId: initialGroupId  // ⭐ 給第一筆記錄一個 groupId
+    },
+  ]);
+
+  // 檢查是否有填寫任何資料
+  const hasAnyData = useMemo(() => {
+    return dieselData.some((r: DieselRecord) =>
+      r.date.trim() !== '' ||
+      r.quantity > 0 ||
+      (r.memoryFiles && r.memoryFiles.length > 0)
+    )
+  }, [dieselData])
+
+  // 第一步：載入記錄資料（不等檔案）
+  useEffect(() => {
+    if (loadedEntry && !dataLoading) {
+      const entryStatus = loadedEntry.status as EntryStatus
+      setInitialStatus(entryStatus)
+      setCurrentEntryId(loadedEntry.id)
+      setHasSubmittedBefore(true)
+
+      // ⭐ 同步前端狀態
+      setCurrentStatus(entryStatus)
+
+      // 從 payload 取得柴油使用資料
+      if (loadedEntry.payload?.dieselData) {
+        // 確保 dieselData 是陣列
+        const dataArray = Array.isArray(loadedEntry.payload.dieselData)
+          ? loadedEntry.payload.dieselData
+          : []
+
+        if (dataArray.length > 0) {
+          // 先載入記錄資料，檔案欄位暫時為空（不阻塞顯示）
+          const updated = dataArray.map((item: any) => ({
+            ...item,
+            id: String(item.id || generateRecordId()),  // ⭐ 確保 id 是字串型別
+            evidenceFiles: [],  // 先空著，稍後由檔案載入 useEffect 分配
+            memoryFiles: [],
+          }))
+
+          // ⭐ 檢查是否已有空白記錄，沒有才添加
+          const hasBlankRecord = updated.some((r: DieselRecord) =>
+            r.date.trim() === '' &&
+            r.quantity === 0 &&
+            (!r.memoryFiles || r.memoryFiles.length === 0)
+          )
+
+          let finalData = updated
+          if (!hasBlankRecord) {
+            const newGroupId = generateRecordId()
+            const blankRecord: DieselRecord = {
+              id: generateRecordId(),
+              date: '',
+              quantity: 0,
+              evidenceFiles: [],
+              memoryFiles: [],
+              groupId: newGroupId
+            }
+            finalData = [blankRecord, ...updated]
+            console.log(`🔍 [DieselPage] 添加空白群組`)
+          } else {
+            console.log(`🔍 [DieselPage] 已有空白群組，不重複添加`)
+          }
+
+          console.log(`🔍 [DieselPage] Loaded records: ${updated.length}`)
+          setDieselData(finalData)
+
+          // ⭐ 載入檔案映射表
+          const payload = loadedEntry.payload || loadedEntry.extraPayload
+          if (payload) {
+            loadFileMapping(payload)
+          }
+        }
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loadedEntry, dataLoading])
+
+  // 第二步：檔案載入後分配到記錄（非破壞性更新）
+  useEffect(() => {
+    // ⭐ 等待檔案載入完成（避免在 files = [] 時執行）
+    if (dataLoading) {
+      console.log('🔍 [DieselPage] 等待檔案載入中...')
       return
     }
 
-    const record: DieselRecord = {
-      id: `diesel_${Date.now()}`,
-      recordKey: `diesel_record_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
-      ...newRecord,
-      memoryFiles: newRecord.memoryFiles || []
-    }
+    if (loadedFiles.length > 0 && dieselData.length > 1) {
+      // 檔案過濾：只取 file_type='other' 且 page_key === pageKey 的檔案
+      const dieselFiles = loadedFiles.filter(f =>
+        f.file_type === 'other' && f.page_key === pageKey
+      )
 
-    setData(prevData => {
-      const newRecords = [...prevData.records, record].sort((a, b) => a.date.localeCompare(b.date))
-      const totals = calculateTotals(newRecords)
-      
-      return {
-        ...prevData,
-        records: newRecords,
-        ...totals
+      if (dieselFiles.length > 0) {
+        // ✅ 先清理所有檔案,再分配給記錄(避免 EvidenceUpload 載入幽靈檔案)
+        const cleanAndAssignFiles = async () => {
+          console.log('🔍 [DieselPage] Starting ghost file cleanup for', dieselFiles.length, 'files')
+
+          // 第一階段：清理所有幽靈檔案（使用 Hook）
+          const validDieselFiles = await cleanFiles(dieselFiles)
+          console.log('✅ [DieselPage] Cleanup complete. Valid files:', validDieselFiles.length)
+
+          // ⭐ 第二階段：使用 recordId 分配檔案（非破壞性更新）
+          setDieselData(prev => {
+            console.log(`📂 [DieselPage] Updating ${prev.length} records with files`)
+
+            const updatedRows = prev.map((item) => {
+              // ✅ 使用 recordId 查找檔案，取代陣列索引
+              const filesForThisRecord = getRecordFiles(item.id, validDieselFiles)
+
+              return {
+                ...item,  // ✅ 保留所有原有資料（id, date, quantity）
+                evidenceFiles: filesForThisRecord,
+                memoryFiles: []  // ✅ 清空 memoryFiles，避免重複提交
+              }
+            })
+
+            console.log(`✅ [DieselPage] Assigned files to ${updatedRows.filter((r: DieselRecord) => r.evidenceFiles && r.evidenceFiles.length > 0).length} records`)
+            return updatedRows
+          })
+        }
+
+        cleanAndAssignFiles()
       }
-    })
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loadedFiles, pageKey, dataLoading])
 
-    setNewRecord({
+  const addNewEntry = () => {
+    const lastRecord = dieselData[dieselData.length - 1]
+
+    const newEntry: DieselRecord = {
+      id: generateRecordId(),  // ⭐ 使用 generateRecordId
       date: '',
       quantity: 0,
-      files: [],
-      memoryFiles: []
-    })
-  }, [newRecord, calculateTotals])
+      evidenceFiles: lastRecord?.evidenceFiles || [],  // ✅ 自動帶入上一筆的檔案
+      memoryFiles: lastRecord?.memoryFiles || []  // ✅ 也複製記憶體檔案
+    };
+    setDieselData(prev => [...prev, newEntry]);
+  };
 
-  const removeRecord = useCallback((recordId: string) => {
-    setData(prevData => {
-      const newRecords = prevData.records.filter(record => record.id !== recordId)
-      const totals = calculateTotals(newRecords)
-      
-      return {
-        ...prevData,
-        records: newRecords,
-        ...totals
-      }
-    })
-  }, [calculateTotals])
+  const removeEntry = (id: string) => {  // ⭐ 改為 string 型別
+    if (dieselData.length > 1) {
+      // ⭐ 移除檔案映射
+      removeRecordMapping(id)
+      setDieselData(prev => prev.filter((r: DieselRecord) => r.id !== id))
+    }
+  };
 
-  const handleRecordFileChange = useCallback((recordId: string, files: EvidenceFile[]) => {
-    setData(prevData => {
-      const newRecords = prevData.records.map(record => {
-        if (record.id === recordId) {
-          // 確保檔案具有正確的關聯標識
-          const updatedFiles = files.map(file => ({
-            ...file,
-            // 檔案已經通過 EvidenceUpload 組件正確關聯到 entry_id
-            // 這裡主要確保檔案與記錄的本地關聯
-          }))
-          return { ...record, files: updatedFiles }
-        }
-        return record
-      })
+  const updateEntry = useCallback((id: string, field: keyof DieselRecord, value: any) => {  // ⭐ 改為 string 型別
+    setDieselData(prev => prev.map(item => item.id === id ? { ...item, [field]: value } : item));
+  }, []);
 
-      return {
-        ...prevData,
-        records: newRecords
-      }
-    })
-  }, [])
+  // 為每個記錄建立穩定的 callback
+  const handleMemoryFilesChange = useCallback((id: string) => {  // ⭐ 改為 string 型別
+    return (files: MemoryFile[]) => updateEntry(id, 'memoryFiles', files);
+  }, [updateEntry]);
 
-  const handleRecordMemoryFileChange = useCallback((recordId: string, memFiles: MemoryFile[]) => {
-    setData(prevData => ({
-      ...prevData,
-      records: prevData.records.map(record =>
-        record.id === recordId ? { ...record, memoryFiles: memFiles } : record
-      )
-    }))
-  }, [])
-
-  const handleSubmit = useCallback(async () => {
-    console.log('=== 柴油提交除錯開始 ===')
-    
-    setSubmitting(true)
-    setError(null)
-    setSuccess(null)
-
+  // ✅ 刪除佐證（清空所有使用該檔案的記錄，群組保留）
+  const deleteEvidence = async (evidenceId: string) => {
     try {
-      // 步驟1：詳細認證狀態診斷
-      console.log('🔍 執行詳細認證診斷...')
-      await logDetailedAuthStatus()
-      
-      const authDiagnosis = await diagnoseAuthState()
-      if (!authDiagnosis.isAuthenticated) {
-        console.error('❌ 認證診斷失敗:', authDiagnosis)
-        throw new Error(`認證失效: ${authDiagnosis.userError?.message || authDiagnosis.sessionError?.message || '未知原因'}`)
+      // Check if admin in review mode
+      if (role === 'admin' && isReviewMode) {
+        await adminDeleteEvidence(evidenceId)
+      } else {
+        await deleteEvidenceFile(evidenceId)
       }
 
-      // 步驟2：準備柴油數據（轉換為月份格式以符合 API）
-      const monthly: Record<string, number> = {
-        '1': data.totalQuantity || 0 // 總使用量記錄在1月
-      }
+      // ⭐ 清空所有使用這個檔案的記錄（但保留 groupId）
+      setDieselData(prev => prev.map((record: DieselRecord) =>
+        record.evidenceFiles?.[0]?.id === evidenceId
+          ? { ...record, evidenceFiles: [], memoryFiles: [] }  // ⭐ 群組變成空群組
+          : record
+      ))
 
-      // 步驟3：建立填報輸入資料
-      const notesText = `柴油使用記錄，總使用量：${data.totalQuantity?.toFixed(2) || 0} L，共 ${data.records.length} 筆記錄`
-      const entryInput: UpsertEntryInput = {
-        page_key: pageKey,
-        period_year: currentYear,
-        unit: 'L',
-        monthly: monthly,
-        notes: notesText,
-        extraPayload: {
-          monthly: monthly,
-          dieselData: data,  // 保存完整的記錄和檔案資訊
-          notes: notesText
-        }
-      }
+      setSuccess('佐證已刪除，群組已變成空群組')
+    } catch (error) {
+      setError(error instanceof Error ? error.message : '刪除佐證失敗')
+    }
+  }
 
-      // 步驟4：使用診斷包裝執行關鍵操作
-      const { entry_id } = await debugRLSOperation(
-        '新增或更新能源填報記錄',
-        async () => await upsertEnergyEntry(entryInput, true)
-      )
+  // ✅ 群組的暫存檔案（Key = 群組 ID，Value = 暫存檔案）
+  const [groupMemoryFiles, setGroupMemoryFiles] = useState<Record<string, MemoryFile[]>>({})
 
-      // 步驟5：設置 entryId（如果是新建的記錄）
-      if (!currentEntryId) {
-        setCurrentEntryId(entry_id)
-      }
+  // ✅ 新增佐證群組
+  const addNewGroup = () => {
+    const newGroupId = generateRecordId()
 
-      // 步驟6：上傳所有記錄的檔案
-      for (const record of data.records) {
-        if (record.memoryFiles && record.memoryFiles.length > 0) {
-          for (const memFile of record.memoryFiles) {
-            await uploadEvidenceWithEntry(memFile.file, {
-              entryId: entry_id,
-              pageKey: pageKey,
-              year: currentYear,
-              category: 'other'
-            })
-          }
-        }
-      }
+    // 建立第一筆空記錄
+    const newRecord: DieselRecord = {
+      id: generateRecordId(),
+      date: '',
+      quantity: 0,
+      evidenceFiles: [],
+      memoryFiles: [],
+      groupId: newGroupId
+    }
 
-      // 清空 memory files
-      setData(prevData => ({
-        ...prevData,
-        records: prevData.records.map(record => ({ ...record, memoryFiles: [] }))
+    // ⭐ 新記錄放在最前面（新的在上方）
+    setDieselData(prev => [newRecord, ...prev])
+
+    // 初始化該群組的 memoryFiles
+    setGroupMemoryFiles(prev => ({
+      ...prev,
+      [newGroupId]: []
+    }))
+
+    setSuccess('已新增佐證群組')
+  }
+
+
+  // ✅ 在特定群組新增記錄
+  const addRecordToGroup = (groupId: string) => {
+    const newRecord: DieselRecord = {
+      id: generateRecordId(),
+      date: '',
+      quantity: 0,
+      evidenceFiles: [],
+      memoryFiles: [],
+      groupId: groupId  // ⭐ 直接使用 groupId，不再特殊處理
+    }
+
+    setDieselData(prev => [...prev, newRecord])
+  }
+
+  // ✅ 刪除整個群組（包含所有記錄）
+  const deleteGroup = (groupId: string) => {
+    const groupRecords = dieselData.filter((r: DieselRecord) => r.groupId === groupId)
+
+    if (!window.confirm(`刪除此群組後，所有 ${groupRecords.length} 筆記錄將一併刪除。確定要刪除嗎？`)) {
+      return
+    }
+
+    // ⭐ 直接刪除該群組的所有記錄
+    setDieselData(prev => prev.filter((r: DieselRecord) => r.groupId !== groupId))
+
+    // 清除該群組的 memoryFiles
+    setGroupMemoryFiles(prev => {
+      const newMap = { ...prev }
+      delete newMap[groupId]
+      return newMap
+    })
+
+    // ⭐ 移除檔案映射
+    removeRecordMapping(groupId)
+
+    setSuccess('群組已刪除')
+  }
+
+  const handleSubmit = async () => {
+    await executeSubmit(async () => {
+      const totalQuantity = dieselData.reduce((sum, item) => sum + item.quantity, 0)
+
+      // ✅ 清理 payload：只送基本資料，移除 File 物件
+      const cleanedDieselData = dieselData.map((r: DieselRecord) => ({
+        id: r.id,
+        date: r.date,
+        quantity: r.quantity,
+        groupId: r.groupId  // ⭐ 保存 groupId
       }))
 
-      // 步驟7：提交所有檔案
-      await debugRLSOperation(
-        '提交證明檔案',
-        async () => await commitEvidence({
-          entryId: entry_id,
-          pageKey: pageKey
+      // ⭐ 建立群組 → recordIds 映射表
+      const groupRecordIds = new Map<string, string[]>()
+      dieselData.forEach(record => {
+        if (record.groupId) {
+          if (!groupRecordIds.has(record.groupId)) {
+            groupRecordIds.set(record.groupId, [])
+          }
+          groupRecordIds.get(record.groupId)!.push(record.id)
+        }
+      })
+
+      // ⭐ 去重：每個群組只保留第一個 record 的 memoryFiles（避免重複上傳）
+      const seenGroupIds = new Set<string>()
+      const deduplicatedRecordData = dieselData.map(record => {
+        const allRecordIds = record.groupId ? groupRecordIds.get(record.groupId) : [record.id]
+
+        if (record.groupId && seenGroupIds.has(record.groupId)) {
+          // 同群組的第 2+ 筆記錄：清空 memoryFiles（不重複上傳）
+          return { ...record, memoryFiles: [], allRecordIds }
+        }
+        if (record.groupId) {
+          seenGroupIds.add(record.groupId)
+        }
+        return { ...record, allRecordIds }
+      })
+
+      // ⭐ 使用 hook 的 submit 函數
+      await submit({
+        entryInput: {
+          page_key: pageKey,
+          period_year: year,
+          unit: 'L',
+          monthly: { '1': totalQuantity },
+          notes: `柴油使用共 ${dieselData.length} 筆記錄`,
+          extraPayload: {
+            dieselData: cleanedDieselData,
+            fileMapping: getFileMappingForPayload()  // ⭐ 第一次就存完整資料
+          }
+        },
+        recordData: deduplicatedRecordData,  // ⭐ 使用去重後的資料（含 allRecordIds）
+        uploadRecordFiles,
+        onSuccess: async (entry_id) => {
+          // ⭐ 簡化為只有收尾工作
+          setCurrentEntryId(entry_id)
+          await reload()
+          setHasSubmittedBefore(true)
+        }
+      })
+
+      await handleSubmitSuccess();
+
+      // 重新載入審核狀態，更新狀態橫幅
+      reloadApprovalStatus()
+
+      setShowSuccessModal(true)
+    }).catch(error => {
+      setError(error instanceof Error ? error.message : '提交失敗，請重試');
+    })
+  };
+
+  const handleSave = async () => {
+    await executeSubmit(async () => {
+      setError(null)
+      setSuccess(null)
+
+      const totalQuantity = dieselData.reduce((sum, item) => sum + item.quantity, 0)
+
+      // 審核模式：使用 useAdminSave hook
+      if (isReviewMode && reviewEntryId) {
+        console.log('📝 管理員審核模式：使用 useAdminSave hook', reviewEntryId)
+
+        const cleanedDieselData = dieselData.map((r: DieselRecord) => ({
+          id: r.id,
+          date: r.date,
+          quantity: r.quantity,
+          groupId: r.groupId
+        }))
+
+        // 準備檔案列表：從 groupMemoryFiles 收集所有檔案
+        const filesToUpload = evidenceGroups.flatMap((group, groupIndex) => {
+          const memFiles = groupMemoryFiles[group.groupId] || []
+          const recordIndex = dieselData.findIndex(r => r.groupId === group.groupId)
+          
+          // Collect all record IDs in this group
+          const groupRecordIds = group.records.map(r => r.id)
+          
+          return memFiles.map(mf => ({
+            file: mf.file,
+            metadata: {
+              recordIndex: recordIndex >= 0 ? recordIndex : groupIndex,
+              allRecordIds: groupRecordIds
+            }
+          }))
         })
-      )
 
-      // 步驟8：處理狀態轉換
-      await handleSubmitSuccess()
-      
-      setHasChanges(false)
-      setHasSubmittedBefore(true)
+        await adminSave({
+          updateData: {
+            unit: 'L',
+            amount: totalQuantity,
+            payload: {
+              monthly: { '1': totalQuantity },
+              dieselData: cleanedDieselData,
+              fileMapping: getFileMappingForPayload()
+            }
+          },
+          files: filesToUpload
+        })
 
-      setSuccess(`柴油數據已提交，總使用量 ${data.totalQuantity?.toFixed(2) || 0} L`)
-      setShowSuccess(true)
-      setTimeout(() => setShowSuccess(false), 3000)
-      
-      console.log('=== ✅ 柴油提交成功完成 ===')
+        // 清空記憶體檔案
+        setGroupMemoryFiles({})
+
+        await reload()
+        reloadApprovalStatus()
+        setSuccess('✅ 儲存成功！資料已更新')
+        return
+      }
+
+      // 非審核模式：原本的邏輯
+      // ✅ 清理 payload：只送基本資料，移除 File 物件
+      const cleanedDieselData = dieselData.map((r: DieselRecord) => ({
+        id: r.id,
+        date: r.date,
+        quantity: r.quantity,
+        groupId: r.groupId  // ⭐ 保存 groupId
+      }))
+
+      // ⭐ 建立群組 → recordIds 映射表
+      const groupRecordIds = new Map<string, string[]>()
+      dieselData.forEach(record => {
+        if (record.groupId) {
+          if (!groupRecordIds.has(record.groupId)) {
+            groupRecordIds.set(record.groupId, [])
+          }
+          groupRecordIds.get(record.groupId)!.push(record.id)
+        }
+      })
+
+      // ⭐ 去重 + 附加 allRecordIds
+      const seenGroupIds = new Set<string>()
+      const deduplicatedRecordData = dieselData.map(record => {
+        const allRecordIds = record.groupId ? groupRecordIds.get(record.groupId) : [record.id]
+
+        if (record.groupId && seenGroupIds.has(record.groupId)) {
+          // 同群組的第 2+ 筆記錄：清空 memoryFiles（不重複上傳）
+          return { ...record, memoryFiles: [], allRecordIds }
+        }
+        if (record.groupId) {
+          seenGroupIds.add(record.groupId)
+        }
+        return { ...record, allRecordIds }
+      })
+
+      // ⭐ 使用 hook 的 save 函數（跳過驗證）
+      await save({
+        entryInput: {
+          page_key: pageKey,
+          period_year: year,
+          unit: 'L',
+          monthly: { '1': totalQuantity },
+          notes: `柴油使用共 ${dieselData.length} 筆記錄`,
+          extraPayload: {
+            dieselData: cleanedDieselData,
+            fileMapping: getFileMappingForPayload()  // ⭐ 第一次就存 fileMapping
+          }
+        },
+        recordData: deduplicatedRecordData,  // ⭐ 包含 allRecordIds
+        uploadRecordFiles,
+        onSuccess: async (entry_id) => {
+          // ⭐ 簡化為 3 行（原本 ~55 行）
+          setCurrentEntryId(entry_id)
+          await reload()
+          setHasSubmittedBefore(true)
+        }
+      })
+
+      // 重新載入審核狀態，更新狀態橫幅
+      reloadApprovalStatus()
+
+      setSuccess('暫存成功！資料已儲存')
+    }).catch(error => {
+      console.error('❌ 暫存失敗:', error)
+      setError(error instanceof Error ? error.message : '暫存失敗')
+    })
+  };
+
+  const handleClear = () => {
+    setShowClearConfirmModal(true);
+  };
+
+  const handleClearConfirm = async () => {
+    try {
+      // 收集所有檔案和記憶體檔案
+      const allFiles = dieselData.flatMap((r: DieselRecord) => r.evidenceFiles || [])
+      const allMemoryFiles = dieselData.map((r: DieselRecord) => r.memoryFiles || [])
+
+      // 使用 Hook 清除
+      await clear({
+        filesToDelete: allFiles,
+        memoryFilesToClean: allMemoryFiles
+      })
+
+      // 重置前端狀態
+      const newGroupId = generateRecordId()
+      setDieselData([{
+        id: generateRecordId(),  // ⭐ 使用 generateRecordId
+        date: '',
+        quantity: 0,
+        evidenceFiles: [],
+        memoryFiles: [],
+        groupId: newGroupId  // ⭐ 添加 groupId
+      }])
+      setCurrentEntryId(null)
+      setHasSubmittedBefore(false)
+      setShowClearConfirmModal(false)
+      setSuccess('資料已完全清除')
+    } catch (error) {
+      setError(error instanceof Error ? error.message : '清除失敗，請重試')
+    }
+  };
+
+  // PDF 檔案下載處理
+  const handleDownloadFile = async (file: EvidenceFile) => {
+    try {
+      setDownloadingFileId(file.id)
+
+      // 獲取檔案下載 URL（60秒有效期）
+      const fileUrl = await getFileUrl(file.file_path)
+
+      // 觸發下載
+      const link = document.createElement('a')
+      link.href = fileUrl
+      link.download = file.file_name
+      link.target = '_blank'
+      document.body.appendChild(link)
+      link.click()
+      document.body.removeChild(link)
 
     } catch (error) {
-      console.error('=== ❌ 柴油提交失敗 ===')
-      console.error('錯誤訊息:', error instanceof Error ? error.message : String(error))
-      setError(error instanceof Error ? error.message : '提交失敗')
-      setErrorMessage(error instanceof Error ? error.message : '提交失敗，請稍後重試')
-      setShowError(true)
+      console.error('下載檔案失敗:', error)
+      setError('下載檔案失敗，請稍後再試')
     } finally {
-      setSubmitting(false)
+      setDownloadingFileId(null)
     }
-  }, [data, currentYear, currentEntryId, handleSubmitSuccess, pageKey])
+  }
 
-  const handleClearAll = async () => {
-    console.log('🗑️ [DieselPage] ===== CLEAR BUTTON CLICKED =====')
+  // ✅ 群組分組邏輯：按 groupId 分組
+  interface EvidenceGroup {
+    groupId: string  // 群組 ID
+    evidence: EvidenceFile | null  // null = 未上傳佐證
+    records: DieselRecord[]
+  }
 
-    const clearSuccess = DocumentHandler.handleClear({
-      currentStatus: currentStatus,
-      title: '柴油資料清除',
-      message: '確定要清除所有柴油使用資料嗎？此操作無法復原。',
-      onClear: () => {
-        setClearLoading(true)
-        try {
-          console.log('🗑️ [DieselPage] Starting complete clear operation...')
+  const evidenceGroups = useMemo((): EvidenceGroup[] => {
+    // ⭐ 按 dieselData 順序收集唯一的 groupId（保持順序）
+    const seenGroupIds = new Set<string>()
+    const groupIds: string[] = []
 
-          // 清理記憶體檔案
-          data.records.forEach(record => {
-            DocumentHandler.clearAllMemoryFiles(record.memoryFiles)
-          })
-          DocumentHandler.clearAllMemoryFiles(newRecord.memoryFiles)
-
-          // 原有的清除邏輯保持不變
-          setData({
-            year: currentYear,
-            records: [],
-            totalQuantity: 0
-          })
-          setNewRecord({
-            date: '',
-            quantity: 0,
-            files: [],
-            memoryFiles: []
-          })
-          setHasChanges(false)
-          setError(null)
-          setSuccess(null)
-          setShowClearConfirmModal(false)
-
-          setSuccess('資料已清除')
-
-        } catch (error) {
-          console.error('❌ [DieselPage] Clear operation failed:', error)
-          setError('清除操作失敗，請重試')
-          setShowClearConfirmModal(false)
-        } finally {
-          console.log('🗑️ [DieselPage] Clear operation finished, resetting loading state')
-          setClearLoading(false)
-        }
+    dieselData.forEach(record => {
+      if (record.groupId && !seenGroupIds.has(record.groupId)) {
+        seenGroupIds.add(record.groupId)
+        groupIds.push(record.groupId)
       }
     })
 
-    if (!clearSuccess && currentStatus === 'approved') {
-      setError('已通過的資料無法清除')
-    }
-  }
+    // ⭐ 按收集到的順序建立 groups（所有群組平等）
+    const result: EvidenceGroup[] = []
 
-  const handleStatusChange = async (newStatus: EntryStatus) => {
-    try {
-      if (currentEntryId) {
-        await updateEntryStatus(currentEntryId, newStatus)
-      }
-      frontendStatus.setFrontendStatus(newStatus)
-    } catch (error) {
-      setError(error instanceof Error ? error.message : '狀態更新失敗')
-    }
-  }
+    groupIds.forEach(groupId => {
+      const records = dieselData.filter((r: DieselRecord) => r.groupId === groupId)
+      const evidence = records.find((r: DieselRecord) => r.evidenceFiles && r.evidenceFiles.length > 0)?.evidenceFiles?.[0]
+      result.push({ groupId, evidence: evidence || null, records })
+    })
 
-  // 載入資料
+    // ✅ 排序：空白群組置頂，其他按時間新→舊
+    return result.sort((a, b) => {
+      const aIsEmpty = a.records.every((r: DieselRecord) =>
+        !r.date.trim() &&
+        r.quantity === 0 &&
+        (!r.memoryFiles || r.memoryFiles.length === 0)
+      ) && !a.evidence
+
+      const bIsEmpty = b.records.every((r: DieselRecord) =>
+        !r.date.trim() &&
+        r.quantity === 0 &&
+        (!r.memoryFiles || r.memoryFiles.length === 0)
+      ) && !b.evidence
+
+      if (aIsEmpty && !bIsEmpty) return -1  // 空白群組在前
+      if (!aIsEmpty && bIsEmpty) return 1
+      return 0  // 保持原順序（新的在前）
+    })
+  }, [dieselData])
+
+  // ⭐ 只為圖片檔案生成縮圖（PDF 不需要）
   useEffect(() => {
-    const loadData = async () => {
-      try {
-        setLoading(true)
-        setError(null)
-
-        // 載入基本資料
-        let existingEntry
-        if (isReviewMode && reviewEntryId) {
-          console.log('🔍 [DieselPage] 審核模式 - 載入特定記錄:', reviewEntryId)
-          existingEntry = await getEntryById(reviewEntryId)
-        } else {
-          console.log('🔍 [DieselPage] 一般模式 - 載入用戶自己的記錄')
-          existingEntry = await getEntryByPageKeyAndYear(pageKey, currentYear)
+    evidenceGroups.forEach(async (group) => {
+      if (group.evidence &&
+          group.evidence.mime_type.startsWith('image/') &&
+          !thumbnails[group.evidence.id]) {
+        try {
+          const url = await getFileUrl(group.evidence.file_path)
+          setThumbnails(prev => ({
+            ...prev,
+            [group.evidence!.id]: url
+          }))
+        } catch (error) {
+          console.warn('Failed to generate thumbnail for', group.evidence.file_name, error)
         }
-        if (existingEntry && existingEntry.status !== 'draft') {
-          setInitialStatus(existingEntry.status as EntryStatus)
-          setCurrentEntryId(existingEntry.id)
-          setHasSubmittedBefore(true)
-          
-          // 載入已提交的記錄數據供編輯
-          if (existingEntry.extraPayload?.dieselData || existingEntry.payload?.dieselData) {
-            const dieselData = existingEntry.extraPayload?.dieselData || existingEntry.payload?.dieselData
-
-            // 載入相關檔案
-            if (existingEntry.id) {
-              try {
-                const files = await getEntryFiles(existingEntry.id)
-
-                // 分類檔案：檢查 file_type === 'other' 或 'usage_evidence'，且 page_key 匹配
-                const dieselFiles = files.filter(f =>
-                  (f.file_type === 'other' || f.file_type === 'usage_evidence') &&
-                  f.page_key === pageKey
-                )
-
-                // 更新記錄的檔案 - 使用時間戳或檔案名稱規則進行關聯
-                if (dieselData.records) {
-                  dieselData.records.forEach((record: any) => {
-                    // 根據記錄的 recordKey 或時間範圍關聯檔案
-                    const recordFiles = dieselFiles.filter(f => {
-                      // 優先使用 recordKey 關聯
-                      if (record.recordKey && f.file_name.includes(record.recordKey)) {
-                        return true
-                      }
-                      // 備選：根據時間相近性關聯（檔案創建時間接近記錄日期）
-                      const recordDate = new Date(record.date)
-                      const fileDate = new Date(f.created_at)
-                      const timeDiff = Math.abs(fileDate.getTime() - recordDate.getTime())
-                      return timeDiff < 24 * 60 * 60 * 1000 // 24小時內
-                    })
-                    record.files = recordFiles || []
-                  })
-                }
-
-                setData(dieselData)
-              } catch (fileError) {
-                console.error('Failed to load files for diesel records:', fileError)
-                setData(dieselData)
-              }
-            } else {
-              setData(dieselData)
-            }
-
-            // 處理狀態變更
-            handleDataChanged()
-          }
-        }
-        // 如果是草稿記錄或無記錄，保持表單空白狀態
-
-        isInitialLoad.current = false
-      } catch (error) {
-        console.error('Error loading data:', error)
-        setError(error instanceof Error ? error.message : '載入資料失敗')
-      } finally {
-        setLoading(false)
       }
-    }
-
-    loadData()
-  }, [isReviewMode, reviewEntryId, reviewUserId])
-
-  // 監聽表單變更
-  useEffect(() => {
-    if (!isInitialLoad.current && hasSubmittedBefore) {
-      setHasChanges(true)
-    }
-  }, [data, hasSubmittedBefore])
+    })
+  }, [evidenceGroups])
 
   // Loading 狀態
-  if (loading) {
+  if (dataLoading) {
     return (
-      <div 
-        className="min-h-screen flex items-center justify-center" 
+      <div
+        className="min-h-screen flex items-center justify-center"
         style={{ backgroundColor: designTokens.colors.background }}
       >
         <div className="text-center">
-          <Loader2 
-            className="w-12 h-12 animate-spin mx-auto mb-4" 
-            style={{ color: designTokens.colors.accentPrimary }} 
+          <Loader2
+            className="w-12 h-12 animate-spin mx-auto mb-4"
+            style={{ color: designTokens.colors.accentPrimary }}
           />
           <p style={{ color: designTokens.colors.textPrimary }}>載入中...</p>
         </div>
@@ -447,275 +749,488 @@ export default function DieselPage() {
   }
 
   return (
-    <>
-      <div className="min-h-screen bg-green-50">
-      {/* 主要內容區域 */}
-      <div className="max-w-4xl mx-auto px-6 py-8 space-y-6">
-
-        {/* 頁面標題 - 無背景框 */}
+    <div className="min-h-screen bg-green-50">
+      <div className="px-6 py-8">
         <div className="text-center mb-8">
-          <h1 className="text-3xl font-bold text-center mb-2">
-            柴油 使用數量填報
+          {/* 審核模式指示器 */}
+          {isReviewMode && (
+            <div className="mb-4 p-3 bg-orange-100 border-2 border-orange-300 rounded-lg max-w-4xl mx-auto">
+              <div className="flex items-center justify-center">
+                <Eye className="w-5 h-5 text-orange-600 mr-2" />
+                <span className="text-orange-800 font-medium">
+                  📋 審核模式 - 查看填報內容
+                </span>
+              </div>
+              <p className="text-sm text-orange-600 mt-1">
+                所有輸入欄位已鎖定，僅供審核查看
+              </p>
+            </div>
+          )}
+
+          <h1 className="text-3xl font-semibold mb-3" style={{ color: designTokens.colors.textPrimary }}>
+            柴油使用量填報
           </h1>
-          <p className="text-lg text-center text-gray-600 mb-6">
-            請上傳 MSDS 文件並填入各月份使用數據進行碳排放計算
+          <p className="text-base" style={{ color: designTokens.colors.textSecondary }}>
+            {isReviewMode
+              ? '管理員審核模式 - 檢視填報內容和相關檔案'
+              : '請上傳加油單或發票作為佐證文件，並完整填寫使用日期與使用量'
+            }
           </p>
         </div>
 
-        {/* 重新提交提示 */}
-        {hasSubmittedBefore && !showSuccess && (
-          <div
-            className="rounded-lg p-4 border-l-4"
-            style={{
-              backgroundColor: '#f0f9ff',
-              borderColor: designTokens.colors.accentBlue
-            }}
-          >
-            <div className="flex items-start">
-              <CheckCircle
-                className="h-5 w-5 mt-0.5 mr-3"
-                style={{ color: designTokens.colors.accentBlue }}
-              />
+        {/* 審核狀態橫幅 */}
+        {!isReviewMode && approvalStatus.isSaved && (
+          <div className="bg-blue-100 border-l-4 border-blue-500 text-blue-700 p-4 mb-6 rounded-r-lg max-w-4xl mx-auto">
+            <div className="flex items-center">
+              <div className="text-2xl mr-3">💾</div>
               <div>
-                <h3
-                  className="text-base font-medium mb-1"
-                  style={{ color: designTokens.colors.accentBlue }}
-                >
-                  資料已提交
-                </h3>
-                <p
-                  className="text-base"
-                  style={{ color: designTokens.colors.textSecondary }}
-                >
-                  您可以繼續編輯資料，修改後請再次點擊「提交填報」以更新記錄。
+                <p className="font-bold text-lg">資料已暫存</p>
+                <p className="text-sm mt-1">您的資料已儲存，可隨時修改後提交審核。</p>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {!isReviewMode && approvalStatus.isApproved && (
+          <div className="bg-green-100 border-l-4 border-green-500 text-green-700 p-4 mb-6 rounded-r-lg max-w-4xl mx-auto">
+            <div className="flex items-center">
+              <div className="text-2xl mr-3">🎉</div>
+              <div>
+                <p className="font-bold text-lg">恭喜您已審核通過！</p>
+                <p className="text-sm mt-1">此填報已完成審核，資料已鎖定無法修改。</p>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {!isReviewMode && approvalStatus.isRejected && (
+          <div className="bg-red-100 border-l-4 border-red-500 text-red-700 p-4 mb-6 rounded-r-lg max-w-4xl mx-auto">
+            <div className="flex items-start">
+              <div className="text-2xl mr-3 mt-0.5">⚠️</div>
+              <div className="flex-1">
+                <p className="font-bold text-lg">填報已被退回</p>
+                <p className="text-sm mt-2">
+                  <span className="font-semibold">退回原因：</span>
+                  {approvalStatus.reviewNotes || '無'}
+                </p>
+                {approvalStatus.reviewedAt && (
+                  <p className="text-xs mt-1 text-red-600">
+                    退回時間：{new Date(approvalStatus.reviewedAt).toLocaleString('zh-TW')}
+                  </p>
+                )}
+                <p className="text-sm mt-2 text-red-600">
+                  請修正後重新提交
                 </p>
               </div>
             </div>
           </div>
         )}
 
-        {/* 新增記錄表單 */}
-        {editPermissions.canEdit && (
-          <div
-            className="rounded-lg border p-6"
-            style={{
-              backgroundColor: designTokens.colors.cardBg,
-              borderColor: designTokens.colors.border,
-              boxShadow: designTokens.shadows.sm
-            }}
-          >
-            <h2
-              className="text-2xl font-medium mb-6"
-              style={{ color: designTokens.colors.textPrimary }}
-            >
-              新增使用記錄
-            </h2>
-            
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+        {!isReviewMode && approvalStatus.isPending && (
+          <div className="bg-green-100 border-l-4 border-green-500 text-green-700 p-4 mb-6 rounded-r-lg max-w-4xl mx-auto">
+            <div className="flex items-center">
+              <div className="text-2xl mr-3">📋</div>
               <div>
-                <label className="block text-base font-medium mb-2" style={{ color: designTokens.colors.textPrimary }}>
-                  使用日期
-                </label>
-                <input
-                  type="date"
-                  value={newRecord.date}
-                  onChange={(e) => setNewRecord(prev => ({ ...prev, date: e.target.value }))}
-                  className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                  style={{ borderColor: designTokens.colors.border }}
-                />
-              </div>
-              
-              <div>
-                <label className="block text-base font-medium mb-2" style={{ color: designTokens.colors.textPrimary }}>
-                  使用量 (L)
-                </label>
-                <input
-                  type="number"
-                  step="0.01"
-                  min="0"
-                  value={newRecord.quantity || ''}
-                  onChange={(e) => setNewRecord(prev => ({ ...prev, quantity: parseFloat(e.target.value) || 0 }))}
-                  className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                  style={{ borderColor: designTokens.colors.border }}
-                  placeholder="輸入使用量"
-                />
+                <p className="font-bold text-lg">等待審核中</p>
+                <p className="text-sm mt-1">您的填報已提交，請等待管理員審核。</p>
               </div>
             </div>
-            
-            <div className="mb-4">
-              <label className="block text-sm font-medium mb-2" style={{ color: designTokens.colors.textPrimary }}>
-                佐證檔案
-              </label>
-              <EvidenceUpload
-                pageKey={pageKey}
-                files={newRecord.files}
-                onFilesChange={(files) => setNewRecord(prev => ({ ...prev, files }))}
-                memoryFiles={newRecord.memoryFiles}
-                onMemoryFilesChange={(memFiles) => setNewRecord(prev => ({ ...prev, memoryFiles: memFiles }))}
-                maxFiles={1}
-                disabled={submitting || !editPermissions.canUploadFiles || isReadOnly}
-                kind="other"
-                mode="edit"
-                hideFileCount={true}
-              />
-            </div>
-            
-            <button
-              onClick={addRecord}
-              className="px-4 py-2 text-white rounded-lg hover:bg-blue-600 transition-colors flex items-center space-x-2"
-              style={{ backgroundColor: designTokens.colors.blue }}
-            >
-              <Plus className="w-4 h-4" />
-              <span>新增記錄</span>
-            </button>
           </div>
         )}
 
-        {/* 使用記錄列表 */}
-        <div
-          className="rounded-lg border p-6"
-          style={{
-            backgroundColor: designTokens.colors.cardBg,
-            borderColor: designTokens.colors.border,
-            boxShadow: designTokens.shadows.sm
-          }}
-        >
-          <h2
-            className="text-2xl font-medium mb-6"
-            style={{ color: designTokens.colors.textPrimary }}
+        {/* 外層白色卡片：置中 + 自動包住內容寬度 */}
+        <div className="flex justify-center">
+          <div
+            className="rounded-lg border p-6 mx-auto w-fit"
+            style={{
+              backgroundColor: designTokens.colors.cardBg,
+              borderColor: designTokens.colors.border,
+              boxShadow: designTokens.shadows.sm,
+            }}
           >
-            使用記錄列表
-          </h2>
-          <div className="space-y-4">
-            {data.records.map((record) => (
-              <div
-                key={record.id}
-                className="border rounded-lg p-4"
-                style={{
-                  borderColor: designTokens.colors.border,
-                  backgroundColor: '#fafbfc'
-                }}
-              >
-              <div className="flex items-center justify-between mb-3">
-                <div className="flex items-center space-x-4">
-                  <Truck className="w-5 h-5 text-blue-600" />
-                  <span className="font-medium text-base" style={{ color: designTokens.colors.textPrimary }}>
-                    {record.date}
-                  </span>
-                  <span className="text-base" style={{ color: designTokens.colors.textSecondary }}>
-                    {record.quantity} L
-                  </span>
-                </div>
-                {editPermissions.canEdit && (
+            <h3 className="text-2xl font-bold mb-6 text-center" style={{ color: designTokens.colors.textPrimary }}>
+              柴油使用記錄
+            </h3>
+
+            {/* 控制填寫區總寬度 */}
+            <div className="w-[1000px] mx-auto space-y-6">
+
+              {/* 新增群組按鈕（移到這裡） */}
+              {!isReadOnly && !approvalStatus.isApproved && !isReviewMode && (
+                <div className="flex justify-center py-4">
                   <button
-                    onClick={() => removeRecord(record.id)}
-                    className="p-1 text-red-500 hover:bg-red-50 rounded"
+                    onClick={addNewGroup}
+                    disabled={submitting}
+                    className="px-8 py-3 bg-gradient-to-r from-blue-500 to-blue-600 hover:from-blue-600 hover:to-blue-700 text-white rounded-xl font-semibold shadow-md hover:shadow-lg transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-3"
                   >
-                    <Trash2 className="w-4 h-4" />
+                    <span className="text-2xl">+</span>
+                    <span>新增佐證群組</span>
                   </button>
-                )}
-              </div>
-              
-              {(record.files.length > 0 || record.memoryFiles?.length > 0) && (
-                <div className="mt-3">
-                  <EvidenceUpload
-                    pageKey={pageKey}
-                    files={record.files}
-                    onFilesChange={(files) => handleRecordFileChange(record.id, files)}
-                    memoryFiles={record.memoryFiles || []}
-                    onMemoryFilesChange={(memFiles) => handleRecordMemoryFileChange(record.id, memFiles)}
-                    maxFiles={1}
-                    disabled={!editPermissions.canUploadFiles || isReadOnly}
-                    kind="other"
-                    mode="edit"
-                    hideFileCount={true}
-                  />
                 </div>
               )}
+
+              {/* 群組卡片渲染 */}
+              <div className="space-y-6">
+                {evidenceGroups.map((group, groupIndex) => {
+                  const groupId = group.groupId
+                  const currentMemoryFiles = groupMemoryFiles[groupId] || []
+
+                  if (group.evidence === null) {
+                    // ==================== 空群組（藍色） ====================
+                    return (
+                      <div
+                        key={groupId}
+                        className="bg-gradient-to-br from-blue-50 to-blue-100/50 border-2 border-blue-200 rounded-xl p-6 shadow-md"
+                      >
+                        <div className="flex items-center justify-between mb-5">
+                          <div className="flex items-center gap-3">
+                            <div className="w-10 h-10 rounded-lg bg-blue-200 flex items-center justify-center">
+                              <span className="text-2xl">📁</span>
+                            </div>
+                            <div>
+                              <h4 className="text-lg font-bold text-blue-900">
+                                佐證群組
+                              </h4>
+                              <p className="text-sm text-blue-700">
+                                {group.records.length} 筆記錄
+                              </p>
+                            </div>
+                          </div>
+                          <button
+                            onClick={() => deleteGroup(groupId)}
+                            disabled={isReadOnly || approvalStatus.isApproved}
+                            className="px-4 py-2 text-sm bg-red-500 hover:bg-red-600 text-white rounded-lg font-medium shadow-sm hover:shadow transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                          >
+                            刪除群組
+                          </button>
+                        </div>
+
+                        {/* 大型上傳區 */}
+                        <div className="mb-6 bg-white rounded-xl p-5 shadow-sm border border-gray-200">
+                          <EvidenceUpload
+                            pageKey={`${pageKey}_${groupId}`}
+                            files={[]}
+                            onFilesChange={() => {}}
+                            memoryFiles={currentMemoryFiles}
+                            onMemoryFilesChange={(files) => {
+                              // 自動套用到該群組的所有記錄
+                              setDieselData(prev => prev.map((record: DieselRecord) => {
+                                if (record.groupId === groupId) {
+                                  return { ...record, memoryFiles: [...files] }
+                                }
+                                return record
+                              }))
+
+                              // 更新群組的 memoryFiles（保留用於顯示）
+                              setGroupMemoryFiles(prev => ({
+                                ...prev,
+                                [groupId]: files
+                              }))
+
+                              if (files.length > 0) {
+                                setSuccess(`已自動套用佐證到 ${group.records.length} 筆記錄`)
+                              }
+                            }}
+                            maxFiles={1}
+                            kind="other"
+                            disabled={submitting || !editPermissions.canUploadFiles}
+                            mode={isReadOnly || approvalStatus.isApproved ? "view" : "edit"}
+                            isAdminReviewMode={isReviewMode && role === 'admin'}
+                          />
+                        </div>
+
+                        {/* 記錄列表 */}
+                        <table className="w-full table-fixed border-collapse bg-white rounded-xl overflow-hidden shadow-sm mb-4">
+                          <thead>
+                            <tr className="bg-gradient-to-r from-blue-400 to-blue-500">
+                              <th className="px-3 py-3 text-center text-sm font-semibold text-white w-[180px]">使用日期</th>
+                              <th className="px-3 py-3 text-center text-sm font-semibold text-white w-[120px]">使用量(L)</th>
+                              <th className="px-3 py-3 text-center text-sm font-semibold text-white w-[80px]">操作</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {group.records.map((record) => (
+                              <tr key={record.id} className="hover:bg-blue-50 transition-colors border-b border-gray-100 last:border-b-0">
+                                <td className="px-3 py-3">
+                                  <input
+                                    type="date"
+                                    value={record.date}
+                                    onChange={(e) => updateEntry(record.id, 'date', e.target.value)}
+                                    disabled={isReadOnly || approvalStatus.isApproved}
+                                    className={`w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 hover:border-blue-300 transition-colors ${
+                                      isReadOnly || approvalStatus.isApproved ? 'bg-gray-100 cursor-not-allowed' : ''
+                                    }`}
+                                  />
+                                </td>
+                                <td className="px-3 py-3">
+                                  <input
+                                    type="number"
+                                    min="0"
+                                    step="0.01"
+                                    value={record.quantity || ''}
+                                    onChange={(e) => updateEntry(record.id, 'quantity', parseFloat(e.target.value) || 0)}
+                                    disabled={isReadOnly || approvalStatus.isApproved}
+                                    className={`w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 hover:border-blue-300 transition-colors ${
+                                      isReadOnly || approvalStatus.isApproved ? 'bg-gray-100 cursor-not-allowed' : ''
+                                    }`}
+                                  />
+                                </td>
+                                <td className="px-3 py-3">
+                                  <div className="flex justify-center">
+                                    {group.records.length > 1 && (
+                                      <button
+                                        onClick={() => removeEntry(record.id)}
+                                        disabled={isReadOnly || approvalStatus.isApproved}
+                                        className={`text-red-500 hover:text-red-700 p-1 rounded-lg hover:bg-red-50 transition-colors ${
+                                          isReadOnly || approvalStatus.isApproved ? 'opacity-50 cursor-not-allowed' : ''
+                                        }`}
+                                        title="刪除此記錄"
+                                      >
+                                        <Trash2 className="w-4 h-4" />
+                                      </button>
+                                    )}
+                                  </div>
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+
+                        {/* 新增記錄到此群組 */}
+                        <button
+                          onClick={() => addRecordToGroup(groupId)}
+                          disabled={isReadOnly || approvalStatus.isApproved}
+                          className={`w-full py-3 border-2 border-dashed border-blue-300 hover:bg-blue-50 text-blue-700 bg-white rounded-xl font-semibold transition-all hover:shadow-sm ${
+                            isReadOnly || approvalStatus.isApproved ? 'opacity-50 cursor-not-allowed' : ''
+                          } flex items-center justify-center gap-2`}
+                        >
+                          <span className="text-xl">+</span>
+                          <span>新增記錄到此群組</span>
+                        </button>
+                      </div>
+                    )
+                  } else {
+                    // ==================== 有佐證的群組 ====================
+                    return (
+                      <div
+                        key={groupId}
+                        className="bg-white border-2 border-gray-200 rounded-xl p-6 shadow-md hover:shadow-lg transition-shadow"
+                      >
+                        {/* 群組標題 */}
+                        <div className="flex items-center gap-3 mb-6">
+                          <div className="w-10 h-10 rounded-lg bg-green-100 flex items-center justify-center">
+                            <span className="text-2xl">✅</span>
+                          </div>
+                          <div>
+                            <h4 className="text-lg font-bold text-gray-900">已上傳佐證</h4>
+                            <p className="text-sm text-gray-600">{group.records.length} 筆記錄</p>
+                          </div>
+                        </div>
+
+                        <div className="flex gap-6">
+                          {/* 左側：佐證預覽 */}
+                          <div className="w-64 flex-shrink-0">
+                            <div className="bg-gradient-to-br from-gray-50 to-gray-100 rounded-xl overflow-hidden shadow-sm border border-gray-200">
+                              {/* ⭐ 根據檔案類型分別渲染：圖片可點擊，PDF 靜態顯示 */}
+                              {group.evidence.mime_type.startsWith('image/') ? (
+                                // 圖片：可點擊放大
+                                <div
+                                  className="cursor-pointer hover:opacity-90 transition-opacity group relative"
+                                  onClick={async () => {
+                                    const url = await getFileUrl(group.evidence!.file_path)
+                                    setLightboxSrc(url)
+                                  }}
+                                >
+                                  <img
+                                    src={thumbnails[group.evidence.id] || '/柴油.png'}
+                                    alt="佐證資料"
+                                    className="w-full h-48 object-cover"
+                                    loading="lazy"
+                                    onError={(e) => {
+                                      (e.target as HTMLImageElement).src = '/柴油.png'
+                                    }}
+                                  />
+                                  <div className="absolute inset-0 bg-black/0 group-hover:bg-black/10 transition-all flex items-center justify-center">
+                                    <Eye className="w-8 h-8 text-white opacity-0 group-hover:opacity-100 transition-opacity" />
+                                  </div>
+                                </div>
+                              ) : (
+                                // PDF：靜態顯示 + 下載按鈕
+                                <div className="relative">
+                                  <div className="w-full h-48 flex items-center justify-center bg-gray-100">
+                                    <span className="text-8xl">📄</span>
+                                  </div>
+                                  {/* PDF 下載按鈕 */}
+                                  <button
+                                    onClick={() => handleDownloadFile(group.evidence!)}
+                                    disabled={downloadingFileId === group.evidence!.id}
+                                    className="absolute top-2 right-2 bg-blue-500 hover:bg-blue-600 text-white p-2 rounded-lg shadow-lg transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                                    title={downloadingFileId === group.evidence!.id ? '下載中...' : '下載 PDF'}
+                                  >
+                                    {downloadingFileId === group.evidence!.id ? (
+                                      <Loader2 className="w-5 h-5 animate-spin" />
+                                    ) : (
+                                      <Download className="w-5 h-5" />
+                                    )}
+                                  </button>
+                                </div>
+                              )}
+                              <div className="p-3 bg-white border-t border-gray-200">
+                                <p className="text-sm text-gray-900 font-medium truncate" title={group.evidence.file_name}>
+                                  {group.evidence.file_name}
+                                </p>
+                                <p className="text-xs text-gray-500 mt-1">
+                                  {(group.evidence.file_size / 1024).toFixed(1)} KB
+                                </p>
+                              </div>
+                              {/* 刪除按鈕 */}
+                              <div className="p-3 border-t border-gray-200 space-y-2 bg-white">
+                                <button
+                                  onClick={() => {
+                                    if (window.confirm('刪除此佐證後，群組將變成空群組，記錄保留。確定要刪除嗎？')) {
+                                      deleteEvidence(group.evidence!.id)
+                                    }
+                                  }}
+                                  disabled={isReadOnly || approvalStatus.isApproved}
+                                  className={`w-full py-2 bg-red-500 hover:bg-red-600 text-white rounded-lg font-medium shadow-sm hover:shadow transition-all flex items-center justify-center gap-2 ${
+                                    isReadOnly || approvalStatus.isApproved ? 'opacity-50 cursor-not-allowed' : ''
+                                  }`}
+                                >
+                                  <Trash2 className="w-4 h-4" />
+                                  刪除佐證
+                                </button>
+                                <button
+                                  onClick={() => deleteGroup(groupId)}
+                                  disabled={isReadOnly || approvalStatus.isApproved}
+                                  className={`w-full py-2 bg-gray-500 hover:bg-gray-600 text-white rounded-lg font-medium shadow-sm hover:shadow transition-all disabled:opacity-50 disabled:cursor-not-allowed`}
+                                >
+                                  刪除群組
+                                </button>
+                              </div>
+                            </div>
+                          </div>
+
+                          {/* 右側：記錄列表 */}
+                          <div className="flex-1">
+
+                            <table className="w-full table-fixed border-collapse bg-white rounded-xl overflow-hidden shadow-sm mb-4">
+                              <thead>
+                                <tr className="bg-gradient-to-r from-green-500 to-green-600">
+                                  <th className="px-3 py-3 text-center text-sm font-semibold text-white w-[180px]">使用日期</th>
+                                  <th className="px-3 py-3 text-center text-sm font-semibold text-white w-[120px]">使用量(L)</th>
+                                  <th className="px-3 py-3 text-center text-sm font-semibold text-white w-[80px]">操作</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {group.records.map((record) => (
+                                  <tr key={record.id} className="hover:bg-green-50 transition-colors border-b border-gray-100 last:border-b-0">
+                                    <td className="px-3 py-3">
+                                      <input
+                                        type="date"
+                                        value={record.date}
+                                        onChange={(e) => updateEntry(record.id, 'date', e.target.value)}
+                                        disabled={isReadOnly || approvalStatus.isApproved}
+                                        className={`w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-green-500 hover:border-green-300 transition-colors ${
+                                          isReadOnly || approvalStatus.isApproved ? 'bg-gray-100 cursor-not-allowed' : ''
+                                        }`}
+                                      />
+                                    </td>
+                                    <td className="px-3 py-3">
+                                      <input
+                                        type="number"
+                                        min="0"
+                                        step="0.01"
+                                        value={record.quantity || ''}
+                                        onChange={(e) => updateEntry(record.id, 'quantity', parseFloat(e.target.value) || 0)}
+                                        disabled={isReadOnly || approvalStatus.isApproved}
+                                        className={`w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-green-500 hover:border-green-300 transition-colors ${
+                                          isReadOnly || approvalStatus.isApproved ? 'bg-gray-100 cursor-not-allowed' : ''
+                                        }`}
+                                      />
+                                    </td>
+                                    <td className="px-3 py-3">
+                                      <div className="flex justify-center">
+                                        <button
+                                          onClick={() => removeEntry(record.id)}
+                                          disabled={isReadOnly || approvalStatus.isApproved}
+                                          className={`text-red-500 hover:text-red-700 p-1 rounded-lg hover:bg-red-50 transition-colors ${
+                                            isReadOnly || approvalStatus.isApproved ? 'opacity-50 cursor-not-allowed' : ''
+                                          }`}
+                                          title="刪除此記錄"
+                                        >
+                                          <Trash2 className="w-4 h-4" />
+                                        </button>
+                                      </div>
+                                    </td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+
+                            {/* 新增記錄到此群組 */}
+                            <button
+                              onClick={() => addRecordToGroup(groupId)}
+                              disabled={isReadOnly || approvalStatus.isApproved}
+                              className={`w-full py-3 border-2 border-dashed border-green-300 bg-white hover:bg-green-50 text-green-700 rounded-xl font-semibold transition-all hover:shadow-sm ${
+                                isReadOnly || approvalStatus.isApproved ? 'opacity-50 cursor-not-allowed' : ''
+                              } flex items-center justify-center gap-2`}
+                            >
+                              <span className="text-xl">+</span>
+                              <span>新增記錄到此群組</span>
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    )
+                  }
+                })}
               </div>
-            ))}
+            </div>
           </div>
         </div>
 
-        {/* 年度總計 */}
-        {data.records.length > 0 && (
-          <div
-            className="rounded-lg border p-6"
-            style={{
-              backgroundColor: designTokens.colors.cardBg,
-              borderColor: designTokens.colors.border,
-              boxShadow: designTokens.shadows.sm
-            }}
-          >
-            <h3 className="text-2xl font-bold mb-4" style={{ color: designTokens.colors.textPrimary }}>
-              {currentYear} 年度總計
-            </h3>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              <div className="text-center p-4 bg-blue-50 rounded-lg">
-                <p className="text-base" style={{ color: designTokens.colors.textSecondary }}>總使用量</p>
-                <p className="text-3xl font-bold text-blue-600">{data.totalQuantity.toFixed(2)} L</p>
-              </div>
-              <div className="text-center p-4 bg-green-50 rounded-lg">
-                <p className="text-base" style={{ color: designTokens.colors.textSecondary }}>使用記錄數</p>
-                <p className="text-3xl font-bold text-green-600">{data.records.length} 筆</p>
-              </div>
-            </div>
+        {/* 審核區塊 - 只在審核模式顯示 */}
+        {isReviewMode && (
+          <div className="max-w-4xl mx-auto mt-8">
+            <ReviewSection
+              entryId={reviewEntryId || currentEntryId || `diesel_${year}`}
+              userId={reviewUserId || "current_user"}
+              category="柴油"
+              userName="填報用戶"
+              amount={dieselData.reduce((sum, item) => sum + item.quantity, 0)}
+              unit="L"
+              role={role}
+              onSave={handleSave}
+              isSaving={submitLoading}
+              onApprove={() => {
+                // ReviewSection 會處理 API 呼叫和導航
+              }}
+              onReject={(reason) => {
+                // ReviewSection 會處理 API 呼叫和導航
+              }}
+            />
           </div>
         )}
 
-        {/* 成功/錯誤提示 */}
-        {showSuccess && (
-          <div className="fixed top-4 right-4 bg-green-500 text-white px-6 py-3 rounded-lg shadow-lg flex items-center space-x-2 z-50">
-            <CheckCircle className="w-5 h-5" />
-            <span>數據已成功提交！</span>
-          </div>
-        )}
-
-        {showError && (
-          <div className="fixed top-4 right-4 bg-red-500 text-white px-6 py-3 rounded-lg shadow-lg flex items-center space-x-2 z-50">
-            <AlertCircle className="w-5 h-5" />
-            <span>{errorMessage}</span>
-            <button onClick={() => setShowError(false)} className="ml-2 hover:bg-red-600 rounded p-1">×</button>
-          </div>
-        )}
-      </div>
-
-        {/* 底部空間，避免內容被固定底部欄遮擋 */}
         <div className="h-20"></div>
       </div>
 
-        {/* 統一底部操作欄 - 審核模式下隱藏 */}
-        {!isReviewMode && (
-          <BottomActionBar
+      {!isReadOnly && !approvalStatus.isApproved && !isReviewMode && (
+        <BottomActionBar
           currentStatus={currentStatus}
           currentEntryId={currentEntryId}
           isUpdating={false}
           hasSubmittedBefore={hasSubmittedBefore}
+          hasAnyData={hasAnyData}
           editPermissions={editPermissions}
           submitting={submitting}
+          saving={submitting}
           onSubmit={handleSubmit}
-          onClear={() => setShowClearConfirmModal(true)}
+          onSave={handleSave}
+          onClear={handleClear}
           designTokens={designTokens}
         />
-        )}
-
-        {/* 審核區塊 - 只在審核模式顯示 */}
-        {isReviewMode && currentEntryId && (
-          <ReviewSection
-            entryId={reviewEntryId || currentEntryId}
-            userId={reviewUserId || "current_user"}
-            category="柴油"
-            userName={reviewUserId || "用戶"}
-            amount={data.totalQuantity}
-            unit="L"
-            onApprove={() => {
-              console.log('✅ 柴油填報審核通過 - 由 ReviewSection 處理')
-            }}
-            onReject={(reason) => {
-              console.log('❌ 柴油填報已退回 - 由 ReviewSection 處理:', reason)
-            }}
-          />
-        )}
+      )}
 
       {/* 清除確認模態框 */}
       {showClearConfirmModal && (
@@ -762,7 +1277,7 @@ export default function DieselPage() {
                   取消
                 </button>
                 <button
-                  onClick={handleClearAll}
+                  onClick={handleClearConfirm}
                   disabled={clearLoading}
                   className="px-4 py-2 text-white rounded-lg transition-colors font-medium flex items-center justify-center"
                   style={{
@@ -794,6 +1309,128 @@ export default function DieselPage() {
           </div>
         </div>
       )}
-    </>
-  )
+
+      {/* Lightbox：點圖放大 */}
+      {lightboxSrc && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/70"
+          onClick={() => setLightboxSrc(null)}
+        >
+          <img
+            src={lightboxSrc}
+            alt="佐證放大"
+            className="max-w-[90vw] max-h-[90vh] rounded shadow-xl cursor-zoom-out"
+            onClick={(e) => e.stopPropagation()}
+          />
+          <button
+            className="absolute top-4 right-4 text-white text-3xl leading-none hover:text-gray-300"
+            aria-label="Close"
+            onClick={() => setLightboxSrc(null)}
+          >
+            <X className="w-8 h-8" />
+          </button>
+        </div>
+      )}
+
+      {/* Toast 訊息 */}
+      {error && (
+        <Toast
+          message={error}
+          type="error"
+          onClose={() => setError(null)}
+        />
+      )}
+
+      {success && (
+        <Toast
+          message={success}
+          type="success"
+          onClose={() => setSuccess(null)}
+        />
+      )}
+
+      {/* 提交成功彈窗 */}
+      {showSuccessModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50 p-4">
+          <div className="bg-white rounded-lg shadow-lg max-w-md w-full">
+            <div className="p-6">
+              {/* 關閉按鈕 */}
+              <div className="flex justify-end mb-2">
+                <button
+                  onClick={() => setShowSuccessModal(false)}
+                  className="text-gray-400 hover:text-gray-600 transition-colors"
+                  aria-label="關閉"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              {/* 內容區 */}
+              <div className="text-center">
+                {/* 成功圖示 */}
+                <div
+                  className="w-12 h-12 mx-auto rounded-full mb-4 flex items-center justify-center"
+                  style={{ backgroundColor: designTokens.colors.success }}
+                >
+                  <CheckCircle className="h-6 w-6 text-white" />
+                </div>
+
+                {/* 標題 */}
+                <h3
+                  className="text-lg font-medium mb-2"
+                  style={{ color: designTokens.colors.textPrimary }}
+                >
+                  提交成功！
+                </h3>
+
+                {/* 成功訊息 */}
+                <p
+                  className="mb-4 font-medium text-lg"
+                  style={{ color: designTokens.colors.textPrimary }}
+                >
+                  {success}
+                </p>
+
+                {/* 提示資訊卡片 */}
+                <div
+                  className="rounded-lg p-4 mb-4 text-left"
+                  style={{ backgroundColor: designTokens.colors.accentLight }}
+                >
+                  <p
+                    className="text-base mb-2 font-medium"
+                    style={{ color: designTokens.colors.textPrimary }}
+                  >
+                    您的資料已成功儲存，您可以：
+                  </p>
+                  <ul
+                    className="text-base space-y-1"
+                    style={{ color: designTokens.colors.textSecondary }}
+                  >
+                    <li>• 隨時回來查看或修改資料</li>
+                    <li>• 重新上傳新的證明文件</li>
+                    <li>• 新增或刪除使用記錄</li>
+                  </ul>
+                </div>
+
+                {/* 確認按鈕 */}
+                <button
+                  onClick={() => setShowSuccessModal(false)}
+                  className="w-full py-2 rounded-lg text-white font-medium transition-colors"
+                  style={{ backgroundColor: designTokens.colors.primary }}
+                  onMouseEnter={(e) => {
+                    (e.target as HTMLButtonElement).style.backgroundColor = '#10b981';
+                  }}
+                  onMouseLeave={(e) => {
+                    (e.target as HTMLButtonElement).style.backgroundColor = designTokens.colors.primary;
+                  }}
+                >
+                  確認
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
 }

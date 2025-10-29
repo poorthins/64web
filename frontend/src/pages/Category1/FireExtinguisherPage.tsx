@@ -1,876 +1,953 @@
-import { useState, useCallback, useEffect, useRef } from 'react'
-import { Plus, Trash2, Shield, AlertCircle, CheckCircle, Upload, Loader2 } from 'lucide-react'
+// src/pages/FireExtinguisherPage.tsx
+import { useState, useCallback, useEffect } from 'react'
+import { useSearchParams } from 'react-router-dom'
+import { Plus, Trash2, Shield, AlertCircle, CheckCircle, Loader2 } from 'lucide-react'
+
 import { useFrontendStatus } from '../../hooks/useFrontendStatus'
 import { useEditPermissions } from '../../hooks/useEditPermissions'
-import StatusIndicator from '../../components/StatusIndicator'
+import { useGhostFileCleaner } from '../../hooks/useGhostFileCleaner'
+import { useEnergyData } from '../../hooks/useEnergyData'
+import { useEnergySubmit } from '../../hooks/useEnergySubmit'
+import { useEnergyClear } from '../../hooks/useEnergyClear'
+import { useApprovalStatus } from '../../hooks/useApprovalStatus'
+import { useRecordFileMapping } from '../../hooks/useRecordFileMapping'
+import { useStatusBanner, getBannerColorClasses } from '../../hooks/useStatusBanner'
+import { useRole } from '../../hooks/useRole'
+import { useAdminSave } from '../../hooks/useAdminSave'
+
 import EvidenceUpload, { MemoryFile } from '../../components/EvidenceUpload'
 import BottomActionBar from '../../components/BottomActionBar'
+import ReviewSection from '../../components/ReviewSection'
 import { EntryStatus } from '../../components/StatusSwitcher'
-import { listMSDSFiles, listUsageEvidenceFiles, commitEvidence, deleteEvidence, EvidenceFile, uploadEvidenceWithEntry } from '../../api/files'
-import { upsertEnergyEntry, sumMonthly, UpsertEntryInput, updateEntryStatus, getEntryByPageKeyAndYear } from '../../api/entries'
-import { getEntryFiles } from '../../api/files'
+
+import { EvidenceFile } from '../../api/files'
+import { UpsertEntryInput } from '../../api/entries'
+import { supabase } from '../../lib/supabaseClient'
 import { designTokens } from '../../utils/designTokens'
-import { debugRLSOperation, diagnoseAuthState } from '../../utils/authDiagnostics'
-import { logDetailedAuthStatus } from '../../utils/authHelpers'
-import { DocumentHandler } from '../../services/documentHandler'
 
+/**
+ * 滅火器記錄
+ */
 interface FireExtinguisherRecord {
-  id: string
-  equipmentType: string    // 設備類型
-  quantity: number         // 數量
-  isRefilled: boolean      // 該年度是否填充
-  refilledAmount?: number  // 填充量（可選）
-  unit: string            // 單位
-  location: string        // 位置
-  files: EvidenceFile[]       // 銘牌照片（已上傳）
-  memoryFiles: MemoryFile[]    // 銘牌照片（待上傳）
+  id: string                    // 穩定 ID（fire_timestamp）
+  type: string                  // 設備類型
+  quantity: number              // 數量
+  unit: string                  // 單位
+  location: string              // 位置
+  isRefilled: boolean           // 該年度是否填充
+  nameplatePhotos: MemoryFile[] // 銘牌照片（記憶體暫存）
 }
 
+/**
+ * 頁面總資料結構
+ */
 interface FireExtinguisherData {
-  year: number
-  records: FireExtinguisherRecord[]
-  totalEquipment: number
+  inspectionReports: MemoryFile[]     // 全年度共用檢修表（記憶體暫存）
+  records: FireExtinguisherRecord[]   // 滅火器清單
+  fileMapping: Record<string, string[]> // 檔案映射表（global_inspection + recordId → fileIds）
 }
 
-const equipmentTypes = ['乾粉式', '二氧化碳式', '泡沫式', '海龍式', '潔淨式', '其他']
-const unitOptions = ['kg', 'L', '瓶', '個']
+const equipmentTypes = ['ABC 乾粉滅火器', 'CO2 滅火器', '泡沫滅火器', '海龍滅火器', '潔淨滅火器', '其他']
+const unitOptions = ['支', '個', 'kg', 'L']
 
 export default function FireExtinguisherPage() {
   const currentYear = new Date().getFullYear()
-  const [loading, setLoading] = useState(true)
-  const [activeTab, setActiveTab] = useState<'usage'>('usage')
-  
-  // 狀態管理
-  const [hasSubmittedBefore, setHasSubmittedBefore] = useState(false)
-  const [currentEntryId, setCurrentEntryId] = useState<string | null>(null)
-  const [initialStatus, setInitialStatus] = useState<EntryStatus>('submitted')
-  const [hasChanges, setHasChanges] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-  const [success, setSuccess] = useState<string | null>(null)
-  
+  const pageKey = 'fire_extinguisher'
+
+  // ==================== URL 參數 ====================
+  const [searchParams] = useSearchParams()
+  const isReviewMode = searchParams.get('mode') === 'review'
+  const reviewEntryId = searchParams.get('entryId') || null
+
+  // ==================== Hooks ====================
+  const { entry, files, loading: dataLoading, reload } = useEnergyData(pageKey, currentYear, reviewEntryId)
+  const { reload: reloadApprovalStatus, ...approvalStatus } = useApprovalStatus(pageKey, currentYear)
+  const banner = useStatusBanner(approvalStatus, isReviewMode)
+  const { submit, save, submitting: submitLoading } = useEnergySubmit(pageKey, currentYear, approvalStatus.status)  // ✅ 使用資料庫狀態
+  const { role } = useRole()
+  const {
+    uploadRecordFiles,
+    getRecordFiles,
+    loadFileMapping,
+    getFileMappingForPayload,
+    removeRecordMapping
+  } = useRecordFileMapping(pageKey, entry?.id || null)
+  const { clear, clearing } = useEnergyClear(entry?.id || null, (entry?.status as EntryStatus) || 'submitted')
+  const { cleanFiles } = useGhostFileCleaner()
+
+  const frontendStatus = useFrontendStatus({
+    initialStatus: (entry?.status as EntryStatus) || 'submitted',
+    entryId: entry?.id || null
+  })
+  const { currentStatus, setCurrentStatus, handleSubmitSuccess, isInitialLoad } = frontendStatus
+
+  // ⭐ 審核模式下只有管理員可編輯
+  const isReadOnly = isReviewMode && role !== 'admin'
+
+  // 管理員審核儲存 Hook
+  const { save: adminSave, saving: adminSaving } = useAdminSave(pageKey, reviewEntryId)
+
+  const editPermissions = useEditPermissions(currentStatus || 'submitted', isReadOnly)
+
+  const submitting = submitLoading || clearing
+
+  // ==================== 本地狀態 ====================
   const [data, setData] = useState<FireExtinguisherData>({
-    year: currentYear,
+    inspectionReports: [],
     records: [],
-    totalEquipment: 0
+    fileMapping: {}
   })
 
-  const [evidenceFiles, setEvidenceFiles] = useState<EvidenceFile[]>([])
-  const [evidenceMemoryFiles, setEvidenceMemoryFiles] = useState<MemoryFile[]>([])
+  // 已上傳的檢修表檔案（從 Supabase）
+  const [uploadedInspectionFiles, setUploadedInspectionFiles] = useState<EvidenceFile[]>([])
 
   const [newRecord, setNewRecord] = useState<Omit<FireExtinguisherRecord, 'id'>>({
-    equipmentType: '乾粉式',
-    quantity: 0,
-    isRefilled: false,
-    refilledAmount: undefined,
-    unit: 'kg',
+    type: 'ABC 乾粉滅火器',
+    quantity: 1,
+    unit: '支',
     location: '',
-    files: [],
-    memoryFiles: []
+    isRefilled: false,
+    nameplatePhotos: []
   })
-
-  // 自訂設備類型狀態
-  const [customEquipmentType, setCustomEquipmentType] = useState('')
 
   const [showSuccess, setShowSuccess] = useState(false)
   const [showError, setShowError] = useState(false)
   const [errorMessage, setErrorMessage] = useState('')
-  const [submitting, setSubmitting] = useState(false)
 
-  const pageKey = 'fire_extinguisher'
-  
-  // 前端狀態管理 Hook
-  const frontendStatus = useFrontendStatus({
-    initialStatus,
-    entryId: currentEntryId,
-    onStatusChange: (newStatus) => {
-      console.log('Status changed to:', newStatus)
-    },
-    onError: (error) => setError(error),
-    onSuccess: (message) => setSuccess(message)
-  })
-
-  const { currentStatus, handleSubmitSuccess, handleDataChanged, isInitialLoad } = frontendStatus
-  
-  const editPermissions = useEditPermissions(currentStatus || 'submitted')
-
-  const calculateTotals = useCallback((records: FireExtinguisherRecord[]) => {
-    const totalEquipment = records.reduce((sum, record) => sum + record.quantity, 0)
-    return { totalEquipment }
-  }, [])
-
-  // 處理設備類型變更
-  const handleEquipmentTypeChange = (value: string) => {
-    setNewRecord(prev => ({ ...prev, equipmentType: value }))
-
-    // 如果不是選擇「其他」，清除自訂類型
-    if (value !== '其他') {
-      setCustomEquipmentType('')
-    }
-  }
-
-  const addRecord = useCallback(() => {
-    if (!newRecord.location || newRecord.quantity <= 0) {
-      setErrorMessage('請填寫完整的滅火器記錄資訊')
+  // ==================== 核心操作：新增記錄 ====================
+  const handleAddRecord = useCallback(() => {
+    if (!newRecord.location.trim()) {
+      setErrorMessage('請填寫位置')
       setShowError(true)
       return
     }
-
-    // 驗證自訂設備類型
-    if (newRecord.equipmentType === '其他' && !customEquipmentType.trim()) {
-      setErrorMessage('選擇「其他」時請輸入具體的設備類型')
+    if (newRecord.quantity <= 0) {
+      setErrorMessage('數量必須大於 0')
       setShowError(true)
       return
     }
-
-    if (newRecord.isRefilled && (!newRecord.refilledAmount || newRecord.refilledAmount <= 0)) {
-      setErrorMessage('請填寫填充量')
-      setShowError(true)
-      return
-    }
-
-    // 決定最終的設備類型
-    const finalEquipmentType = newRecord.equipmentType === '其他' ? customEquipmentType.trim() : newRecord.equipmentType
 
     const record: FireExtinguisherRecord = {
-      id: `fire_extinguisher_${Date.now()}`,
-      ...newRecord,
-      equipmentType: finalEquipmentType,
-      refilledAmount: newRecord.isRefilled ? newRecord.refilledAmount : undefined,
-      files: newRecord.files || [],
-      memoryFiles: newRecord.memoryFiles || []
+      id: `fire_${Date.now()}`,
+      ...newRecord
     }
 
-    setData(prevData => {
-      const newRecords = [...prevData.records, record]
-      const totals = calculateTotals(newRecords)
+    setData(prev => ({
+      ...prev,
+      records: [...prev.records, record] // 新增在最後
+    }))
 
-      return {
-        ...prevData,
-        records: newRecords,
-        ...totals
-      }
-    })
-
+    // 重置表單
     setNewRecord({
-      equipmentType: '乾粉式',
-      quantity: 0,
-      isRefilled: false,
-      refilledAmount: undefined,
-      unit: 'kg',
+      type: 'ABC 乾粉滅火器',
+      quantity: 1,
+      unit: '支',
       location: '',
-      files: [],
-      memoryFiles: []
+      isRefilled: false,
+      nameplatePhotos: []
     })
+  }, [newRecord])
 
-    // 清除自訂設備類型
-    setCustomEquipmentType('')
-  }, [newRecord, customEquipmentType, calculateTotals])
-
-  const removeRecord = useCallback((recordId: string) => {
-    setData(prevData => {
-      const newRecords = prevData.records.filter(record => record.id !== recordId)
-      const totals = calculateTotals(newRecords)
-
-      return {
-        ...prevData,
-        records: newRecords,
-        ...totals
-      }
-    })
-  }, [calculateTotals])
-
-  const handleRecordFileChange = (recordId: string, files: EvidenceFile[]) => {
-    setData(prevData => ({
-      ...prevData,
-      records: prevData.records.map(record =>
-        record.id === recordId ? { ...record, files } : record
-      )
+  // ==================== 核心操作：刪除記錄 ====================
+  const handleDeleteRecord = useCallback((recordId: string) => {
+    setData(prev => ({
+      ...prev,
+      records: prev.records.filter(r => r.id !== recordId)
     }))
-  }
+    removeRecordMapping(recordId)
+  }, [removeRecordMapping])
 
-  const handleRecordMemoryFileChange = (recordId: string, memFiles: MemoryFile[]) => {
-    setData(prevData => ({
-      ...prevData,
-      records: prevData.records.map(record =>
-        record.id === recordId ? { ...record, memoryFiles: memFiles } : record
-      )
-    }))
-  }
-
+  // ==================== 核心操作：提交 ====================
   const handleSubmit = useCallback(async () => {
-    console.log('=== 滅火器填報提交除錯開始 ===')
-    
-    if (evidenceFiles.length === 0 && evidenceMemoryFiles.length === 0) {
-      setError('請上傳消防安全設備檢修表')
+    // 驗證
+    if (data.inspectionReports.length === 0 && uploadedInspectionFiles.length === 0) {
+      setErrorMessage('請上傳消防安全設備檢修表')
+      setShowError(true)
       return
     }
-
     if (data.records.length === 0) {
-      setError('請至少新增一筆滅火器記錄')
+      setErrorMessage('請至少新增一筆滅火器記錄')
+      setShowError(true)
       return
     }
-
-    setSubmitting(true)
-    setError(null)
-    setSuccess(null)
 
     try {
-      // 步驟1：詳細認證狀態診斷
-      console.log('🔍 執行詳細認證診斷...')
-      await logDetailedAuthStatus()
-      
-      const authDiagnosis = await diagnoseAuthState()
-      if (!authDiagnosis.isAuthenticated) {
-        console.error('❌ 認證診斷失敗:', authDiagnosis)
-        throw new Error(`認證失效: ${authDiagnosis.userError?.message || authDiagnosis.sessionError?.message || '未知原因'}`)
-      }
+      console.log('📤 [Submit] === 開始提交 ===')
 
-      // 步驟2：準備滅火器數據（轉換為月份格式以符合 API）
-      const monthly: Record<string, number> = {
-        '1': data.totalEquipment || 0 // 總設備數量記錄在1月
-      }
+      // 計算總數
+      const totalQuantity = data.records.reduce((sum, r) => sum + r.quantity, 0)
 
-      // 步驟3：建立填報輸入資料
+      console.log('📤 [Submit] 檢修表檔案數:', data.inspectionReports.length)
+      console.log('📤 [Submit] 記錄數:', data.records.length)
+      console.log('📤 [Submit] fileMapping:', getFileMappingForPayload())
+
+      // 準備 payload
       const entryInput: UpsertEntryInput = {
         page_key: pageKey,
         period_year: currentYear,
-        unit: '台',
-        monthly: monthly,
-        notes: `滅火器填報記錄，總設備數量：${data.totalEquipment} 台，共 ${data.records.length} 筆記錄`,
+        unit: '支',
+        monthly: { '1': totalQuantity },
+        notes: `滅火器填報：共 ${data.records.length} 筆記錄，總數量 ${totalQuantity} 支`,
         extraPayload: {
-          fireExtinguisherData: data  // 保存完整的滅火器記錄數據
-        }
-      }
-
-      // 步驟4：使用診斷包裝執行關鍵操作
-      const { entry_id } = await debugRLSOperation(
-        '新增或更新能源填報記錄',
-        async () => await upsertEnergyEntry(entryInput, true)
-      )
-
-      // 步驟5：設置 entryId（如果是新建的記錄）
-      if (!currentEntryId) {
-        setCurrentEntryId(entry_id)
-      }
-
-      // 步驟6：上傳消防檢修表
-      for (const memFile of evidenceMemoryFiles) {
-        await uploadEvidenceWithEntry(memFile.file, {
-          entryId: entry_id,
-          pageKey: pageKey,
-          year: currentYear,
-          category: 'other'
-        })
-      }
-
-      // 步驟7：上傳各滅火器銘牌照片
-      for (const record of data.records) {
-        if (record.memoryFiles && record.memoryFiles.length > 0) {
-          for (const memFile of record.memoryFiles) {
-            await uploadEvidenceWithEntry(memFile.file, {
-              entryId: entry_id,
-              pageKey: pageKey,
-              year: currentYear,
-              category: 'other'
-            })
+          fireExtinguisherData: {
+            records: data.records.map(r => ({
+              ...r,
+              nameplatePhotos: [] // 不存 blob 到 payload
+            })),
+            fileMapping: getFileMappingForPayload()
           }
         }
       }
 
-      // 步驟8：提交所有檔案
-      await debugRLSOperation(
-        '提交證明檔案',
-        async () => await commitEvidence({
-          entryId: entry_id,
-          pageKey: pageKey
-        })
-      )
+      // 提交 entry + 上傳檢修表
+      const newEntryId = await submit({
+        formData: {
+          unit: entryInput.unit,
+          monthly: entryInput.monthly,
+          notes: entryInput.notes,
+          extraPayload: entryInput.extraPayload
+        },
+        msdsFiles: [],
+        monthlyFiles: [],
+        evidenceFiles: data.inspectionReports // 檢修表
+      })
 
-      // 步驟9：處理狀態轉換
-      await handleSubmitSuccess()
+      if (!newEntryId) {
+        throw new Error('無法取得 entryId')
+      }
 
-      // 步驟10：清空 memory files
-      setEvidenceMemoryFiles([])
-      setData(prevData => ({
-        ...prevData,
-        records: prevData.records.map(record => ({ ...record, memoryFiles: [] }))
+      console.log('📤 [Submit] 新 entryId:', newEntryId)
+
+      // 上傳各滅火器的銘牌照片
+      for (const record of data.records) {
+        if (record.nameplatePhotos.length > 0) {
+          console.log('📤 [Submit] 上傳記錄照片:', record.id, record.nameplatePhotos.length, '個檔案')
+          await uploadRecordFiles(record.id, record.nameplatePhotos, newEntryId)
+        }
+      }
+
+      console.log('📤 [Submit] 提交完成')
+
+      // 清空記憶體檔案
+      setData(prev => ({
+        ...prev,
+        inspectionReports: [],
+        records: prev.records.map(r => ({ ...r, nameplatePhotos: [] }))
       }))
 
-      setHasChanges(false)
-      setHasSubmittedBefore(true)
+      await reload()
+      await handleSubmitSuccess()
 
-      setSuccess(`滅火器填報已提交，總設備數量 ${data.totalEquipment} 台`)
+      // 重新載入審核狀態，更新狀態橫幅
+      reloadApprovalStatus()
+
       setShowSuccess(true)
       setTimeout(() => setShowSuccess(false), 3000)
-      
-      console.log('=== ✅ 滅火器填報提交成功完成 ===')
 
     } catch (error) {
-      console.error('=== ❌ 滅火器填報提交失敗 ===')
-      console.error('錯誤訊息:', error instanceof Error ? error.message : String(error))
-      setError(error instanceof Error ? error.message : '提交失敗')
-      setErrorMessage(error instanceof Error ? error.message : '提交失敗，請稍後重試')
+      console.error('⚠️ [Submit] 提交失敗:', error)
+      const msg = error instanceof Error ? error.message : '提交失敗'
+      setErrorMessage(msg)
       setShowError(true)
-    } finally {
-      setSubmitting(false)
     }
-  }, [data, evidenceFiles, currentYear, currentEntryId, handleSubmitSuccess, pageKey])
+  }, [
+    data,
+    uploadedInspectionFiles,
+    currentYear,
+    pageKey,
+    submit,
+    uploadRecordFiles,
+    getFileMappingForPayload,
+    reload,
+    handleSubmitSuccess
+  ])
 
-  const handleClear = useCallback(async () => {
-    console.log('🗑️ [FireExtinguisherPage] ===== CLEAR BUTTON CLICKED =====')
+  // ==================== 核心操作：暫存 ====================
+  const handleSave = useCallback(async () => {
+    try {
+      console.log('📤 [Save] === 開始暫存 ===')
 
-    const clearSuccess = DocumentHandler.handleClear({
-      currentStatus: currentStatus,
-      title: '滅火器資料清除',
-      message: '確定要清除所有滅火器使用資料嗎？此操作無法復原。',
-      onClear: () => {
-        setSubmitting(true)
-        try {
-          console.log('🗑️ [FireExtinguisherPage] Starting complete clear operation...')
+      // 計算總數
+      const totalQuantity = data.records.reduce((sum, r) => sum + r.quantity, 0)
 
-          // 清理記憶體檔案
-          data.records.forEach(record => {
-            DocumentHandler.clearAllMemoryFiles(record.memoryFiles)
+      // 審核模式：使用 useAdminSave hook
+      if (isReviewMode && reviewEntryId) {
+        console.log('📝 管理員審核模式：使用 useAdminSave hook', reviewEntryId)
+
+        // 準備月份檔案列表
+        const filesToUpload: Array<{
+          file: File
+          metadata: {
+            month: number
+            fileType: 'usage_evidence' | 'msds' | 'other'
+          }
+        }> = []
+
+        // 收集全年度檢修表
+        data.inspectionReports.forEach((mf) => {
+          filesToUpload.push({
+            file: mf.file,
+            metadata: {
+              month: 1,
+              fileType: 'other' as const
+            }
           })
-          DocumentHandler.clearAllMemoryFiles(newRecord.memoryFiles)
-          DocumentHandler.clearAllMemoryFiles(evidenceMemoryFiles)
+        })
 
-          // 原有的清除邏輯保持不變
-          setData({
-            year: currentYear,
-            records: [],
-            totalEquipment: 0
+        // 收集每個滅火器的銘牌照片
+        data.records.forEach((record) => {
+          record.nameplatePhotos.forEach(mf => {
+            filesToUpload.push({
+              file: mf.file,
+              metadata: {
+                month: 1,
+                fileType: 'other' as const
+              }
+            })
           })
-          setNewRecord({
-            equipmentType: '乾粉式',
-            quantity: 0,
-            isRefilled: false,
-            refilledAmount: undefined,
-            unit: 'kg',
-            location: '',
-            files: [],
-            memoryFiles: []
-          })
-          setEvidenceFiles([])
-          setEvidenceMemoryFiles([])
-          setHasChanges(false)
-          setError(null)
-          setSuccess(null)
+        })
 
-          setSuccess('資料已清除')
+        // 從舊區塊中提取 payload 資料
+        await adminSave({
+          updateData: {
+            unit: '支',
+            amount: totalQuantity,
+            payload: {
+              fireExtinguisherData: {
+                records: data.records.map(r => ({
+                  ...r,
+                  nameplatePhotos: []
+                })),
+                fileMapping: getFileMappingForPayload()
+              }
+            },
+          },
+          files: filesToUpload
+        })
 
-        } catch (error) {
-          console.error('❌ [FireExtinguisherPage] Clear operation failed:', error)
-          setError('清除操作失敗，請重試')
-        } finally {
-          console.log('🗑️ [FireExtinguisherPage] Clear operation finished, resetting loading state')
-          setSubmitting(false)
+        // 清空記憶體檔案
+        setData(prev => ({
+          inspectionReports: [],
+          records: prev.records.map(r => ({ ...r, nameplatePhotos: [] })),
+          fileMapping: prev.fileMapping
+        }))
+
+        await reload()
+        reloadApprovalStatus()
+        return
+      }
+
+      // 非審核模式：原本的邏輯
+      // 準備 payload（不驗證）
+      const entryInput = {
+        unit: '支',
+        monthly: { '1': totalQuantity },
+        notes: `滅火器填報：共 ${data.records.length} 筆記錄，總數量 ${totalQuantity} 支`,
+        extraPayload: {
+          fireExtinguisherData: {
+            records: data.records.map(r => ({
+              ...r,
+              nameplatePhotos: []
+            })),
+            fileMapping: getFileMappingForPayload()
+          }
         }
       }
+
+      // 使用 Hook 暫存
+      const newEntryId = await save({
+        formData: entryInput,
+        msdsFiles: [],
+        monthlyFiles: [],
+        evidenceFiles: data.inspectionReports
+      })
+
+      if (!newEntryId) {
+        throw new Error('無法取得 entryId')
+      }
+
+      // 上傳各滅火器的銘牌照片
+      for (const record of data.records) {
+        if (record.nameplatePhotos.length > 0) {
+          await uploadRecordFiles(record.id, record.nameplatePhotos, newEntryId)
+        }
+      }
+
+      // 清空記憶體檔案
+      setData(prev => ({
+        ...prev,
+        inspectionReports: [],
+        records: prev.records.map(r => ({ ...r, nameplatePhotos: [] }))
+      }))
+
+      await reload()
+
+      // 重新載入審核狀態，更新狀態橫幅
+      reloadApprovalStatus()
+
+      setShowSuccess(true)
+      setTimeout(() => setShowSuccess(false), 3000)
+
+    } catch (error) {
+      console.error('⚠️ [Save] 暫存失敗:', error)
+      const msg = error instanceof Error ? error.message : '暫存失敗'
+      setErrorMessage(msg)
+      setShowError(true)
+    }
+  }, [data, save, uploadRecordFiles, getFileMappingForPayload, reload, isReviewMode, reviewEntryId])
+
+  // ==================== 核心操作：清除 ====================
+  const handleClear = useCallback(async () => {
+    try {
+      const filesToDelete: EvidenceFile[] = [...uploadedInspectionFiles]
+
+      // 收集所有記錄的檔案
+      data.records.forEach(record => {
+        const recordFiles = getRecordFiles(record.id, files)
+        filesToDelete.push(...recordFiles)
+      })
+
+      const memoryFilesToClean: MemoryFile[] = [
+        ...data.inspectionReports,
+        ...data.records.flatMap(r => r.nameplatePhotos)
+      ]
+
+      await clear({ filesToDelete, memoryFilesToClean })
+
+      // 重置狀態
+      setData({
+        inspectionReports: [],
+        records: [],
+        fileMapping: {}
+      })
+      setUploadedInspectionFiles([])
+      setNewRecord({
+        type: 'ABC 乾粉滅火器',
+        quantity: 1,
+        unit: '支',
+        location: '',
+        isRefilled: false,
+        nameplatePhotos: []
+      })
+
+      setShowSuccess(true)
+      setTimeout(() => setShowSuccess(false), 3000)
+
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : '清除失敗'
+      setErrorMessage(msg)
+      setShowError(true)
+    }
+  }, [data, uploadedInspectionFiles, files, clear, getRecordFiles])
+
+  // ==================== 載入：從 entry 還原資料 ====================
+  useEffect(() => {
+    if (!entry) return
+
+
+    // ⭐ 等待檔案載入完成（避免在 files = [] 時執行）
+    if (dataLoading) {
+      console.log('🔍 [Load] 等待檔案載入中...')
+      return
+    }
+
+    console.log('🔍 [Load] === 開始載入資料 ===')
+    console.log('🔍 [Load] files 總數:', files.length)
+    console.log('🔍 [Load] pageKey:', pageKey)
+
+    // 檢查檔案欄位命名（診斷用）
+    if (files.length > 0) {
+      const sampleFile = files[0] as any
+      console.log('🔍 [Load] 檔案範例:', {
+        id: sampleFile.id,
+        page_key: sampleFile.page_key,
+        record_id: sampleFile.record_id,
+        recordId: sampleFile.recordId,
+        record_index: sampleFile.record_index,
+        recordIndex: sampleFile.recordIndex
+      })
+    }
+
+    // 載入檢修表檔案（同時檢查兩種命名）
+    const inspectionFiles = (files as any[]).filter(f => {
+      const match = f.page_key === pageKey &&
+        (f.record_id == null && f.recordId == null) &&
+        (f.record_index == null && f.recordIndex == null)
+
+      if (f.page_key === pageKey) {
+        console.log('🔍 [Load] 檢查檔案:', f.id.substring(0, 8), {
+          record_id: f.record_id,
+          recordId: f.recordId,
+          record_index: f.record_index,
+          recordIndex: f.recordIndex,
+          匹配檢修表: match
+        })
+      }
+
+      return match
     })
 
-    if (!clearSuccess && currentStatus === 'approved') {
-      setError('已通過的資料無法清除')
-    }
-  }, [currentYear, currentStatus, data.records, newRecord.memoryFiles, evidenceMemoryFiles])
+    console.log('🔍 [Load] 過濾後的檢修表檔案數:', inspectionFiles.length)
+    setUploadedInspectionFiles(inspectionFiles as EvidenceFile[])
 
-  const handleStatusChange = async (newStatus: EntryStatus) => {
-    try {
-      if (currentEntryId) {
-        await updateEntryStatus(currentEntryId, newStatus)
+    // ⭐ 初次載入：從 payload 還原記錄資料
+    if (isInitialLoad.current) {
+      // 同步前端狀態
+      if (entry.status) {
+        setCurrentStatus(entry.status as EntryStatus)
       }
-      frontendStatus.setFrontendStatus(newStatus)
-    } catch (error) {
-      setError(error instanceof Error ? error.message : '狀態更新失敗')
+
+    // 載入記錄資料
+    if (entry.payload?.fireExtinguisherData) {
+      const rawData = entry.payload.fireExtinguisherData
+      const rawRecords = Array.isArray(rawData.records) ? rawData.records : []
+
+      console.log('🔍 [Load] payload 記錄數:', rawRecords.length)
+      console.log('🔍 [Load] payload fileMapping:', rawData.fileMapping)
+
+      setData({
+        inspectionReports: [],
+        records: rawRecords.map((r: any) => ({
+          ...r,
+          nameplatePhotos: [] // blob 不從 payload 載入
+        })),
+        fileMapping: rawData.fileMapping || {}
+      })
+
+      // 載入 fileMapping
+      loadFileMapping(entry.payload.fireExtinguisherData)
+      console.log('🔍 [Load] fileMapping 已載入')
     }
-  }
 
-  // 載入資料
+    isInitialLoad.current = false
+    }
+  }, [entry, files, pageKey, isInitialLoad, loadFileMapping, dataLoading])
+
+  // ==================== 清理幽靈檔案 ====================
   useEffect(() => {
-    const loadData = async () => {
-      try {
-        setLoading(true)
-        setError(null)
+    // ⭐ 嚴格條件檢查，避免在狀態未準備好時執行
+    if (!entry || files.length === 0 || data.records.length === 0) return
+    if (dataLoading) return  // 等待資料載入完成
 
-        // 檢查是否已有非草稿記錄
-        const existingEntry = await getEntryByPageKeyAndYear(pageKey, currentYear)
+    console.log('🗑️ [Clean] === 開始檢查幽靈檔案 ===')
+    console.log('🗑️ [Clean] uploadedInspectionFiles 數量:', uploadedInspectionFiles.length)
 
-        if (existingEntry && existingEntry.status !== 'draft') {
-          setInitialStatus(existingEntry.status as EntryStatus)
-          setCurrentEntryId(existingEntry.id)
-          setHasSubmittedBefore(true)
+    const collectValidIds = () => {
+      const ids = new Set<string>()
 
-          // 載入該記錄的所有檔案（支援審核模式）
-          try {
-            const allFiles = await getEntryFiles(existingEntry.id)
-            const evidenceFilesFromEntry = allFiles.filter(f =>
-              f.file_type === 'msds' && f.page_key === pageKey
-            )
-            setEvidenceFiles(evidenceFilesFromEntry)
-          } catch (fileError) {
-            console.error('Failed to load files for existing entry:', fileError)
-            setEvidenceFiles([])
-          }
-          
-          // 載入已提交的記錄數據供編輯
-          if (existingEntry.payload?.fireExtinguisherData) {
-            const fireExtinguisherData = existingEntry.payload.fireExtinguisherData
-            
-            // 載入相關檔案
-            setData(fireExtinguisherData)
-            
-            // 處理狀態變更
-            handleDataChanged()
-          }
-        } else {
-          // 新記錄：設為空狀態，不載入任何檔案（因為還沒有記錄）
-          setEvidenceFiles([])
-        }
+      // 檢修表檔案
+      console.log('🗑️ [Clean] 檢修表檔案:', uploadedInspectionFiles.length, '個')
+      uploadedInspectionFiles.forEach(f => ids.add(f.id))
 
-        isInitialLoad.current = false
-      } catch (error) {
-        console.error('Error loading data:', error)
-        setError(error instanceof Error ? error.message : '載入資料失敗')
-      } finally {
-        setLoading(false)
+      // 記錄檔案
+      data.records.forEach(record => {
+        const recordFiles = getRecordFiles(record.id, files)
+        console.log('🗑️ [Clean] 記錄', record.id, '的檔案:', recordFiles.length, '個')
+        recordFiles.forEach(f => ids.add(f.id))
+      })
+
+      console.log('🗑️ [Clean] 有效檔案總數:', ids.size)
+      return ids
+    }
+
+    const cleanGhost = async () => {
+      const validFileIds = collectValidIds()
+      const ghostFiles = (files as any[]).filter(
+        f => f.page_key === pageKey && !validFileIds.has(f.id)
+      )
+
+      console.log('🗑️ [Clean] 所有檔案數:', files.length)
+      console.log('🗑️ [Clean] 幽靈檔案數:', ghostFiles.length)
+
+      if (ghostFiles.length > 0) {
+        console.log('🗑️ [Clean] 幽靈檔案 IDs:', ghostFiles.map(f => f.id.substring(0, 8)))
+        await cleanFiles(ghostFiles as any)
+        console.log('🗑️ [Clean] 清理完成')
       }
     }
 
-    loadData()
-  }, [])
+    cleanGhost()
+  }, [entry, files, data.records, uploadedInspectionFiles, pageKey, getRecordFiles, cleanFiles, dataLoading])
 
-  // 監聽表單變更
-  useEffect(() => {
-    if (!isInitialLoad.current && hasSubmittedBefore) {
-      setHasChanges(true)
-    }
-  }, [data, evidenceFiles, hasSubmittedBefore])
-
-  // Loading 狀態
-  if (loading) {
+  // ==================== Loading ====================
+  if (dataLoading) {
     return (
-      <div 
-        className="min-h-screen flex items-center justify-center" 
-        style={{ backgroundColor: designTokens.colors.background }}
-      >
+      <div className="min-h-screen flex items-center justify-center" style={{ backgroundColor: designTokens.colors.background }}>
         <div className="text-center">
-          <Loader2 
-            className="w-12 h-12 animate-spin mx-auto mb-4" 
-            style={{ color: designTokens.colors.accentPrimary }} 
-          />
+          <Loader2 className="w-12 h-12 animate-spin mx-auto mb-4" style={{ color: designTokens.colors.accentPrimary }} />
           <p style={{ color: designTokens.colors.textPrimary }}>載入中...</p>
         </div>
       </div>
     )
   }
 
+  // ==================== 計算總數 ====================
+  const totalQuantity = data.records.reduce((sum, r) => sum + r.quantity, 0)
+
   return (
     <>
-      <div className="min-h-screen bg-green-50">
-      {/* 主要內容區域 */}
-      <div className="max-w-4xl mx-auto px-6 py-8 space-y-6">
+      <div className="min-h-screen bg-gray-50">
+        <div className="max-w-5xl mx-auto px-6 py-8 space-y-6">
 
-        {/* 頁面標題 - 無背景框 */}
-        <div className="text-center mb-8">
-          <h1 className="text-3xl font-bold text-center mb-2">
-            滅火器 使用數量填報
-          </h1>
-          <p className="text-lg text-center text-gray-600 mb-6">
-            請上傳 MSDS 文件並填入各月份使用數據進行碳排放計算
-          </p>
-        </div>
-
-        {/* 重新提交提示 */}
-        {hasSubmittedBefore && !showSuccess && (
-          <div
-            className="rounded-lg p-4 border-l-4"
-            style={{
-              backgroundColor: '#f0f9ff',
-              borderColor: designTokens.colors.accentBlue
-            }}
-          >
-            <div className="flex items-start">
-              <CheckCircle
-                className="h-5 w-5 mt-0.5 mr-3"
-                style={{ color: designTokens.colors.accentBlue }}
-              />
-              <div>
-                <h3
-                  className="text-base font-medium mb-1"
-                  style={{ color: designTokens.colors.accentBlue }}
-                >
-                  資料已提交
-                </h3>
-                <p
-                  className="text-base"
-                  style={{ color: designTokens.colors.textSecondary }}
-                >
-                  您可以繼續編輯資料，修改後請再次點擊「提交填報」以更新記錄。
-                </p>
-              </div>
-            </div>
+          {/* ==================== 標題 ==================== */}
+          <div className="text-center mb-8">
+            <h1 className="text-3xl font-bold text-gray-900 mb-2">滅火器使用數量填報</h1>
+            <p className="text-lg text-gray-600">請填寫滅火器設備資料並上傳相關佐證文件</p>
           </div>
-        )}
 
-        {/* 消防安全設備檢修表上傳 */}
-        <div
-          className="rounded-lg border p-6"
-          style={{
-            backgroundColor: designTokens.colors.cardBg,
-            borderColor: designTokens.colors.border,
-            boxShadow: designTokens.shadows.sm
-          }}
-        >
-          <h2
-            className="text-2xl font-medium mb-4"
-            style={{ color: designTokens.colors.textPrimary }}
-          >
-            消防安全設備檢修表
-          </h2>
-          
-          <div>
-            <label 
-              className="block text-base font-medium mb-2"
-              style={{ color: designTokens.colors.textPrimary }}
-            >
-              佐證資料
-            </label>
-            <EvidenceUpload
-              pageKey={pageKey}
-              files={evidenceFiles}
-              onFilesChange={setEvidenceFiles}
-              memoryFiles={evidenceMemoryFiles}
-              onMemoryFilesChange={setEvidenceMemoryFiles}
-              maxFiles={3}
-              disabled={submitting || !editPermissions.canUploadFiles}
-              kind="other"
-              mode="edit"
-            />
-            <p 
-              className="text-sm mt-1"
-              style={{ color: designTokens.colors.textSecondary }}
-            >
-              請上傳消防安全設備檢修表或相關證明文件
-            </p>
-          </div>
-        </div>
-
-        {/* 新增滅火器記錄表單 */}
-        {editPermissions.canEdit && (
-          <div
-            className="rounded-lg border p-6"
-            style={{
-              backgroundColor: designTokens.colors.cardBg,
-              borderColor: designTokens.colors.border,
-              boxShadow: designTokens.shadows.sm
-            }}
-          >
-            <h2
-              className="text-2xl font-medium mb-6"
-              style={{ color: designTokens.colors.textPrimary }}
-            >
-              新增滅火器記錄
-            </h2>
-            
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mb-4">
-              <div>
-                <label className="block text-base font-medium mb-2" style={{ color: designTokens.colors.textPrimary }}>
-                  設備類型
-                </label>
-                <select
-                  value={newRecord.equipmentType}
-                  onChange={(e) => handleEquipmentTypeChange(e.target.value)}
-                  className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                  style={{ borderColor: designTokens.colors.border }}
-                >
-                  {equipmentTypes.map(type => (
-                    <option key={type} value={type}>{type}</option>
-                  ))}
-                </select>
-
-                {/* 當選擇「其他」時顯示自訂輸入框 */}
-                {newRecord.equipmentType === '其他' && (
-                  <div className="mt-3">
-                    <label className="block text-sm font-medium mb-2" style={{ color: designTokens.colors.textPrimary }}>
-                      請輸入具體類型 <span className="text-red-500">*</span>
-                    </label>
-                    <input
-                      type="text"
-                      value={customEquipmentType}
-                      onChange={(e) => setCustomEquipmentType(e.target.value)}
-                      className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                      style={{ borderColor: designTokens.colors.border }}
-                      placeholder="例如：水霧式、潔淨氣體式等"
-                      maxLength={50}
-                    />
-                  </div>
-                )}
-              </div>
-              
-              <div>
-                <label className="block text-base font-medium mb-2" style={{ color: designTokens.colors.textPrimary }}>
-                  數量
-                </label>
-                <input
-                  type="number"
-                  min="1"
-                  value={newRecord.quantity || ''}
-                  onChange={(e) => setNewRecord(prev => ({ ...prev, quantity: parseInt(e.target.value) || 0 }))}
-                  className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                  style={{ borderColor: designTokens.colors.border }}
-                  placeholder="輸入數量"
-                />
-              </div>
-              
-              <div>
-                <label className="block text-base font-medium mb-2" style={{ color: designTokens.colors.textPrimary }}>
-                  該年度是否填充
-                </label>
-                <select
-                  value={newRecord.isRefilled ? 'yes' : 'no'}
-                  onChange={(e) => setNewRecord(prev => ({ 
-                    ...prev, 
-                    isRefilled: e.target.value === 'yes',
-                    refilledAmount: e.target.value === 'yes' ? prev.refilledAmount : undefined
-                  }))}
-                  className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                  style={{ borderColor: designTokens.colors.border }}
-                >
-                  <option value="no">否</option>
-                  <option value="yes">是</option>
-                </select>
-              </div>
-              
-              {newRecord.isRefilled && (
-                <div>
-                  <label className="block text-base font-medium mb-2" style={{ color: designTokens.colors.textPrimary }}>
-                    填充量
-                  </label>
-                  <input
-                    type="number"
-                    step="0.1"
-                    min="0"
-                    value={newRecord.refilledAmount || ''}
-                    onChange={(e) => setNewRecord(prev => ({ ...prev, refilledAmount: parseFloat(e.target.value) || 0 }))}
-                    className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                    style={{ borderColor: designTokens.colors.border }}
-                    placeholder="輸入填充量"
-                  />
+          {/* ==================== 審核狀態橫幅 - 統一管理 ==================== */}
+          {banner && (
+            <div className={`border-l-4 p-4 mb-6 rounded-r-lg ${getBannerColorClasses(banner.type)}`}>
+              <div className="flex items-center">
+                <div className="text-2xl mr-3">{banner.icon}</div>
+                <div className="flex-1">
+                  <p className="font-bold text-lg">{banner.title}</p>
+                  {banner.message && <p className="text-sm mt-1">{banner.message}</p>}
+                  {banner.reason && (
+                    <div className="mt-3 p-3 bg-red-50 rounded-md border border-red-200">
+                      <p className="text-base font-bold text-red-800 mb-1">退回原因：</p>
+                      <p className="text-lg font-semibold text-red-900">{banner.reason}</p>
+                    </div>
+                  )}
+                  {banner.reviewedAt && (
+                    <p className="text-xs mt-2 opacity-75">
+                      {banner.type === 'rejected' ? '退回時間' : '審核完成時間'}：
+                      {new Date(banner.reviewedAt).toLocaleString()}
+                    </p>
+                  )}
                 </div>
-              )}
-              
-              <div>
-                <label className="block text-base font-medium mb-2" style={{ color: designTokens.colors.textPrimary }}>
-                  單位
-                </label>
-                <select
-                  value={newRecord.unit}
-                  onChange={(e) => setNewRecord(prev => ({ ...prev, unit: e.target.value }))}
-                  className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                  style={{ borderColor: designTokens.colors.border }}
-                >
-                  {unitOptions.map(unit => (
-                    <option key={unit} value={unit}>{unit}</option>
-                  ))}
-                </select>
-              </div>
-              
-              <div>
-                <label className="block text-base font-medium mb-2" style={{ color: designTokens.colors.textPrimary }}>
-                  位置
-                </label>
-                <input
-                  type="text"
-                  value={newRecord.location}
-                  onChange={(e) => setNewRecord(prev => ({ ...prev, location: e.target.value }))}
-                  className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                  style={{ borderColor: designTokens.colors.border }}
-                  placeholder="設備所在位置"
-                />
               </div>
             </div>
+          )}
 
-            <div className="col-span-full">
-              <label className="block text-base font-medium mb-2">
-                滅火器銘牌照片
-              </label>
+          {/* ==================== 舊資料格式警告 ==================== */}
+          {!isReviewMode && entry && !entry.payload?.fireExtinguisherData?.fileMapping && data.records.length > 0 && (
+            <div className="rounded-lg p-4 border-l-4 bg-orange-50 border-orange-500">
+              <div className="flex items-start">
+                <AlertCircle className="h-5 w-5 mt-0.5 mr-3 text-orange-600" />
+                <div>
+                  <h3 className="text-base font-medium text-orange-800 mb-1">舊版資料格式</h3>
+                  <p className="text-base text-gray-700">
+                    此填報使用舊版格式儲存，檔案顯示功能可能受限。建議重新提交以獲得更好的檔案管理體驗。
+                  </p>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* ==================== 檢修表上傳區（全域獨立） ==================== */}
+          <div className="rounded-xl border-l-4 p-6 bg-white border-green-500 shadow-md">
+            <div className="flex items-center mb-4">
+              <Shield className="w-6 h-6 mr-2 text-green-600" />
+              <h2 className="text-2xl font-bold text-gray-900">消防安全設備檢修表</h2>
+            </div>
+            <div>
+              <label className="block text-base font-medium mb-2 text-gray-700">佐證資料</label>
               <EvidenceUpload
                 pageKey={pageKey}
-                files={newRecord.files || []}
-                onFilesChange={(files) => setNewRecord(prev => ({ ...prev, files }))}
-                memoryFiles={newRecord.memoryFiles || []}
-                onMemoryFilesChange={(memFiles) => setNewRecord(prev => ({ ...prev, memoryFiles: memFiles }))}
-                maxFiles={1}
+                files={uploadedInspectionFiles}
+                onFilesChange={setUploadedInspectionFiles}
+                memoryFiles={data.inspectionReports}
+                onMemoryFilesChange={(memFiles) => setData(prev => ({ ...prev, inspectionReports: memFiles }))}
+                maxFiles={3}
+                disabled={submitting || !editPermissions.canUploadFiles || isReadOnly || approvalStatus.isApproved}
                 kind="other"
-                mode="edit"
+                mode={isReadOnly ? "view" : "edit"}
+                            isAdminReviewMode={isReviewMode && role === 'admin'}
               />
-              <p className="text-sm mt-1" style={{ color: designTokens.colors.textSecondary }}>
-                請上傳此滅火器的銘牌照片作為佐證
+              <p className="text-sm mt-1 text-gray-500">
+                {isReviewMode ? '已上傳的消防安全設備檢修表' : '請上傳消防安全設備檢修表或相關證明文件（全年度共用）'}
               </p>
             </div>
-            
-            <button
-              onClick={addRecord}
-              className="px-4 py-2 text-white rounded-lg hover:bg-blue-600 transition-colors flex items-center space-x-2"
-              style={{ backgroundColor: designTokens.colors.blue }}
-            >
-              <Plus className="w-4 h-4" />
-              <span>新增記錄</span>
-            </button>
           </div>
-        )}
 
-        {/* 滅火器記錄列表 */}
-        <div
-          className="rounded-lg border p-6"
-          style={{
-            backgroundColor: designTokens.colors.cardBg,
-            borderColor: designTokens.colors.border,
-            boxShadow: designTokens.shadows.sm
-          }}
-        >
-          <h2
-            className="text-2xl font-medium mb-6"
-            style={{ color: designTokens.colors.textPrimary }}
-          >
-            滅火器記錄列表
-          </h2>
-          <div className="space-y-4">
-            {data.records.map((record) => (
-              <div
-                key={record.id}
-                className="border rounded-lg p-4"
-                style={{
-                  borderColor: designTokens.colors.border,
-                  backgroundColor: '#fafbfc'
-                }}
-              >
-              <div className="flex items-center justify-between mb-3">
-                <div className="flex items-center space-x-4">
-                  <Shield className="w-5 h-5 text-red-600" />
-                  <div className="grid grid-cols-1 md:grid-cols-6 gap-2 text-base">
-                    <div>
-                      <span className="font-medium">{record.equipmentType}</span>
-                    </div>
-                    <div>
-                      <span style={{ color: designTokens.colors.textSecondary }}>
-                        數量: {record.quantity}
-                      </span>
-                    </div>
-                    <div>
-                      <span className={`px-2 py-1 rounded-md text-sm ${
-                        record.isRefilled ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-800'
-                      }`}>
-                        {record.isRefilled ? '已填充' : '未填充'}
-                      </span>
-                    </div>
-                    {record.isRefilled && record.refilledAmount && (
-                      <div>
-                        <span style={{ color: designTokens.colors.textSecondary }}>
-                          填充量: {record.refilledAmount} {record.unit}
-                        </span>
-                      </div>
-                    )}
-                    <div>
-                      <span style={{ color: designTokens.colors.textSecondary }}>
-                        單位: {record.unit}
-                      </span>
-                    </div>
-                    <div>
-                      <span style={{ color: designTokens.colors.textSecondary }}>
-                        位置: {record.location}
-                      </span>
-                    </div>
-                  </div>
-                </div>
-                {editPermissions.canEdit && (
-                  <button
-                    onClick={() => removeRecord(record.id)}
-                    className="p-1 text-red-500 hover:bg-red-50 rounded"
+          {/* ==================== 新增表單 ==================== */}
+          {!isReadOnly && (
+            <div className="rounded-xl border p-6 bg-white shadow-md">
+              <h2 className="text-2xl font-bold mb-6 text-gray-900">新增滅火器記錄</h2>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mb-4">
+                <div>
+                  <label className="block text-base font-medium mb-2 text-gray-700">設備類型</label>
+                  <select
+                    value={newRecord.type}
+                    onChange={(e) => setNewRecord(prev => ({ ...prev, type: e.target.value }))}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                    disabled={submitting}
                   >
-                    <Trash2 className="w-4 h-4" />
-                  </button>
-                )}
-              </div>
-              {(record.files.length > 0 || record.memoryFiles.length > 0) && (
-                <div className="mt-3">
-                  <EvidenceUpload
-                    pageKey={pageKey}
-                    files={record.files}
-                    onFilesChange={(files) => handleRecordFileChange(record.id, files)}
-                    memoryFiles={record.memoryFiles || []}
-                    onMemoryFilesChange={(memFiles) => handleRecordMemoryFileChange(record.id, memFiles)}
-                    maxFiles={1}
-                    disabled={!editPermissions.canUploadFiles}
-                    kind="other"
-                    mode="edit"
+                    {equipmentTypes.map(type => (
+                      <option key={type} value={type}>{type}</option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-base font-medium mb-2 text-gray-700">數量</label>
+                  <input
+                    type="number"
+                    min="1"
+                    value={newRecord.quantity}
+                    onChange={(e) => setNewRecord(prev => ({ ...prev, quantity: parseInt(e.target.value) || 1 }))}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                    disabled={submitting}
                   />
                 </div>
-              )}
-              </div>
-            ))}
-          </div>
-        </div>
 
-        {/* 年度總計 */}
-        {data.records.length > 0 && (
-          <div
-            className="rounded-lg border p-6"
-            style={{
-              backgroundColor: designTokens.colors.cardBg,
-              borderColor: designTokens.colors.border,
-              boxShadow: designTokens.shadows.sm
-            }}
-          >
-            <h3 className="text-2xl font-bold mb-4" style={{ color: designTokens.colors.textPrimary }}>
-              {currentYear} 年度總計
-            </h3>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              <div className="text-center p-4 bg-blue-50 rounded-lg">
-                <p className="text-base" style={{ color: designTokens.colors.textSecondary }}>總設備數量</p>
-                <p className="text-3xl font-bold text-blue-600">{data.totalEquipment} 台</p>
+                <div>
+                  <label className="block text-base font-medium mb-2 text-gray-700">單位</label>
+                  <select
+                    value={newRecord.unit}
+                    onChange={(e) => setNewRecord(prev => ({ ...prev, unit: e.target.value }))}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                    disabled={submitting}
+                  >
+                    {unitOptions.map(unit => (
+                      <option key={unit} value={unit}>{unit}</option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-base font-medium mb-2 text-gray-700">位置</label>
+                  <input
+                    type="text"
+                    value={newRecord.location}
+                    onChange={(e) => setNewRecord(prev => ({ ...prev, location: e.target.value }))}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                    placeholder="例如：1F 走廊、辦公室"
+                    disabled={submitting}
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-base font-medium mb-2 text-gray-700">該年度是否填充</label>
+                  <select
+                    value={newRecord.isRefilled ? 'yes' : 'no'}
+                    onChange={(e) => setNewRecord(prev => ({ ...prev, isRefilled: e.target.value === 'yes' }))}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                    disabled={submitting}
+                  >
+                    <option value="no">否</option>
+                    <option value="yes">是</option>
+                  </select>
+                </div>
               </div>
-              <div className="text-center p-4 bg-green-50 rounded-lg">
-                <p className="text-base" style={{ color: designTokens.colors.textSecondary }}>記錄筆數</p>
-                <p className="text-3xl font-bold text-green-600">{data.records.length} 筆</p>
+
+              <div className="mb-4">
+                <label className="block text-base font-medium mb-2 text-gray-700">滅火器銘牌照片</label>
+                <EvidenceUpload
+                  pageKey={pageKey}
+                  files={[]}
+                  onFilesChange={() => {}}
+                  memoryFiles={newRecord.nameplatePhotos}
+                  onMemoryFilesChange={(memFiles) => setNewRecord(prev => ({ ...prev, nameplatePhotos: memFiles }))}
+                  maxFiles={3}
+                  kind="other"
+                  mode="edit"
+                  disabled={submitting}
+                  isAdminReviewMode={isReviewMode && role === 'admin'}
+                />
+                <p className="text-sm mt-1 text-gray-500">請上傳此滅火器的銘牌照片作為佐證</p>
+              </div>
+
+              <div className="flex justify-center">
+                <button
+                  onClick={handleAddRecord}
+                  className="px-6 py-3 bg-green-600 text-white text-lg font-bold rounded-lg hover:bg-green-700 transition-all shadow-md flex items-center space-x-2"
+                  disabled={submitting}
+                >
+                  <Plus className="w-5 h-5" />
+                  <span>新增記錄</span>
+                </button>
               </div>
             </div>
-          </div>
-        )}
+          )}
 
-        {/* 成功/錯誤提示 */}
-        {showSuccess && (
-          <div className="fixed top-4 right-4 bg-green-500 text-white px-6 py-3 rounded-lg shadow-lg flex items-center space-x-2 z-50">
-            <CheckCircle className="w-5 h-5" />
-            <span>數據已成功提交！</span>
-          </div>
-        )}
+          {/* ==================== 滅火器清單 ==================== */}
+          {data.records.length > 0 && (
+            <div>
+              <h2 className="text-2xl font-bold mb-4 text-gray-900">滅火器清單</h2>
+              <div className="space-y-4">
+                {data.records.map((record, index) => {
+                  const recordFiles = getRecordFiles(record.id, files)
+                  console.log('🔍 [Render] 記錄檔案:', record.id, '→', recordFiles.length, '個檔案')
 
-        {showError && (
-          <div className="fixed top-4 right-4 bg-red-500 text-white px-6 py-3 rounded-lg shadow-lg flex items-center space-x-2 z-50">
-            <AlertCircle className="w-5 h-5" />
-            <span>{errorMessage}</span>
-            <button onClick={() => setShowError(false)} className="ml-2 hover:bg-red-600 rounded p-1">×</button>
-          </div>
-        )}
+                  return (
+                    <div key={record.id} className="rounded-xl p-6 bg-white shadow-lg border border-gray-200">
+                      <div className="flex items-start justify-between mb-4">
+                        <div className="flex items-center space-x-3">
+                          <Shield className="w-6 h-6 text-red-600 flex-shrink-0" />
+                          <div>
+                            <h3 className="text-xl font-bold text-gray-800">{record.type}</h3>
+                            <p className="text-sm text-gray-500">位置：{record.location}</p>
+                          </div>
+                        </div>
+                        {!isReadOnly && (
+                          <button
+                            onClick={() => handleDeleteRecord(record.id)}
+                            className="p-2 text-red-500 hover:bg-red-50 rounded-lg transition-colors"
+                            title="刪除此記錄"
+                            disabled={submitting}
+                          >
+                            <Trash2 className="w-5 h-5" />
+                          </button>
+                        )}
+                      </div>
+
+                      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4">
+                        <div className="bg-gray-50 rounded-lg p-3">
+                          <p className="text-xs text-gray-500 mb-1">數量</p>
+                          <p className="text-lg font-bold text-gray-800">{record.quantity}</p>
+                        </div>
+                        <div className="bg-gray-50 rounded-lg p-3">
+                          <p className="text-xs text-gray-500 mb-1">單位</p>
+                          <p className="text-lg font-bold text-gray-800">{record.unit}</p>
+                        </div>
+                        <div className="bg-gray-50 rounded-lg p-3">
+                          <p className="text-xs text-gray-500 mb-1">填充狀態</p>
+                          <span className={`inline-block px-3 py-1 rounded-full text-sm font-medium ${
+                            record.isRefilled ? 'bg-green-100 text-green-800' : 'bg-gray-200 text-gray-700'
+                          }`}>
+                            {record.isRefilled ? '已填充' : '未填充'}
+                          </span>
+                        </div>
+                      </div>
+
+                      <div className="border-t pt-4">
+                        <label className="block text-sm font-medium mb-2 text-gray-700">銘牌照片</label>
+                        <EvidenceUpload
+                          pageKey={pageKey}
+                          files={recordFiles}
+                          onFilesChange={() => {}}
+                          memoryFiles={record.nameplatePhotos}
+                          onMemoryFilesChange={(memFiles) => {
+                            setData(prev => ({
+                              ...prev,
+                              records: prev.records.map(r =>
+                                r.id === record.id ? { ...r, nameplatePhotos: memFiles } : r
+                              )
+                            }))
+                          }}
+                          maxFiles={3}
+                          disabled={submitting || isReadOnly || approvalStatus.isApproved}
+                          kind="other"
+                          mode={isReadOnly ? 'view' : 'edit'}
+                      isAdminReviewMode={isReviewMode && role === 'admin'}
+                        />
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+            </div>
+          )}
+
+          {/* ==================== 年度總計 ==================== */}
+          {data.records.length > 0 && (
+            <div className="rounded-xl border p-6 bg-white shadow-md">
+              <h3 className="text-2xl font-bold mb-4 text-gray-900">{currentYear} 年度總計</h3>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div className="text-center p-4 bg-blue-50 rounded-lg">
+                  <p className="text-base text-gray-600">總設備數量</p>
+                  <p className="text-3xl font-bold text-blue-600">{totalQuantity} 支</p>
+                </div>
+                <div className="text-center p-4 bg-green-50 rounded-lg">
+                  <p className="text-base text-gray-600">記錄筆數</p>
+                  <p className="text-3xl font-bold text-green-600">{data.records.length} 筆</p>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* ==================== 審核模式資訊 ==================== */}
+          {isReviewMode && entry && (
+            <div className="rounded-lg border-2 p-6 bg-yellow-50 border-yellow-500">
+              <div className="flex items-start">
+                <AlertCircle className="h-6 w-6 mt-0.5 mr-3 flex-shrink-0 text-yellow-600" />
+                <div>
+                  <h3 className="text-lg font-bold mb-2 text-yellow-800">管理員審核模式</h3>
+                  <div className="text-base text-gray-700 space-y-2">
+                    <p><strong>填報內容總覽：</strong></p>
+                    <ul className="list-disc list-inside space-y-1 ml-2">
+                      <li>消防安全設備檢修表：共 {uploadedInspectionFiles.length} 個檔案</li>
+                      <li>滅火器記錄：共 {data.records.length} 筆記錄</li>
+                      <li>總設備數量：{totalQuantity} 支</li>
+                    </ul>
+                    <p className="mt-3 text-sm text-gray-600">
+                      請仔細檢查上方所有資料是否完整正確，然後在下方審核區進行審核操作。
+                    </p>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* ==================== 審核區段 ==================== */}
+          {isReviewMode && entry && (
+            <ReviewSection
+              entryId={entry.id}
+              userId={entry.owner_id}
+              category="滅火器"
+              amount={totalQuantity}
+              unit="支"
+              role={role}
+              onSave={handleSave}
+              isSaving={submitting}
+            />
+          )}
+
+          {/* ==================== 成功提示 ==================== */}
+          {showSuccess && (
+            <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+              <div className="bg-white rounded-lg p-8 max-w-md w-full mx-4 relative">
+                <button onClick={() => setShowSuccess(false)} className="absolute top-4 right-4 text-gray-400 hover:text-gray-600">×</button>
+                <div className="text-center">
+                  <div className="mx-auto flex items-center justify-center h-16 w-16 rounded-full bg-green-100 mb-4">
+                    <CheckCircle className="h-10 w-10 text-green-600" />
+                  </div>
+                  <h3 className="text-lg font-medium text-gray-900 mb-2">操作成功</h3>
+                  <p className="text-base text-gray-500 mb-6">
+                    滅火器填報已成功提交，總設備數量 {totalQuantity} 支
+                  </p>
+                  <button onClick={() => setShowSuccess(false)} className="w-full px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors">
+                    確定
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* ==================== 錯誤提示 ==================== */}
+          {showError && (
+            <div className="fixed top-4 right-4 bg-red-500 text-white px-6 py-3 rounded-lg shadow-lg flex items-center space-x-2 z-50">
+              <AlertCircle className="w-5 h-5" />
+              <span>{errorMessage}</span>
+              <button onClick={() => setShowError(false)} className="ml-2 hover:bg-red-600 rounded p-1">×</button>
+            </div>
+          )}
+        </div>
+
+        {/* 底部空間 */}
+        <div className="h-20" />
       </div>
 
-        {/* 底部空間，避免內容被固定底部欄遮擋 */}
-        <div className="h-20"></div>
-      </div>
-
-        {/* 統一底部操作欄 */}
+      {/* ==================== 底部操作欄 ==================== */}
+      {!isReadOnly && !isReviewMode && (
         <BottomActionBar
-        currentStatus={currentStatus}
-        currentEntryId={currentEntryId}
-        isUpdating={false}
-        hasSubmittedBefore={hasSubmittedBefore}
-        editPermissions={editPermissions}
-        submitting={submitting}
-        onSubmit={handleSubmit}
-        onClear={handleClear}
-        designTokens={designTokens}
-      />
+          currentStatus={currentStatus}
+          currentEntryId={entry?.id || null}
+          isUpdating={false}
+          hasSubmittedBefore={!!entry}
+          banner={banner}
+          editPermissions={editPermissions}
+          submitting={submitting}
+          saving={submitting}
+          onSubmit={handleSubmit}
+          onSave={handleSave}
+          onClear={handleClear}
+          designTokens={designTokens}
+        />
+      )}
     </>
   )
 }

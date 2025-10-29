@@ -35,13 +35,7 @@ const CreateUser: React.FC = () => {
     email: [rules.required('電子郵件為必填欄位'), rules.email()],
     password: [rules.required('密碼為必填欄位'), rules.password()],
     company: [rules.required('公司名稱為必填欄位')],
-    targetYear: [rules.required('目標年份為必填欄位'), rules.custom(
-      (value: number) => {
-        const currentYear = new Date().getFullYear()
-        return value >= currentYear && value <= currentYear + 10
-      },
-      `目標年份必須在 ${new Date().getFullYear()} 到 ${new Date().getFullYear() + 10} 之間`
-    )],
+    targetYear: [rules.required('目標年份為必填欄位')],
     energyCategories: [rules.arrayMinLength(1, '至少需要選擇一個能源類別')]
   }
 

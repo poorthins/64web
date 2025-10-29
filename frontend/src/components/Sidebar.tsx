@@ -249,20 +249,6 @@ export default function Sidebar() {
                     <span>統計詳情</span>
                   </div>
                 </button>
-
-                <button
-                  onClick={() => navigate('/app/admin/submissions')}
-                  className={`w-full text-left px-4 py-3 rounded-lg text-sm transition-all duration-200 ${
-                    location.pathname === '/app/admin/submissions'
-                      ? 'bg-brand-700 text-white font-medium'
-                      : 'text-brand-100 hover:bg-brand-700'
-                  }`}
-                >
-                  <div className="flex items-center space-x-3">
-                    <span>📝</span>
-                    <span>填報管理</span>
-                  </div>
-                </button>
               </div>
             </div>
           )}

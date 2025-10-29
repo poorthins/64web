@@ -11,6 +11,14 @@ import EvidenceUpload from '../../components/EvidenceUpload'
 import { useEditPermissions } from '../../hooks/useEditPermissions'
 import { useFrontendStatus } from '../../hooks/useFrontendStatus'
 import { useApprovalStatus } from '../../hooks/useApprovalStatus'
+import { useStatusBanner, getBannerColorClasses } from '../../hooks/useStatusBanner'
+import { useEnergyPageLoader } from '../../hooks/useEnergyPageLoader'
+import { useEnergySubmit } from '../../hooks/useEnergySubmit'
+import { useEnergyClear } from '../../hooks/useEnergyClear'
+import { useSubmitGuard } from '../../hooks/useSubmitGuard'
+import { useReloadWithFileSync } from '../../hooks/useReloadWithFileSync'
+import { useRole } from '../../hooks/useRole'
+import { useAdminSave } from '../../hooks/useAdminSave'
 import {
   commitEvidence,
   debugDatabaseContent,
@@ -34,41 +42,10 @@ import { logDetailedAuthStatus } from '../../utils/authHelpers'
 
 // 增強的檔案去重工具函數
 function deduplicateFilesByID(files: EvidenceFile[], context: string = ''): EvidenceFile[] {
-  console.log(`🔄 [${context}] Starting deduplication:`, {
-    input_count: files.length,
-    input_files: files.map(f => ({
-      id: f.id,
-      name: f.file_name,
-      entry_id: f.entry_id,
-      file_type: f.file_type,
-      month: f.month
-    }))
-  })
-
   // 按 ID 去重，如果有重複的 ID，優先保留最新的（created_at 最新）
   const deduplicated = Array.from(
     new Map(files.map(file => [file.id, file])).values()
   )
-
-  if (files.length !== deduplicated.length) {
-    const duplicateIds = files
-      .filter((file, index, array) =>
-        array.findIndex(f => f.id === file.id) !== index
-      )
-      .map(f => f.id)
-
-    console.log(`🔄 [${context}] File deduplication completed:`, {
-      original_count: files.length,
-      deduplicated_count: deduplicated.length,
-      removed_duplicates: files.length - deduplicated.length,
-      duplicate_ids: [...new Set(duplicateIds)],
-      final_files: deduplicated.map(f => ({
-        id: f.id,
-        name: f.file_name,
-        entry_id: f.entry_id
-      }))
-    })
-  }
 
   return deduplicated
 }
@@ -99,8 +76,8 @@ const WD40Page = () => {
   const reviewUserId = searchParams.get('userId')
 
   const [loading, setLoading] = useState(true)
-  const [clearLoading, setClearLoading] = useState(false)
-  const [submitting, setSubmitting] = useState(false)
+  // 防止重複提交
+  const { executeSubmit, submitting } = useSubmitGuard()
   const [error, setError] = useState<string | null>(null)
   const [success, setSuccess] = useState<string | null>(null)
   const [hasSubmittedBefore, setHasSubmittedBefore] = useState(false)
@@ -117,29 +94,120 @@ const WD40Page = () => {
     entryId: currentEntryId,
     onStatusChange: (newStatus) => {
       // 狀態變更時的回調處理
-      console.log('Status changed to:', newStatus)
     },
     onError: (error) => setError(error),
     onSuccess: (message) => {
       // 使用 Toast 顯示狀態變更通知
       setToast({ message, type: 'success' })
-      
+
       // 同時設置 success 用於傳統的成功訊息顯示
       setSuccess(message)
     }
   })
 
-  const { currentStatus, handleDataChanged, handleSubmitSuccess, isInitialLoad } = frontendStatus
+  const { currentStatus, setCurrentStatus, handleDataChanged, handleSubmitSuccess, isInitialLoad } = frontendStatus
 
   // 審核 API hook
   const { reviewSubmission } = useSubmissions()
+
+  // 角色檢查
+  const { role } = useRole()
 
   // 表單資料
   const [year] = useState(new Date().getFullYear())
   const pageKey = 'wd40'
 
+  // 資料載入 Hook - 統一處理 entry 和 files 的載入與分類
+  const entryIdToLoad = isReviewMode && reviewEntryId ? reviewEntryId : undefined
+  const {
+    entry: loadedEntry,
+    files: loadedFiles,
+    loading: dataLoading,
+    error: dataError,
+    reload
+  } = useEnergyPageLoader({
+    pageKey,
+    year,
+    entryId: entryIdToLoad,
+    onEntryLoad: (entry) => {
+      // 載入基本參數（新結構優先，舊結構備用）
+      if (entry.payload.unitCapacity !== undefined) {
+        setUnitCapacity(entry.payload.unitCapacity || 0)
+        setCarbonRate(entry.payload.carbonRate || 0)
+      } else if (entry.payload.notes) {
+        // 從舊結構的 notes 解析
+        const unitMatch = entry.payload.notes.match(/單位容量: ([\d.]+)/)
+        const carbonMatch = entry.payload.notes.match(/含碳率: ([\d.]+)/)
+        if (unitMatch) setUnitCapacity(parseFloat(unitMatch[1]) || 0)
+        if (carbonMatch) setCarbonRate(parseFloat(carbonMatch[1]) || 0)
+      }
+
+      const entryStatus = entry.status as EntryStatus
+      setCurrentEntryId(entry.id)
+      setHasSubmittedBefore(true)
+      setInitialStatus(entryStatus)
+      setCurrentStatus(entryStatus)  // 同步前端狀態
+      setExistingEntry(entry)
+
+      // 載入月份數據
+      if (entry.payload.monthly) {
+        const newMonthlyData = Array.from({ length: 12 }, (_, i) => {
+          const month = i + 1
+          const monthKey = month.toString()
+          const quantity = entry.payload.monthlyQuantity?.[monthKey] || 0
+          const totalUsage = entry.payload.monthly[monthKey] || 0
+          return {
+            month,
+            quantity,
+            totalUsage,
+            files: []
+          }
+        })
+        setMonthlyData(newMonthlyData)
+      }
+    },
+    onFilesLoad: (files) => {
+      // 分類 MSDS 檔案
+      const msds = files.filter(f => f.file_type === 'msds')
+      setMsdsFiles(msds)
+
+      // 分配月份檔案（避免重複）
+      setMonthlyData(prev => prev.map(data => ({
+        ...data,
+        files: files.filter(f => f.file_type === 'usage_evidence' && f.month === data.month)
+      })))
+    }
+  })
+
   // 審核狀態檢查 Hook
-  const approvalStatus = useApprovalStatus(pageKey, year)
+  const { reload: reloadApprovalStatus, ...approvalStatus } = useApprovalStatus(pageKey, year)
+
+  // 狀態橫幅 Hook
+  const banner = useStatusBanner(approvalStatus, isReviewMode)
+
+  // 提交 Hook
+  const {
+    submit,
+    save,
+    submitting: submitLoading,
+    error: submitError,
+    success: submitSuccess,
+    clearError: clearSubmitError,
+    clearSuccess: clearSubmitSuccess
+  } = useEnergySubmit(pageKey, year, approvalStatus.status)  // ✅ 使用資料庫狀態，不是前端狀態
+
+  // 清除 Hook
+  const {
+    clear,
+    clearing: clearLoading,
+    error: clearError,
+    clearError: clearClearError
+  } = useEnergyClear(currentEntryId, currentStatus)
+
+
+  // 檔案同步 reload Hook
+  const { reloadAndSync } = useReloadWithFileSync(reload)
+
   const [unitCapacity, setUnitCapacity] = useState<number>(0)
   const [carbonRate, setCarbonRate] = useState<number>(0)
   const [monthlyData, setMonthlyData] = useState<MonthData[]>(
@@ -165,7 +233,7 @@ const WD40Page = () => {
   )
 
   // 編輯權限控制
-  const editPermissions = useEditPermissions(currentStatus || 'draft')
+  const editPermissions = useEditPermissions(currentStatus || 'saved')
   
   // 判斷是否有資料
   const hasAnyData = useMemo(() => {
@@ -175,8 +243,11 @@ const WD40Page = () => {
     return hasMonthlyData || hasBasicData || hasMemoryFiles
   }, [monthlyData, unitCapacity, carbonRate, msdsMemoryFiles, monthlyMemoryFiles])
   
-  // 允許所有狀態編輯
-  const isReadOnly = false
+  // 審核模式下只有管理員可編輯
+  const isReadOnly = isReviewMode && role !== 'admin'
+
+  // 管理員審核儲存 Hook
+  const { save: adminSave, saving: adminSaving } = useAdminSave(pageKey, reviewEntryId)
 
   const monthNames = [
     '1月', '2月', '3月', '4月', '5月', '6月',
@@ -202,349 +273,6 @@ const WD40Page = () => {
     }
   }, [])
 
-  // 載入檔案和資料（支援完整編輯功能）
-  useEffect(() => {
-    const loadData = async () => {
-      try {
-        // === 診斷程式碼開始 ===
-        console.log('🔍 [WD40] loadData 開始執行', {
-          pageKey: 'wd40',
-          year,
-          timestamp: new Date().toISOString()
-        })
-
-        const { data: { user } } = await supabase.auth.getUser()
-        console.log('👤 [WD40] 當前用戶:', user?.id)
-
-        const { data: rawData, error: rawError } = await supabase
-          .from('energy_entries')
-          .select('*')
-          .eq('page_key', 'wd40')
-          .eq('owner_id', user?.id)
-          .eq('period_year', year)
-
-        console.log('📊 [WD40] 查詢結果:', {
-          找到記錄數: rawData?.length || 0,
-          錯誤訊息: rawError?.message || null,
-          第一筆資料: rawData?.[0] || null
-        })
-        // === 診斷程式碼結束 ===
-
-        setLoading(true)
-        setError(null)
-
-        // 審核模式除錯
-        console.log('🔍 [WD40Page] 審核模式除錯:', {
-          isReviewMode,
-          reviewEntryId,
-          reviewUserId,
-          currentUrl: window.location.href
-        })
-
-        // 清理所有舊狀態，避免重複顯示
-        console.log('🧹 [WD40Page] Clearing previous state')
-        setMsdsFiles([])
-        setMsdsMemoryFiles([])
-        setMonthlyMemoryFiles(Array.from({ length: 12 }, () => []))
-        setMonthlyData(Array.from({ length: 12 }, (_, i) => ({
-          month: i + 1,
-          quantity: 0,
-          totalUsage: 0,
-          files: []
-        })))
-
-        // 載入基本資料
-        let existingEntry
-        if (isReviewMode && reviewEntryId) {
-          console.log('🔍 [WD40Page] 審核模式 - 載入特定記錄:', reviewEntryId)
-          existingEntry = await getEntryById(reviewEntryId)
-        } else {
-          console.log('🔍 [WD40Page] 一般模式 - 載入用戶自己的記錄')
-          existingEntry = await getEntryByPageKeyAndYear(pageKey, year)
-        }
-
-        console.log('🚀 [WD40Page] Starting file loading process:', {
-          pageKey,
-          year,
-          hasExistingEntry: !!existingEntry
-        })
-
-        // 如果有現有記錄，載入資料
-        if (existingEntry) {
-          console.log('✅ [WD40] Loading existing entry:', {
-            id: existingEntry.id,
-            status: existingEntry.status,
-            hasPayload: !!existingEntry.payload,
-            monthlyKeys: Object.keys(existingEntry.payload?.monthly || {})
-          })
-
-          setExistingEntry(existingEntry)
-          // 只有非草稿狀態才算真正提交過
-          setHasSubmittedBefore(existingEntry.status !== 'draft')
-          setCurrentEntryId(existingEntry.id)
-          setInitialStatus(existingEntry.status as EntryStatus)
-
-          // 只有非草稿狀態才載入檔案，草稿狀態使用記憶體暫存
-          const shouldLoadFiles = existingEntry.status !== 'draft'
-          console.log('📁 [WD40Page] File loading decision:', {
-            status: existingEntry.status,
-            shouldLoadFiles
-          })
-
-          // 載入表單資料
-          if (existingEntry.payload?.monthly) {
-            const entryMonthly = existingEntry.payload.monthly
-
-            // 載入基本參數（新結構優先，舊結構備用）
-            let loadedUnitCapacity = 0
-            let loadedCarbonRate = 0
-
-            console.log('📝 [WD40] Loading parameters from payload:', {
-              hasNewStructure: !!(existingEntry.payload.unitCapacity && existingEntry.payload.carbonRate),
-              unitCapacity: existingEntry.payload.unitCapacity,
-              carbonRate: existingEntry.payload.carbonRate,
-              hasNotes: !!existingEntry.payload.notes
-            })
-
-            // 優先使用新結構的資料
-            if (existingEntry.payload.unitCapacity && existingEntry.payload.carbonRate) {
-              loadedUnitCapacity = existingEntry.payload.unitCapacity
-              loadedCarbonRate = existingEntry.payload.carbonRate
-              console.log('✅ [WD40] Using new structure data:', { loadedUnitCapacity, loadedCarbonRate })
-            }
-            // 回退到舊結構（從 notes 解析）
-            else if (existingEntry.payload.notes) {
-              console.log('⚠️ [WD40] Falling back to parsing notes for legacy data')
-              const unitCapacityMatch = existingEntry.payload.notes.match(/單位容量: ([\d.]+)/)
-              const carbonRateMatch = existingEntry.payload.notes.match(/含碳率: ([\d.]+)/)
-
-              if (unitCapacityMatch) {
-                loadedUnitCapacity = parseFloat(unitCapacityMatch[1]) || 0
-              }
-              if (carbonRateMatch) {
-                loadedCarbonRate = parseFloat(carbonRateMatch[1]) || 0
-              }
-              console.log('📊 [WD40] Parsed from notes:', { loadedUnitCapacity, loadedCarbonRate })
-            }
-
-            setUnitCapacity(loadedUnitCapacity)
-            setCarbonRate(loadedCarbonRate)
-
-            // 恢復各月份的數量資料（新結構優先）
-            const restoredMonthlyData = monthlyData.map((data, index) => {
-              const monthKey = (index + 1).toString()
-              const monthUsage = entryMonthly[monthKey] || 0
-
-              let quantity = 0
-
-              // 優先使用新結構的瓶數資料
-              if (existingEntry.payload.monthlyQuantity && existingEntry.payload.monthlyQuantity[monthKey]) {
-                quantity = existingEntry.payload.monthlyQuantity[monthKey]
-                console.log(`📅 [WD40] Month ${monthKey}: Using stored quantity ${quantity}`)
-              }
-              // 回退到計算瓶數（舊邏輯）
-              else if (monthUsage > 0 && loadedUnitCapacity > 0) {
-                quantity = monthUsage / loadedUnitCapacity
-                console.log(`📅 [WD40] Month ${monthKey}: Calculated quantity ${quantity} from usage ${monthUsage} / unitCapacity ${loadedUnitCapacity}`)
-              }
-
-              return {
-                ...data,
-                quantity,
-                totalUsage: monthUsage
-              }
-            })
-            
-            console.log('📝 [WD40] Entry details:', {
-              entryId: existingEntry.id,
-              payloadKeys: Object.keys(existingEntry.payload || {}),
-              monthlyKeys: Object.keys(existingEntry.payload?.monthly || {})
-            })
-
-            // 診斷資料庫內容
-            await debugDatabaseContent()
-
-            // 載入檔案：只有非草稿狀態才載入檔案
-            if (shouldLoadFiles) {
-              try {
-                console.log('📁 [WD40Page] Loading files for existing entry:', existingEntry.id)
-
-              // 使用 getEntryFiles 獲取該記錄的所有檔案
-              const allEntryFiles = await getEntryFiles(existingEntry.id)
-
-              console.log('📁 [WD40Page] Raw entry files:', {
-                entryId: existingEntry.id,
-                totalFiles: allEntryFiles.length,
-                fileDetails: allEntryFiles.map(f => ({
-                  id: f.id,
-                  name: f.file_name,
-                  type: f.file_type,
-                  month: f.month,
-                  page_key: f.page_key,
-                  entry_id: f.entry_id
-                }))
-              })
-
-              // 新增詳細的路徑診斷
-              console.log('📋 從資料庫載入的檔案路徑分析:', allEntryFiles.map(f => ({
-                id: f.id,
-                file_path: f.file_path,
-                file_name: f.file_name,
-                路徑是否為空: !f.file_path,
-                路徑長度: f.file_path?.length,
-                路徑格式: {
-                  包含evidence: f.file_path?.includes('evidence'),
-                  包含用戶ID: f.file_path?.includes('/'),
-                  開頭: f.file_path?.substring(0, 30),
-                  結尾: f.file_path?.substring(f.file_path.length - 30)
-                },
-                檔案大小: f.file_size,
-                MIME類型: f.mime_type,
-                建立時間: f.created_at
-              })))
-
-              // 檢查是否有路徑異常的檔案
-              const invalidPaths = allEntryFiles.filter(f =>
-                !f.file_path ||
-                f.file_path === 'null' ||
-                f.file_path === 'undefined' ||
-                f.file_path.length === 0
-              )
-
-              if (invalidPaths.length > 0) {
-                console.error('❌ [WD40Page] 發現無效的檔案路徑:', invalidPaths.map(f => ({
-                  id: f.id,
-                  file_name: f.file_name,
-                  file_path: f.file_path,
-                  問題: '路徑無效或為空'
-                })))
-              }
-
-              // 分析路徑模式
-              const pathPatterns = allEntryFiles.map(f => f.file_path).filter(Boolean)
-              const uniquePatterns = [...new Set(pathPatterns.map(path => {
-                const parts = path.split('/')
-                return parts.length > 1 ? `${parts[0]}/.../...` : path
-              }))]
-
-              console.log('📊 [WD40Page] 檔案路徑模式分析:', {
-                總檔案數: allEntryFiles.length,
-                有效路徑數: pathPatterns.length,
-                路徑模式: uniquePatterns,
-                示例路徑: pathPatterns.slice(0, 3)
-              })
-
-              // 分類檔案
-              const msdsFilesFromEntry = allEntryFiles.filter(f =>
-                f.file_type === 'msds' && f.page_key === pageKey
-              )
-              const usageFilesFromEntry = allEntryFiles.filter(f =>
-                f.file_type === 'usage_evidence' && f.page_key === pageKey
-              )
-
-              console.log('📁 [WD40Page] File classification:', {
-                msdsCount: msdsFilesFromEntry.length,
-                usageCount: usageFilesFromEntry.length,
-                msdsFileIds: msdsFilesFromEntry.map(f => f.id),
-                usageFileIds: usageFilesFromEntry.map(f => f.id)
-              })
-
-              // 設置 MSDS 檔案（加入去重和診斷）
-              const deduplicatedMsdsFiles = deduplicateFilesByID(msdsFilesFromEntry, 'WD40Page-MSDS-Entry')
-              console.log('🔄 [WD40Page] MSDS deduplication result:', {
-                original: msdsFilesFromEntry.length,
-                deduplicated: deduplicatedMsdsFiles.length
-              })
-              setMsdsFiles(deduplicatedMsdsFiles)
-
-              // 分配月份檔案（加入診斷）
-              const updatedMonthlyData = restoredMonthlyData.map((data, index) => {
-                const monthNumber = index + 1
-                const monthFiles = usageFilesFromEntry.filter(f => f.month === monthNumber)
-                const deduplicatedFiles = deduplicateFilesByID(monthFiles, `WD40Page-Month${monthNumber}-Entry`)
-
-                console.log(`📅 [WD40Page] Month ${monthNumber} files:`, {
-                  found: monthFiles.length,
-                  deduplicated: deduplicatedFiles.length,
-                  fileIds: deduplicatedFiles.map(f => f.id)
-                })
-
-                return {
-                  ...data,
-                  files: deduplicatedFiles
-                }
-              })
-
-              console.log('📅 [WD40Page] Final monthly data summary:',
-                updatedMonthlyData.map((data, i) =>
-                  `月${i+1}: ${data.files.length}個檔案`
-                ).join(', ')
-              )
-
-              setMonthlyData(updatedMonthlyData)
-              } catch (fileError) {
-                console.error('❌ [WD40Page] Failed to load files:', fileError)
-                // 即使檔案載入失敗，也要設置恢復的月份資料
-                setMonthlyData(restoredMonthlyData)
-              }
-            } else {
-              // 草稿狀態：不載入檔案，使用記憶體暫存
-              console.log('📁 [WD40Page] Draft status - using memory files instead of loading existing files')
-              setMsdsFiles([])
-              setMonthlyData(restoredMonthlyData.map(data => ({ ...data, files: [] })))
-            }
-          }
-        } else {
-          // 新記錄處理：不載入任何檔案，使用記憶體暫存
-          console.log('📝 [WD40Page] No existing entry found, starting with clean state for memory file usage')
-          setExistingEntry(null)
-          setHasSubmittedBefore(false)
-          setCurrentEntryId(null)
-          setInitialStatus('draft' as EntryStatus)
-
-          // 保持檔案狀態為空，讓用戶使用記憶體暫存功能
-          setMsdsFiles([])
-          setMonthlyData(Array.from({ length: 12 }, (_, i) => ({
-            month: i + 1,
-            quantity: 0,
-            totalUsage: 0,
-            files: []
-          })))
-
-          console.log('📁 [WD40Page] New record initialized with empty file states for memory file usage')
-        }
-
-        isInitialLoad.current = false
-
-        // 審核模式載入完成除錯
-        if (isReviewMode) {
-          console.log('🔍 [WD40Page] 審核模式載入完成:', {
-            entryExists: !!existingEntry,
-            entryId: existingEntry?.id,
-            entryOwnerId: existingEntry?.owner_id,
-            reviewEntryId,
-            reviewUserId,
-            msdsFilesCount: msdsFiles.length,
-            monthlyDataFiles: monthlyData.map((data, i) => ({
-              month: i + 1,
-              quantity: data.quantity,
-              filesCount: data.files.length,
-              fileIds: data.files.map(f => f.id)
-            })),
-            totalFiles: msdsFiles.length + monthlyData.reduce((sum, data) => sum + data.files.length, 0)
-          })
-        }
-
-      } catch (error) {
-        console.error('載入資料失敗:', error)
-        setError(error instanceof Error ? error.message : '載入失敗')
-      } finally {
-        setLoading(false)
-      }
-    }
-
-    loadData()
-  }, [isReviewMode, reviewEntryId, reviewUserId])
 
   // 計算總使用量
   useEffect(() => {
@@ -607,12 +335,10 @@ const WD40Page = () => {
 
   // 記憶體檔案處理函數
   const handleMsdsMemoryFilesChange = (files: MemoryFile[]) => {
-    console.log('📁 [WD40Page] MSDS memory files changed:', files.length)
     setMsdsMemoryFiles(files)
   }
 
   const handleMonthMemoryFilesChange = (month: number, files: MemoryFile[]) => {
-    console.log(`📁 [WD40Page] Month ${month} memory files changed:`, files.length)
     setMonthlyMemoryFiles(prev => {
       const newFiles = [...prev]
       newFiles[month - 1] = files
@@ -627,29 +353,8 @@ const WD40Page = () => {
   const validateData = () => {
     const errors: string[] = []
 
-    console.log('📋 [Validation] Starting validation with current state:', {
-      msdsFiles: msdsFiles.length,
-      msdsMemoryFiles: msdsMemoryFiles.length,
-      monthlyData: monthlyData.map(data => ({
-        month: data.month,
-        quantity: data.quantity,
-        files: data.files.length
-      })),
-      monthlyMemoryFiles: monthlyMemoryFiles.map((files, i) => ({
-        month: i + 1,
-        memoryFiles: files.length
-      })),
-      unitCapacity,
-      carbonRate
-    })
-
     // MSDS 檢查：已上傳檔案 OR 記憶體檔案
     const totalMsdsFiles = msdsFiles.length + msdsMemoryFiles.length
-    console.log('📋 [Validation] MSDS files check:', {
-      msdsFiles: msdsFiles.length,
-      msdsMemoryFiles: msdsMemoryFiles.length,
-      total: totalMsdsFiles
-    })
 
     if (totalMsdsFiles === 0) {
       errors.push('請上傳 MSDS 安全資料表')
@@ -669,63 +374,28 @@ const WD40Page = () => {
         const monthMemoryFiles = monthlyMemoryFiles[index] || []
         const totalFiles = data.files.length + monthMemoryFiles.length
 
-        console.log(`📋 [Validation] Month ${data.month} files check:`, {
-          quantity: data.quantity,
-          uploadedFiles: data.files.length,
-          memoryFiles: monthMemoryFiles.length,
-          total: totalFiles
-        })
-
         if (totalFiles === 0) {
           errors.push(`${monthNames[index]}有使用量但未上傳使用證明`)
         }
       }
     })
 
-    console.log('📋 [Validation] Validation completed:', {
-      totalErrors: errors.length,
-      errors: errors,
-      result: errors.length === 0 ? 'PASS' : 'FAIL'
-    })
-
     return errors
   }
 
   const handleSubmit = async () => {
-    console.log('=== WD-40 提交除錯開始 ===')
-    
+    // 驗證資料
     const errors = validateData()
     if (errors.length > 0) {
       setError('請修正以下問題：\n' + errors.join('\n'))
       return
     }
 
-    setSubmitting(true)
-    setError(null)
-    setSuccess(null)
+    await executeSubmit(async () => {
+      setError(null)
+      setSuccess(null)
 
-    try {
-      // 步驟1：詳細認證狀態診斷
-      console.log('🔍 執行詳細認證診斷...')
-      await logDetailedAuthStatus()
-      
-      const authDiagnosis = await diagnoseAuthState()
-      if (!authDiagnosis.isAuthenticated) {
-        console.error('❌ 認證診斷失敗:', authDiagnosis)
-        throw new Error(`認證失效: ${authDiagnosis.userError?.message || authDiagnosis.sessionError?.message || '未知原因'}`)
-      }
-
-      // 步驟2：檢查當前表單狀態
-      console.log('📊 當前表單狀態:', {
-        pageKey,
-        year,
-        unitCapacity,
-        carbonRate,
-        monthlyDataCount: monthlyData.length,
-        hasData: monthlyData.some(d => d.quantity > 0)
-      })
-
-      // 步驟3：準備每月數據
+      // 準備每月數據
       const monthly: Record<string, number> = {}
       const monthlyQuantity: Record<string, number> = {}
       monthlyData.forEach(data => {
@@ -734,268 +404,149 @@ const WD40Page = () => {
           monthlyQuantity[data.month.toString()] = data.quantity
         }
       })
-      console.log('📋 處理後的每月數據:', { monthly, monthlyQuantity })
 
-      // 步驟4：建立填報輸入資料（使用新的 payload 結構）
-      const entryInput: UpsertEntryInput = {
-        page_key: pageKey,
-        period_year: year,
-        unit: 'ML',
-        monthly: monthly,
-        extraPayload: {
+      // 呼叫 Hook 提交
+      const entry_id = await submit({
+        formData: {
           unitCapacity,
           carbonRate,
           monthly,
           monthlyQuantity,
-          notes: '' // 純備註，目前為空
-        }
-      }
-      console.log('📝 準備提交的 entryInput:', entryInput)
-
-      // 步驟5：使用診斷包裝執行關鍵操作
-      const { entry_id } = await debugRLSOperation(
-        '新增或更新能源填報記錄',
-        async () => await upsertEnergyEntry(entryInput, true)
-      )
-      console.log('✅ upsertEnergyEntry 完成，entry_id:', entry_id)
-
-      // 步驟6：設置 entryId（如果是新建的記錄）
-      if (!currentEntryId) {
-        setCurrentEntryId(entry_id)
-      }
-
-      // 步驟6.5：批次上傳記憶體檔案
-      console.log('📁 [WD40] Starting memory files upload...')
-      console.log('📁 [WD40] Memory files to upload:', {
-        msdsMemoryFiles: msdsMemoryFiles.length,
-        monthlyMemoryFiles: monthlyMemoryFiles.map((files, i) => ({ month: i + 1, count: files.length }))
+          unit: 'ML'
+        },
+        msdsFiles: msdsMemoryFiles,
+        monthlyFiles: monthlyMemoryFiles
       })
 
-      const uploadedFiles: EvidenceFile[] = []
+      // 更新 currentEntryId（不做判斷，直接設定）
+      setCurrentEntryId(entry_id)
 
-      try {
-        // 上傳 MSDS 記憶體檔案
-        if (msdsMemoryFiles.length > 0) {
-          console.log(`📁 [WD40] Uploading ${msdsMemoryFiles.length} MSDS memory files...`)
-          for (const memoryFile of msdsMemoryFiles) {
-            const uploadedFile = await uploadEvidenceWithEntry(memoryFile.file, {
-              entryId: entry_id,
-              pageKey,
-              year,
-              category: 'msds'
-            })
-            uploadedFiles.push(uploadedFile)
-            console.log(`✅ [WD40] MSDS file uploaded: ${uploadedFile.file_name}`)
-          }
+      // 重新載入後端資料並等待同步完成
+      await reloadAndSync()
+
+      // 清空記憶體檔案
+      setMsdsMemoryFiles([])
+      setMonthlyMemoryFiles(Array.from({ length: 12 }, () => []))
+
+      // 處理狀態轉換
+      await frontendStatus.handleSubmitSuccess()
+
+      // 重新載入審核狀態，更新狀態橫幅
+      reloadApprovalStatus()
+
+      setHasSubmittedBefore(true)
+      setShowSuccessModal(true)
+    }).catch(error => {
+      console.error('❌ 提交失敗:', error)
+      setError(error instanceof Error ? error.message : '提交失敗')
+    })
+  }
+
+  const handleSave = async () => {
+    await executeSubmit(async () => {
+      setError(null)
+      setSuccess(null)
+
+      // 準備每月數據
+      const monthly: Record<string, number> = {}
+      const monthlyQuantity: Record<string, number> = {}
+      monthlyData.forEach(data => {
+        if (data.quantity > 0) {
+          monthly[data.month.toString()] = data.totalUsage
+          monthlyQuantity[data.month.toString()] = data.quantity
         }
+      })
 
-        // 上傳月份使用證明記憶體檔案
-        for (let month = 1; month <= 12; month++) {
-          const monthFiles = monthlyMemoryFiles[month - 1] || []
-          if (monthFiles.length > 0) {
-            console.log(`📁 [WD40] Uploading ${monthFiles.length} files for month ${month}...`)
-            for (const memoryFile of monthFiles) {
-              const uploadedFile = await uploadEvidenceWithEntry(memoryFile.file, {
-                entryId: entry_id,
-                pageKey,
-                year,
-                category: 'usage_evidence',
-                month
+      const totalAmount = Object.values(monthly).reduce((sum, val) => sum + val, 0)
+
+      // 審核模式：使用 useAdminSave hook
+      if (isReviewMode && reviewEntryId) {
+        console.log('📝 管理員審核模式：使用 useAdminSave hook', reviewEntryId)
+
+        // 準備月份檔案列表
+        const filesToUpload: Array<{
+          file: File
+          metadata: {
+            month: number
+            fileType: 'usage_evidence' | 'msds' | 'other'
+          }
+        }> = []
+
+        // 收集每個月份的使用證明檔案
+        monthlyMemoryFiles.forEach((memFiles, monthIndex) => {
+          if (memFiles && memFiles.length > 0) {
+            memFiles.forEach(mf => {
+              filesToUpload.push({
+                file: mf.file,
+                metadata: {
+                  month: monthIndex + 1,
+                  fileType: 'usage_evidence' as const
+                }
               })
-              uploadedFiles.push(uploadedFile)
-              console.log(`✅ [WD40] Month ${month} file uploaded: ${uploadedFile.file_name}`)
-            }
+            })
           }
-        }
+        })
 
-        console.log(`✅ [WD40] All memory files uploaded successfully: ${uploadedFiles.length} files`)
+        // 收集 MSDS 檔案
+        msdsMemoryFiles.forEach((mf, index) => {
+          filesToUpload.push({
+            file: mf.file,
+            metadata: {
+              month: index + 1,
+              fileType: 'msds' as const
+            }
+          })
+        })
+
+        // 從舊區塊中提取 payload 資料
+        await adminSave({
+          updateData: {
+            unit: 'ML',
+            amount: totalAmount,
+            payload: {
+              unitCapacity,
+              carbonRate,
+              monthly,
+              monthlyQuantity
+            },
+            updated_at: new Date().toISOString()
+          },
+          files: filesToUpload
+        })
 
         // 清空記憶體檔案
         setMsdsMemoryFiles([])
         setMonthlyMemoryFiles(Array.from({ length: 12 }, () => []))
 
-        // 更新檔案狀態
-        const newMsdsFiles = [...msdsFiles, ...uploadedFiles.filter(f => f.file_type === 'msds')]
-        setMsdsFiles(newMsdsFiles)
-
-        // 更新月份檔案
-        const newMonthlyData = monthlyData.map(data => {
-          const monthUploadedFiles = uploadedFiles.filter(f =>
-            f.file_type === 'usage_evidence' && f.month === data.month
-          )
-          return {
-            ...data,
-            files: [...data.files, ...monthUploadedFiles]
-          }
-        })
-        setMonthlyData(newMonthlyData)
-
-      } catch (uploadError) {
-        console.error('❌ [WD40] Memory files upload failed:', uploadError)
-        throw new Error(`檔案上傳失敗: ${uploadError instanceof Error ? uploadError.message : '未知錯誤'}`)
+        await reloadAndSync()
+        reloadApprovalStatus()
+        setToast({ message: '[SUCCESS] 儲存成功！資料已更新', type: 'success' })
+        return
       }
 
-      // 步驟7：使用改進的錯誤恢復機制關聯檔案
-      const allFiles = [
-        ...msdsFiles,
-        ...monthlyData.flatMap(m => m.files)
-      ]
-      
-      console.log('🔗 [WD40] All files before association:', {
-        totalFiles: allFiles.length,
-        msdsFilesCount: msdsFiles.length,
-        monthlyFilesCount: monthlyData.flatMap(m => m.files).length,
-        fileDetails: allFiles.map(f => ({
-          id: f.id,
-          name: f.file_name,
-          entry_id: f.entry_id || 'NOT_ASSOCIATED',
-          hasEntryId: !!f.entry_id
-        }))
+      // 非審核模式：原本的邏輯
+      const entry_id = await save({
+        formData: {
+          unitCapacity,
+          carbonRate,
+          monthly,
+          monthlyQuantity,
+          unit: 'ML'
+        },
+        msdsFiles: msdsMemoryFiles,
+        monthlyFiles: monthlyMemoryFiles
       })
-      
-      const unassociatedFiles = allFiles.filter(f => !f.entry_id)
-      console.log('📎 [WD40] Unassociated files to link:', {
-        count: unassociatedFiles.length,
-        files: unassociatedFiles.map(f => ({
-          id: f.id,
-          name: f.file_name,
-          path: f.file_path
-        }))
-      })
-      
-      if (unassociatedFiles.length > 0) {
-        
-        // 使用 Promise.allSettled 允許部分失敗
-        const results = await Promise.allSettled(
-          unassociatedFiles.map(file => 
-            updateFileEntryAssociation(file.id, entry_id)
-          )
-        )
-        
-        // 統計結果
-        const succeeded = results.filter(r => r.status === 'fulfilled').length
-        const failed = results.filter(r => r.status === 'rejected').length
-        
-        console.log('✅ [WD40] Association results:', {
-          totalAttempts: results.length,
-          succeeded,
-          failed,
-          detailedResults: results.map((result, index) => ({
-            fileId: unassociatedFiles[index].id,
-            fileName: unassociatedFiles[index].file_name,
-            status: result.status,
-            error: result.status === 'rejected' ? result.reason : null
-          }))
-        })
-        
-        // 記錄失敗詳情並提供用戶反饋
-        if (failed > 0) {
-          const failures = results
-            .map((r, i) => ({ result: r, file: unassociatedFiles[i] }))
-            .filter(({ result }) => result.status === 'rejected')
-            .map(({ file, result }) => ({
-              fileName: file.file_name,
-              error: (result as PromiseRejectedResult).reason
-            }))
-          
-          console.error('檔案關聯失敗詳情:', failures)
-          
-          // 設置用戶可見的警告
-          if (succeeded > 0) {
-            setToast({ 
-              message: `部分檔案關聯成功 (${succeeded}/${unassociatedFiles.length})，${failed} 個檔案關聯失敗`, 
-              type: 'error' 
-            })
-          } else {
-            setToast({ 
-              message: `所有檔案關聯失敗，請檢查網路連線後重新提交`, 
-              type: 'error' 
-            })
-          }
-        } else {
-          setToast({ 
-            message: `所有檔案 (${succeeded} 個) 已成功關聯`, 
-            type: 'success' 
-          })
-        }
-        
-        // 更新本地檔案狀態（標記成功關聯的）
-        const successfulIndices = results
-          .map((r, i) => ({ result: r, index: i }))
-          .filter(({ result }) => result.status === 'fulfilled')
-          .map(({ index }) => index)
-        
-        successfulIndices.forEach(index => {
-          unassociatedFiles[index].entry_id = entry_id
-        })
-        
-        // 更新本地狀態
-        setMsdsFiles(prev => prev.map(f => {
-          const updated = unassociatedFiles.find(uf => uf.id === f.id)
-          return updated ? { ...f, entry_id: updated.entry_id } : f
-        }))
-        
-        setMonthlyData(prev => prev.map(monthData => ({
-          ...monthData,
-          files: monthData.files.map(f => {
-            const updated = unassociatedFiles.find(uf => uf.id === f.id)
-            return updated ? { ...f, entry_id: updated.entry_id } : f
-          })
-        })))
-      }
 
-      // 步驟8：自動清理草稿資料（提交成功後）
-      // 草稿清理功能已移除
-
-      // 步驟9：處理狀態轉換 - 提交成功時自動更新狀態
-      await handleSubmitSuccess()
-
-      // 步驟10：計算並顯示成功訊息
-      const totalUsage = sumMonthly(monthly)
-      console.log('📊 計算總使用量:', totalUsage)
-      
-      setSuccess(`提交成功！年度總使用量：${totalUsage.toFixed(2)} ML`)
-      
-      setHasSubmittedBefore(true)
-      setShowSuccessModal(true)
-      
-      console.log('=== ✅ WD-40 提交成功完成 ===')
-
-    } catch (error) {
-      console.error('=== ❌ WD-40 提交失敗 ===')
-      console.error('錯誤類型:', error?.constructor?.name)
-      console.error('錯誤訊息:', error instanceof Error ? error.message : String(error))
-      console.error('完整錯誤物件:', error)
-      
-      // 失敗後的詳細認證診斷
-      console.log('🔍 執行失敗後的認證診斷...')
-      try {
-        await logDetailedAuthStatus()
-      } catch (diagError) {
-        console.error('診斷過程中發生錯誤:', diagError)
-      }
-      
-      // 檢查是否為 RLS 錯誤
-      if (error instanceof Error && (
-        error.message.toLowerCase().includes('rls') ||
-        error.message.toLowerCase().includes('row level security') ||
-        error.message.toLowerCase().includes('permission') ||
-        error.message.toLowerCase().includes('policy')
-      )) {
-        console.error('🚨 檢測到 RLS 權限錯誤！')
-        console.error('💡 可能原因分析:', {
-          認證狀態: '檢查 auth.uid() 是否為 null',
-          RLS政策: '檢查相關表格的 RLS 政策設定',
-          時機問題: '可能在 token 過期瞬間執行操作',
-          建議: '查看上方詳細診斷結果找出根本原因'
-        })
-      }
-      
-      console.log('=== 🔍 除錯結束 ===')
-      setError(error instanceof Error ? error.message : '提交失敗')
-    } finally {
-      setSubmitting(false)
-    }
+      setCurrentEntryId(entry_id)
+      await reloadAndSync()
+      setMsdsMemoryFiles([])
+      setMonthlyMemoryFiles(Array.from({ length: 12 }, () => []))
+      reloadApprovalStatus()
+      setToast({ message: '暫存成功！資料已儲存', type: 'success' })
+    }).catch(error => {
+      console.error('❌ 儲存失敗:', error)
+      setError(error instanceof Error ? error.message : '儲存失敗')
+    })
   }
 
   const handleStatusChange = async (newStatus: EntryStatus) => {
@@ -1011,97 +562,57 @@ const WD40Page = () => {
   }
 
   const handleClearAll = async () => {
-    console.log('🗑️ [WD40Page] ===== CLEAR BUTTON CLICKED =====')
+    try {
+      // 收集所有要刪除的檔案
+      const allFiles = [...msdsFiles]
+      monthlyData.forEach(data => {
+        allFiles.push(...data.files)
+      })
 
-    const clearSuccess = DocumentHandler.handleClear({
-      currentStatus: currentStatus,
-      title: 'WD-40資料清除',
-      message: '確定要清除所有WD-40使用資料嗎？此操作無法復原。',
-      onClear: async () => {
-        setClearLoading(true)
-        try {
-          console.log('🗑️ [WD40Page] Starting complete clear operation...')
+      // 呼叫 Hook 清除
+      await clear({
+        filesToDelete: allFiles,
+        memoryFilesToClean: [msdsMemoryFiles, ...monthlyMemoryFiles]
+      })
 
-          // 1. 刪除所有檔案
-          if (currentEntryId) {
-            const allFiles = [...msdsFiles]
-            monthlyData.forEach(data => {
-              allFiles.push(...data.files)
-            })
+      // 清除成功後，重置前端狀態
+      setCurrentEntryId(null)
+      setHasSubmittedBefore(false)
+      setUnitCapacity(0)
+      setCarbonRate(0)
+      handleMsdsFilesChange([])
+      setMsdsMemoryFiles([])
+      setMonthlyMemoryFiles(Array.from({ length: 12 }, () => []))
+      setMonthlyData(Array.from({ length: 12 }, (_, i) => ({
+        month: i + 1,
+        quantity: 0,
+        totalUsage: 0,
+        files: []
+      })))
 
-            console.log('🗑️ [WD40Page] Deleting files:', allFiles.length)
-            for (const file of allFiles) {
-              try {
-                await deleteEvidenceFile(file.id)
-                console.log('✅ Deleted file:', file.file_name)
-              } catch (err) {
-                console.warn('Failed to delete file:', err)
-              }
-            }
+      setError(null)
+      setShowClearConfirmModal(false)
+      setSuccess('資料已完全清除')
 
-            // 2. 刪除能源記錄
-            try {
-              await deleteEnergyEntry(currentEntryId)
-              console.log('✅ Deleted energy entry:', currentEntryId)
-              setCurrentEntryId(null)
-              setHasSubmittedBefore(false)
-            } catch (err) {
-              console.warn('Failed to delete entry:', err)
-            }
-          }
-
-          // 3. 清理記憶體檔案
-          DocumentHandler.clearAllMemoryFiles(msdsMemoryFiles)
-          monthlyMemoryFiles.forEach(memFiles => {
-            DocumentHandler.clearAllMemoryFiles(memFiles)
-          })
-
-          // 4. 清除前端狀態
-          setUnitCapacity(0)
-          setCarbonRate(0)
-          handleMsdsFilesChange([])
-          setMsdsMemoryFiles([])
-          setMonthlyMemoryFiles(Array.from({ length: 12 }, () => []))
-          setMonthlyData(Array.from({ length: 12 }, (_, i) => ({
-            month: i + 1,
-            quantity: 0,
-            totalUsage: 0,
-            files: []
-          })))
-
-          setError(null)
-          setSuccess(null)
-          setShowClearConfirmModal(false)
-
-          setSuccess('資料已完全清除')
-
-        } catch (error) {
-          console.error('❌ [WD40Page] Clear operation failed:', error)
-          setError('清除操作失敗，請重試')
-          setShowClearConfirmModal(false)
-        } finally {
-          console.log('🗑️ [WD40Page] Clear operation finished, resetting loading state')
-          setClearLoading(false)
-        }
-      }
-    })
-
-    if (!clearSuccess && currentStatus === 'approved') {
-      setError('已通過的資料無法清除')
+    } catch (error) {
+      console.error('❌ 清除操作失敗:', error)
+      const errorMessage = error instanceof Error ? error.message : '清除操作失敗，請重試'
+      setError(errorMessage)
+      setShowClearConfirmModal(false)
     }
   }
 
   // Loading 狀態
-  if (loading) {
+  if (dataLoading) {
     return (
-      <div 
-        className="min-h-screen flex items-center justify-center" 
+      <div
+        className="min-h-screen flex items-center justify-center"
         style={{ backgroundColor: designTokens.colors.background }}
       >
         <div className="text-center">
-          <Loader2 
-            className="w-12 h-12 animate-spin mx-auto mb-4" 
-            style={{ color: designTokens.colors.accentPrimary }} 
+          <Loader2
+            className="w-12 h-12 animate-spin mx-auto mb-4"
+            style={{ color: designTokens.colors.accentPrimary }}
           />
           <p style={{ color: designTokens.colors.textPrimary }}>載入中...</p>
         </div>
@@ -1116,49 +627,26 @@ const WD40Page = () => {
       {/* 主要內容區域 - 簡化結構，移除多層嵌套 */}
       <div className="max-w-4xl mx-auto px-6 py-8 space-y-6">
 
-        {/* 審核狀態通知 */}
-        {!isReviewMode && approvalStatus.isApproved && (
-          <div className="bg-green-100 border-l-4 border-green-500 text-green-700 p-4 mb-6 rounded-r-lg">
+        {/* 審核狀態橫幅 - 統一管理 */}
+        {banner && (
+          <div className={`border-l-4 p-4 mb-6 rounded-r-lg ${getBannerColorClasses(banner.type)}`}>
             <div className="flex items-center">
-              <div className="text-2xl mr-3">🎉</div>
-              <div>
-                <p className="font-bold text-lg">恭喜您已審核通過！</p>
-                <p className="text-sm mt-1">此填報已完成審核，資料已鎖定無法修改。</p>
-                {approvalStatus.reviewedAt && (
-                  <p className="text-xs mt-2 opacity-75">
-                    審核完成時間：{new Date(approvalStatus.reviewedAt).toLocaleString()}
-                  </p>
-                )}
-              </div>
-            </div>
-          </div>
-        )}
-
-        {!isReviewMode && approvalStatus.isRejected && (
-          <div className="bg-red-100 border-l-4 border-red-500 text-red-700 p-4 mb-6 rounded-r-lg">
-            <div className="flex items-center">
-              <div className="text-2xl mr-3">⚠️</div>
+              <div className="text-2xl mr-3">{banner.icon}</div>
               <div className="flex-1">
-                <p className="font-bold text-lg">填報已被退回</p>
-                <p className="text-sm mt-1 font-medium">退回原因：{approvalStatus.rejectionReason}</p>
-                <p className="text-xs mt-2">請根據上述原因修正後重新提交。修正完成後，資料將重新進入審核流程。</p>
-                {approvalStatus.reviewedAt && (
+                <p className="font-bold text-lg">{banner.title}</p>
+                {banner.message && <p className="text-sm mt-1">{banner.message}</p>}
+                {banner.reason && (
+                  <div className="mt-3 p-3 bg-red-50 rounded-md border border-red-200">
+                    <p className="text-base font-bold text-red-800 mb-1">退回原因：</p>
+                    <p className="text-lg font-semibold text-red-900">{banner.reason}</p>
+                  </div>
+                )}
+                {banner.reviewedAt && (
                   <p className="text-xs mt-2 opacity-75">
-                    退回時間：{new Date(approvalStatus.reviewedAt).toLocaleString()}
+                    {banner.type === 'rejected' ? '退回時間' : '審核完成時間'}：
+                    {new Date(banner.reviewedAt).toLocaleString()}
                   </p>
                 )}
-              </div>
-            </div>
-          </div>
-        )}
-
-        {!isReviewMode && approvalStatus.isPending && (
-          <div className="bg-blue-100 border-l-4 border-blue-500 text-blue-700 p-4 mb-6 rounded-r-lg">
-            <div className="flex items-center">
-              <div className="text-2xl mr-3">📝</div>
-              <div>
-                <p className="font-bold text-lg">填報已提交</p>
-                <p className="text-sm mt-1">您的填報已提交，正在等待管理員審核。審核期間您仍可修改資料。</p>
               </div>
             </div>
           </div>
@@ -1198,37 +686,6 @@ const WD40Page = () => {
           </p>
         </div>
 
-        {/* 重新提交提示 */}
-        {hasSubmittedBefore && !showSuccessModal && (
-          <div 
-            className="rounded-lg p-4 border-l-4"
-            style={{ 
-              backgroundColor: '#f0f9ff',
-              borderColor: designTokens.colors.accentBlue
-            }}
-          >
-            <div className="flex items-start">
-              <CheckCircle 
-                className="h-5 w-5 mt-0.5 mr-3" 
-                style={{ color: designTokens.colors.accentBlue }} 
-              />
-              <div>
-                <h3 
-                  className="text-base font-medium mb-1" 
-                  style={{ color: designTokens.colors.accentBlue }}
-                >
-                  資料已提交
-                </h3>
-                <p 
-                  className="text-base" 
-                  style={{ color: designTokens.colors.textSecondary }}
-                >
-                  您可以繼續編輯資料，修改後請再次點擊「提交填報」以更新記錄。
-                </p>
-              </div>
-            </div>
-          </div>
-        )}
 
         {/* MSDS 安全資料表與基本參數 */}
         <div 
@@ -1261,8 +718,9 @@ const WD40Page = () => {
                 onFilesChange={setMsdsFiles}
                 maxFiles={3}
                 kind="msds"
-                disabled={submitting || isReviewMode || approvalStatus.isApproved}
-                mode={isReviewMode || approvalStatus.isApproved ? "view" : "edit"}
+                disabled={submitting || isReadOnly || approvalStatus.isApproved}
+                mode={isReadOnly || approvalStatus.isApproved ? "view" : "edit"}
+                            isAdminReviewMode={isReviewMode && role === 'admin'}
                 memoryFiles={msdsMemoryFiles}
                 onMemoryFilesChange={handleMsdsMemoryFilesChange}
               />
@@ -1271,8 +729,8 @@ const WD40Page = () => {
             {/* 基本參數輸入 */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
               <div>
-                <label 
-                  className="block text-base font-medium mb-2" 
+                <label
+                  className="block text-base font-medium mb-2"
                   style={{ color: designTokens.colors.textPrimary }}
                 >
                   單位容量 (ML/瓶)
@@ -1287,9 +745,9 @@ const WD40Page = () => {
                     const numValue = inputValue === '' ? 0 : parseFloat(inputValue)
                     setUnitCapacity(isNaN(numValue) ? 0 : numValue)
                   }}
-                  disabled={isReviewMode || approvalStatus.isApproved}
+                  disabled={isReadOnly || approvalStatus.isApproved}
                   className={`w-full px-4 py-3 border rounded-lg focus:outline-none focus:ring-2 focus:border-transparent transition-all ${
-                    isReviewMode || approvalStatus.isApproved ? 'bg-gray-100 cursor-not-allowed' : ''
+                    isReadOnly || approvalStatus.isApproved ? 'bg-gray-100 cursor-not-allowed' : ''
                   }`}
                   style={{
                     color: designTokens.colors.textPrimary,
@@ -1297,7 +755,7 @@ const WD40Page = () => {
                     borderRadius: designTokens.borderRadius.md
                   }}
                   onFocus={(e) => {
-                    if (!isReviewMode && !approvalStatus.isApproved) {
+                    if (!isReadOnly && !approvalStatus.isApproved) {
                       (e.target as HTMLInputElement).style.borderColor = designTokens.colors.accentPrimary;
                       (e.target as HTMLInputElement).style.boxShadow = `0 0 0 3px ${designTokens.colors.accentPrimary}20`
                     }
@@ -1328,9 +786,9 @@ const WD40Page = () => {
                     const numValue = inputValue === '' ? 0 : parseFloat(inputValue)
                     setCarbonRate(isNaN(numValue) ? 0 : numValue)
                   }}
-                  disabled={isReviewMode || approvalStatus.isApproved}
+                  disabled={isReadOnly || approvalStatus.isApproved}
                   className={`w-full px-4 py-3 border rounded-lg focus:outline-none focus:ring-2 focus:border-transparent transition-all ${
-                    isReviewMode || approvalStatus.isApproved ? 'bg-gray-100 cursor-not-allowed' : ''
+                    isReadOnly || approvalStatus.isApproved ? 'bg-gray-100 cursor-not-allowed' : ''
                   }`}
                   style={{
                     color: designTokens.colors.textPrimary,
@@ -1338,7 +796,7 @@ const WD40Page = () => {
                     borderRadius: designTokens.borderRadius.md
                   }}
                   onFocus={(e) => {
-                    if (!isReviewMode && !approvalStatus.isApproved) {
+                    if (!isReadOnly && !approvalStatus.isApproved) {
                       (e.target as HTMLInputElement).style.borderColor = designTokens.colors.accentPrimary;
                       (e.target as HTMLInputElement).style.boxShadow = `0 0 0 3px ${designTokens.colors.accentPrimary}20`
                     }
@@ -1419,16 +877,16 @@ const WD40Page = () => {
                         const numValue = inputValue === '' ? 0 : parseFloat(inputValue)
                         updateMonthData(index, 'quantity', isNaN(numValue) ? 0 : numValue)
                       }}
-                      disabled={isReviewMode || approvalStatus.isApproved}
+                      disabled={isReadOnly || approvalStatus.isApproved}
                       className={`w-full px-3 py-2 border rounded-md focus:outline-none focus:ring-2 focus:border-transparent transition-all ${
-                        isReviewMode || approvalStatus.isApproved ? 'bg-gray-100 cursor-not-allowed' : ''
+                        isReadOnly || approvalStatus.isApproved ? 'bg-gray-100 cursor-not-allowed' : ''
                       }`}
                       style={{
                         color: designTokens.colors.textPrimary,
                         borderColor: designTokens.colors.border
                       }}
                       onFocus={(e) => {
-                        if (!isReviewMode && !approvalStatus.isApproved) {
+                        if (!isReadOnly && !approvalStatus.isApproved) {
                           (e.target as HTMLInputElement).style.borderColor = designTokens.colors.accentPrimary;
                           (e.target as HTMLInputElement).style.boxShadow = `0 0 0 2px ${designTokens.colors.accentPrimary}20`
                         }
@@ -1455,8 +913,9 @@ const WD40Page = () => {
                       onFilesChange={(files) => handleMonthFilesChange(data.month, files)}
                       maxFiles={3}
                       kind="usage_evidence"
-                      disabled={submitting || isReviewMode || approvalStatus.isApproved}
-                      mode={isReviewMode || approvalStatus.isApproved ? "view" : "edit"}
+                      disabled={submitting || isReadOnly || approvalStatus.isApproved}
+                      mode={isReadOnly || approvalStatus.isApproved ? "view" : "edit"}
+                            isAdminReviewMode={isReviewMode && role === 'admin'}
                       memoryFiles={monthlyMemoryFiles[data.month - 1] || []}
                       onMemoryFilesChange={(files) => handleMonthMemoryFilesChange(data.month, files)}
                     />
@@ -1473,35 +932,35 @@ const WD40Page = () => {
       </div>
 
       {/* 錯誤訊息模態框 */}
-      {error && (
+      {(error || dataError) && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50 p-4">
-          <div 
+          <div
             className="bg-white rounded-lg shadow-lg max-w-md w-full"
             style={{ borderRadius: designTokens.borderRadius.lg }}
           >
             <div className="p-6">
               <div className="flex items-start space-x-3 mb-4">
-                <div 
+                <div
                   className="w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0"
                   style={{ backgroundColor: `${designTokens.colors.error}15` }}
                 >
-                  <AlertCircle 
-                    className="h-5 w-5" 
-                    style={{ color: designTokens.colors.error }} 
+                  <AlertCircle
+                    className="h-5 w-5"
+                    style={{ color: designTokens.colors.error }}
                   />
                 </div>
                 <div className="flex-1">
-                  <h3 
+                  <h3
                     className="text-xl font-semibold mb-2"
                     style={{ color: designTokens.colors.textPrimary }}
                   >
                     發生錯誤
                   </h3>
                   <div className="text-base space-y-1">
-                    {error.split('\n').map((line, index) => (
+                    {(error || dataError || '').split('\n').map((line, index) => (
                       <div key={index}>
                         {line.startsWith('請修正以下問題：') ? (
-                          <div 
+                          <div
                             className="font-medium mb-2"
                             style={{ color: designTokens.colors.error }}
                           >
@@ -1509,7 +968,7 @@ const WD40Page = () => {
                           </div>
                         ) : line ? (
                           <div className="flex items-start space-x-2 py-1">
-                            <div 
+                            <div
                               className="w-1.5 h-1.5 rounded-full mt-2 flex-shrink-0"
                               style={{ backgroundColor: designTokens.colors.error }}
                             ></div>
@@ -1700,17 +1159,20 @@ const WD40Page = () => {
         </div>
       )}
 
-      {/* 底部操作欄 - 審核模式下隱藏，審核通過時也隱藏 */}
-      {!isReviewMode && !approvalStatus.isApproved && (
+      {/* 底部操作欄 - 唯讀模式下隱藏，審核通過時也隱藏 */}
+      {!isReadOnly && !approvalStatus.isApproved && !isReviewMode && (
         <BottomActionBar
         currentStatus={currentStatus}
         currentEntryId={currentEntryId}
         isUpdating={false}
         hasSubmittedBefore={hasSubmittedBefore}
         hasAnyData={hasAnyData}
+        banner={banner}
         editPermissions={editPermissions}
         submitting={submitting}
+        saving={submitting}
         onSubmit={handleSubmit}
+        onSave={handleSave}
         onClear={() => setShowClearConfirmModal(true)}
         designTokens={designTokens}
       />
@@ -1725,15 +1187,16 @@ const WD40Page = () => {
           userName="填報用戶" // 可以從用戶資料獲取
           amount={monthlyData.reduce((sum, data) => sum + data.quantity, 0)}
           unit="瓶"
+          role={role}
+          onSave={handleSave}
+          isSaving={submitting}
           onApprove={() => {
             // ReviewSection 會處理 API 呼叫和導航
             // 這裡可以加入額外的本地狀態處理（如果需要）
-            console.log('✅ WD-40 填報審核通過 - 由 ReviewSection 處理')
           }}
           onReject={(reason) => {
             // ReviewSection 會處理 API 呼叫和導航
             // 這裡可以加入額外的本地狀態處理（如果需要）
-            console.log('❌ WD-40 填報已退回 - 由 ReviewSection 處理:', reason)
           }}
         />
       )}
@@ -1744,6 +1207,24 @@ const WD40Page = () => {
           message={toast.message}
           type={toast.type}
           onClose={() => setToast(null)}
+        />
+      )}
+
+      {/* Hook 錯誤訊息 */}
+      {submitError && !toast && (
+        <Toast
+          message={submitError}
+          type="error"
+          onClose={clearSubmitError}
+        />
+      )}
+
+      {/* Hook 成功訊息 */}
+      {submitSuccess && !toast && (
+        <Toast
+          message={submitSuccess}
+          type="success"
+          onClose={clearSubmitSuccess}
         />
       )}
     </div>

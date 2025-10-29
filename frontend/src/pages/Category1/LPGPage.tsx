@@ -1,18 +1,28 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
-import { useNavigate } from 'react-router-dom'
-import { Upload, AlertCircle, CheckCircle, Loader2, X, Trash2 } from 'lucide-react'
-import EvidenceUpload, { MemoryFile } from '../../components/EvidenceUpload'
-import StatusSwitcher, { EntryStatus, canEdit, canUploadFiles, getButtonText } from '../../components/StatusSwitcher'
+import { useNavigate, useSearchParams } from 'react-router-dom'
+import { Upload, AlertCircle, CheckCircle, Loader2, X, Trash2, Eye } from 'lucide-react'
+import EvidenceUpload from '../../components/EvidenceUpload'
+import StatusSwitcher, { EntryStatus } from '../../components/StatusSwitcher'
 import StatusIndicator from '../../components/StatusIndicator'
 import Toast, { ToastType } from '../../components/Toast'
 import BottomActionBar from '../../components/BottomActionBar'
 import { useEditPermissions } from '../../hooks/useEditPermissions'
 import { useFrontendStatus } from '../../hooks/useFrontendStatus'
-import { listMSDSFiles, listUsageEvidenceFiles, commitEvidence, deleteEvidence, EvidenceFile, uploadEvidenceWithEntry } from '../../api/files'
-import { upsertEnergyEntry, sumMonthly, UpsertEntryInput, updateEntryStatus, getEntryByPageKeyAndYear } from '../../api/entries'
-import { getEntryFiles } from '../../api/files'
+import { useApprovalStatus } from '../../hooks/useApprovalStatus'
+import { useStatusBanner, getBannerColorClasses } from '../../hooks/useStatusBanner'
+import { useEnergyPageLoader } from '../../hooks/useEnergyPageLoader'
+import { useEnergySubmit } from '../../hooks/useEnergySubmit'
+import { useEnergyClear } from '../../hooks/useEnergyClear'
+import { useSubmitGuard } from '../../hooks/useSubmitGuard'
+import { useReloadWithFileSync } from '../../hooks/useReloadWithFileSync'
+import { useRole } from '../../hooks/useRole'
+import { useAdminSave } from '../../hooks/useAdminSave'
+import { sumMonthly, updateEntryStatus } from '../../api/entries'
+import { EvidenceFile } from '../../api/files'
+import { MemoryFile } from '../../components/EvidenceUpload'
+import ReviewSection from '../../components/ReviewSection'
+import { supabase } from '../../lib/supabaseClient'
 import { designTokens } from '../../utils/designTokens'
-import { DocumentHandler } from '../../services/documentHandler'
 
 
 interface MonthData {
@@ -25,8 +35,14 @@ interface MonthData {
 
 const LPGPage = () => {
   const navigate = useNavigate()
-  const [loading, setLoading] = useState(true)
-  const [submitting, setSubmitting] = useState(false)
+  const [searchParams] = useSearchParams()
+
+  // 審核模式檢測
+  const isReviewMode = searchParams.get('mode') === 'review'
+  const reviewEntryId = searchParams.get('entryId')
+  const reviewUserId = searchParams.get('userId')
+
+  const { executeSubmit, submitting } = useSubmitGuard()
   const [error, setError] = useState<string | null>(null)
   const [success, setSuccess] = useState<string | null>(null)
   const [hasSubmittedBefore, setHasSubmittedBefore] = useState(false)
@@ -42,12 +58,103 @@ const LPGPage = () => {
     entryId: currentEntryId
   })
 
-  const { currentStatus: frontendCurrentStatus, handleSubmitSuccess, handleDataChanged } = frontendStatus
+  const { currentStatus: frontendCurrentStatus, setCurrentStatus, handleSubmitSuccess, handleDataChanged } = frontendStatus
   const currentStatus = frontendCurrentStatus || initialStatus
   const isUpdating = false
-  
+
   // 表單資料
   const [year] = useState(new Date().getFullYear())
+  const pageKey = 'lpg'
+
+  // 資料載入 Hook - 統一處理 entry 和 files 的載入與分類
+  const entryIdToLoad = isReviewMode && reviewEntryId ? reviewEntryId : undefined
+  const {
+    entry: loadedEntry,
+    files: loadedFiles,
+    loading: dataLoading,
+    error: dataError,
+    reload
+  } = useEnergyPageLoader({
+    pageKey,
+    year,
+    entryId: entryIdToLoad,
+    onEntryLoad: (entry) => {
+      const entryStatus = entry.status as EntryStatus
+      setInitialStatus(entryStatus)
+      setCurrentStatus(entryStatus)  // 同步前端狀態
+      setCurrentEntryId(entry.id)
+      setHasSubmittedBefore(true)
+
+      // 載入單位重量
+      const entryUnitWeight = entry.payload?.notes?.match(/單位重量: ([\d.]+)/)?.[1]
+      if (entryUnitWeight) {
+        setUnitWeight(parseFloat(entryUnitWeight))
+      }
+
+      // 載入月份數據
+      if (entry.payload?.monthly) {
+        const monthly = entry.payload.monthly
+        const weight = entryUnitWeight ? parseFloat(entryUnitWeight) : 0
+
+        setMonthlyData(prev => prev.map(data => {
+          const totalUsage = monthly[data.month.toString()] || 0
+          const quantity = weight > 0 ? totalUsage / weight : 0
+          return {
+            ...data,
+            quantity,
+            totalUsage,
+            files: []  // 檔案由 onFilesLoad 處理
+          }
+        }))
+      }
+    },
+    onFilesLoad: (files) => {
+      // 載入重量證明檔案
+      const msdsFiles = files.filter(f => f.file_type === 'msds' || f.file_type === 'other')
+      setWeightProofFiles(msdsFiles)
+
+      // 分配月份檔案
+      setMonthlyData(prev => prev.map(data => ({
+        ...data,
+        files: files.filter(f => 
+          f.month === data.month && f.file_type === 'usage_evidence'
+        ) as EvidenceFile[]
+      })))
+    }
+  })
+
+  // 審核狀態 Hook
+  const { reload: reloadApprovalStatus, ...approvalStatus } = useApprovalStatus(pageKey, year)
+
+  // 狀態橫幅 Hook
+  const banner = useStatusBanner(approvalStatus, isReviewMode)
+
+  // 提交 Hook
+  const {
+    submit,
+    save,
+    submitting: submitLoading,
+    error: submitError,
+    success: submitSuccess,
+    clearError: clearSubmitError,
+    clearSuccess: clearSubmitSuccess
+  } = useEnergySubmit(pageKey, year, approvalStatus.status)  // ✅ 使用資料庫狀態
+
+  // 角色檢查
+  const { role } = useRole()
+
+  // 清除 Hook
+  const {
+    clear,
+    clearing: clearLoading,
+    error: clearError,
+    clearError: clearClearError
+  } = useEnergyClear(currentEntryId, currentStatus)
+
+
+  // Reload 同步 Hook
+  const { reloadAndSync } = useReloadWithFileSync(reload)
+
   const [unitWeight, setUnitWeight] = useState<number>(0) // 單位重量 (KG/桶)
   const [weightProofFiles, setWeightProofFiles] = useState<EvidenceFile[]>([])
   const [weightProofMemoryFiles, setWeightProofMemoryFiles] = useState<MemoryFile[]>([])
@@ -61,12 +168,11 @@ const LPGPage = () => {
     }))
   )
 
-  const pageKey = 'lpg'
   const isInitialLoad = useRef(true)
   
   // 編輯權限控制
   const editPermissions = useEditPermissions(currentStatus)
-  
+
   // 判斷是否有資料
   const hasAnyData = useMemo(() => {
     const hasMonthlyData = monthlyData.some(m => m.quantity > 0)
@@ -76,9 +182,12 @@ const LPGPage = () => {
                           monthlyData.some(m => m.memoryFiles.length > 0)
     return hasMonthlyData || hasBasicData || hasFiles || hasMemoryFiles
   }, [monthlyData, unitWeight, weightProofFiles, weightProofMemoryFiles])
-  
-  // 唯讀模式判斷
-  const isReadOnly = false
+
+  // 審核模式下只有管理員可編輯
+  const isReadOnly = isReviewMode && role !== 'admin'
+
+  // 管理員審核儲存 Hook
+  const { save: adminSave, saving: adminSaving } = useAdminSave(pageKey, reviewEntryId)
 
   const monthNames = [
     '1月', '2月', '3月', '4月', '5月', '6月',
@@ -103,104 +212,6 @@ const LPGPage = () => {
     }
   }, [])
 
-  // 載入檔案（移除草稿功能）
-  useEffect(() => {
-    const loadData = async () => {
-      try {
-        setLoading(true)
-        setError(null)
-
-        // 草稿功能已移除
-
-        // 檢查是否已有非草稿記錄
-        const existingEntry = await getEntryByPageKeyAndYear(pageKey, year)
-
-        if (existingEntry && existingEntry.status !== 'draft') {
-          setInitialStatus(existingEntry.status as EntryStatus)
-          setCurrentEntryId(existingEntry.id)
-          setHasSubmittedBefore(true)
-
-          // 載入該記錄的所有檔案（支援審核模式）
-          try {
-            const allFiles = await getEntryFiles(existingEntry.id)
-            const weightProofFilesFromEntry = allFiles.filter(f =>
-              f.file_type === 'msds' && f.page_key === pageKey
-            )
-            setWeightProofFiles(weightProofFilesFromEntry)
-          } catch (fileError) {
-            console.error('Failed to load files for existing entry:', fileError)
-            setWeightProofFiles([])
-          }
-          
-          // 載入已提交的記錄數據供編輯
-          if (existingEntry.payload?.monthly) {
-            const entryMonthly = existingEntry.payload.monthly
-            const entryUnitWeight = existingEntry.payload.notes?.match(/單位重量: ([\d.]+)/)?.[1]
-            
-            if (entryUnitWeight) setUnitWeight(parseFloat(entryUnitWeight))
-          }
-        } else {
-          // 新記錄：設為空狀態，不載入任何檔案（因為還沒有記錄）
-          setWeightProofFiles([])
-        }
-
-        // 載入各月份的使用證明檔案
-        let updatedMonthlyData = Array.from({ length: 12 }, (_, i) => {
-          const month = i + 1
-          // 從已提交記錄中取得數量資料（僅針對非草稿記錄）
-          let quantity = 0
-          if (existingEntry && existingEntry.status !== 'draft' && existingEntry.payload?.monthly?.[month.toString()]) {
-            const totalUsage = existingEntry.payload.monthly[month.toString()]
-            const entryUnitWeight = existingEntry.payload.notes?.match(/單位重量: ([\d.]+)/)?.[1]
-            if (entryUnitWeight && parseFloat(entryUnitWeight) > 0) {
-              quantity = totalUsage / parseFloat(entryUnitWeight)
-            }
-          }
-
-          const totalUsage = quantity * unitWeight
-
-          return {
-            month,
-            quantity,
-            totalUsage,
-            files: [] as EvidenceFile[],
-            memoryFiles: [] as MemoryFile[]
-          }
-        })
-        
-        // 載入相關檔案
-        if (existingEntry && existingEntry.id) {
-          try {
-            const files = await getEntryFiles(existingEntry.id)
-            
-            // 分類檔案到對應的月份
-            const monthlyFiles = files.filter(f => f.month && f.file_type === 'usage_evidence')
-            
-            // 更新月份檔案
-            updatedMonthlyData = updatedMonthlyData.map(data => ({
-              ...data,
-              files: monthlyFiles.filter(f => f.month === data.month) as EvidenceFile[]
-            }))
-            
-            // 處理狀態變更
-            handleDataChanged()
-          } catch (fileError) {
-            console.error('Failed to load files for LPG records:', fileError)
-          }
-        }
-        
-        setMonthlyData(updatedMonthlyData)
-        isInitialLoad.current = false
-      } catch (error) {
-        console.error('Error loading data:', error)
-        setError(error instanceof Error ? error.message : '載入資料失敗')
-      } finally {
-        setLoading(false)
-      }
-    }
-
-    loadData()
-  }, [])
 
   // 計算總使用量
   useEffect(() => {
@@ -272,81 +283,181 @@ const LPGPage = () => {
       return
     }
 
-    setSubmitting(true)
-    setError(null)
-    setSuccess(null)
-
-    try {
+    await executeSubmit(async () => {
       // 準備每月數據
       const monthly: Record<string, number> = {}
+      const monthlyQuantity: Record<string, number> = {}
       monthlyData.forEach(data => {
         if (data.quantity > 0) {
           monthly[data.month.toString()] = data.totalUsage
+          monthlyQuantity[data.month.toString()] = data.quantity
         }
       })
 
-      const entryInput: UpsertEntryInput = {
-        page_key: pageKey,
-        period_year: year,
-        unit: 'KG',
-        monthly: monthly,
-        notes: `單位重量: ${unitWeight} KG/桶`
-      }
+      // 準備月份檔案陣列（12個月）
+      const monthlyFiles: MemoryFile[][] = monthlyData.map(data => data.memoryFiles)
 
-      const { entry_id } = await upsertEnergyEntry(entryInput, true)
+      // ⭐ 使用 Hook 提交（教訓 #1 防護：notes 參數）
+      const entry_id = await submit({
+        formData: {
+          unitCapacity: 0,  // LPG 不使用
+          carbonRate: 0,    // LPG 不使用
+          monthly,
+          monthlyQuantity,
+          unit: 'KG',
+          notes: `單位重量: ${unitWeight} KG/桶`  // ⭐ 傳入 notes
+        },
+        msdsFiles: [],
+        monthlyFiles,
+        evidenceFiles: weightProofMemoryFiles  // ⭐ 重量佐證檔案
+      })
 
       if (!currentEntryId) {
         setCurrentEntryId(entry_id)
       }
 
-      // 上傳重量佐證檔案
-      for (const memFile of weightProofMemoryFiles) {
-        await uploadEvidenceWithEntry(memFile.file, {
-          entryId: entry_id,
-          pageKey: pageKey,
-          year: new Date().getFullYear(),
-          category: 'other'
-        })
-      }
+      // ⭐ 教訓 #4 防護：確保 reload 在檔案上傳後執行
+      await reloadAndSync()
 
-      // 上傳各月份檔案
-      for (const monthData of monthlyData) {
-        if (monthData.memoryFiles.length > 0) {
-          for (const memFile of monthData.memoryFiles) {
-            await uploadEvidenceWithEntry(memFile.file, {
-              entryId: entry_id,
-              pageKey: pageKey,
-              year: new Date().getFullYear(),
-              category: 'usage_evidence',
-              month: monthData.month
-            })
-          }
-        }
-      }
-
-      // 清空 memory files
+      // 清空記憶體檔案
       setWeightProofMemoryFiles([])
       setMonthlyData(prev => prev.map(data => ({ ...data, memoryFiles: [] })))
 
-      await commitEvidence({
-        entryId: entry_id,
-        pageKey: pageKey
-      })
-
-      // 草稿清理功能已移除
       await handleSubmitSuccess()
 
-      const totalUsage = sumMonthly(monthly)
-      setSuccess(`年度總使用量：${totalUsage.toFixed(2)} KG`)
+      // 重新載入審核狀態，更新狀態橫幅
+      reloadApprovalStatus()
+
       setHasSubmittedBefore(true)
       setShowSuccessModal(true)
-
-    } catch (error) {
+      // ⭐ Hook 已自動設定 success 訊息，不需要手動設定
+    }).catch(error => {
       console.error('Submit error:', error)
+      // ⭐ Hook 會 throw error，但我們用本地 error 狀態顯示錯誤訊息
       setError(error instanceof Error ? error.message : '提交失敗')
-    } finally {
-      setSubmitting(false)
-    }
+    })
+    // ⭐ Hook 已自動管理 submitLoading 狀態
+  }
+
+  const handleSave = async () => {
+    await executeSubmit(async () => {
+      setError(null)
+      setSuccess(null)
+
+      // 準備每月數據
+      const monthly: Record<string, number> = {}
+      const monthlyQuantity: Record<string, number> = {}
+      monthlyData.forEach(data => {
+        if (data.quantity > 0) {
+          monthly[data.month.toString()] = data.totalUsage
+          monthlyQuantity[data.month.toString()] = data.quantity
+        }
+      })
+
+      const totalAmount = Object.values(monthly).reduce((sum, val) => sum + val, 0)
+
+      // 審核模式：使用 useAdminSave hook
+      if (isReviewMode && reviewEntryId) {
+        console.log('📝 管理員審核模式：使用 useAdminSave hook', reviewEntryId)
+
+        // 準備月份檔案列表
+        const filesToUpload: Array<{
+          file: File
+          metadata: {
+            month: number
+            fileType: 'usage_evidence' | 'msds' | 'other'
+          }
+        }> = []
+
+        // 收集每個月份的使用證明檔案
+        monthlyData.forEach((data, monthIndex) => {
+          if (data.memoryFiles && data.memoryFiles.length > 0) {
+            data.memoryFiles.forEach(mf => {
+              filesToUpload.push({
+                file: mf.file,
+                metadata: {
+                  month: monthIndex + 1,
+                  fileType: 'usage_evidence' as const
+                }
+              })
+            })
+          }
+        })
+
+        // 收集 MSDS 檔案
+        weightProofMemoryFiles.forEach((mf, index) => {
+          filesToUpload.push({
+            file: mf.file,
+            metadata: {
+              month: index + 1,
+              fileType: 'msds' as const
+            }
+          })
+        })
+
+        // 從舊區塊中提取 payload 資料
+        await adminSave({
+          updateData: {
+            unit: 'KG',
+            amount: totalAmount,
+            payload: {
+              unitCapacity: 0,
+              carbonRate: 0,
+              monthly,
+              monthlyQuantity,
+              notes: `單位重量: ${unitWeight} KG/桶`
+            },
+          },
+          files: filesToUpload
+        })
+        // 清空記憶體檔案
+        setWeightProofMemoryFiles([])
+        setMonthlyData(prev => prev.map(data => ({ ...data, memoryFiles: [] })))
+
+
+        await reloadAndSync()
+        reloadApprovalStatus()
+        setToast({ message: '[SUCCESS] 儲存成功！資料已更新', type: 'success' })
+        return
+      }
+
+      // 準備月份檔案陣列（12個月）
+      const monthlyFiles: MemoryFile[][] = monthlyData.map(data => data.memoryFiles)
+
+      // 非審核模式：原本的邏輯
+      const entry_id = await save({
+        formData: {
+          unitCapacity: 0,
+          carbonRate: 0,
+          monthly,
+          monthlyQuantity,
+          unit: 'KG',
+          notes: `單位重量: ${unitWeight} KG/桶`
+        },
+        msdsFiles: [],
+        monthlyFiles,
+        evidenceFiles: weightProofMemoryFiles
+      })
+
+      if (!currentEntryId) {
+        setCurrentEntryId(entry_id)
+      }
+
+      await reloadAndSync()
+
+      // 清空記憶體檔案
+      setWeightProofMemoryFiles([])
+      setMonthlyData(prev => prev.map(data => ({ ...data, memoryFiles: [] })))
+
+      // 重新載入審核狀態，更新狀態橫幅
+      reloadApprovalStatus()
+
+      // 暫存成功，更新狀態（但不觸發 handleSubmitSuccess）
+      setToast({ message: '暫存成功！資料已儲存', type: 'success' })
+    }).catch(error => {
+      console.error('❌ 暫存失敗:', error)
+      setError(error instanceof Error ? error.message : '暫存失敗')
+    })
   }
 
   const handleStatusChange = async (newStatus: EntryStatus) => {
@@ -355,74 +466,71 @@ const LPGPage = () => {
   }
 
   const handleClearAll = async () => {
-    console.log('🗑️ [LPGPage] ===== CLEAR BUTTON CLICKED =====')
-
-    const clearSuccess = DocumentHandler.handleClear({
-      currentStatus: currentStatus,
-      title: '液化石油氣資料清除',
-      message: '確定要清除所有液化石油氣使用資料嗎？此操作無法復原。',
-      onClear: () => {
-        setSubmitting(true)
-        try {
-          console.log('🗑️ [LPGPage] Starting complete clear operation...')
-
-          // 清理記憶體檔案
-          DocumentHandler.clearAllMemoryFiles(weightProofMemoryFiles)
-          monthlyData.forEach(monthData => {
-            DocumentHandler.clearAllMemoryFiles(monthData.memoryFiles)
-          })
-
-          // 原有的清除邏輯保持不變
-          setUnitWeight(0)
-          setWeightProofFiles([])
-          setWeightProofMemoryFiles([])
-          setMonthlyData(Array.from({ length: 12 }, (_, i) => ({
-            month: i + 1,
-            quantity: 0,
-            totalUsage: 0,
-            files: [],
-            memoryFiles: []
-          })))
-
-          setHasSubmittedBefore(false)
-          setError(null)
-          setSuccess(null)
-          setShowClearConfirmModal(false)
-
-          setToast({
-            message: '資料已清除',
-            type: 'success'
-          })
-
-        } catch (error) {
-          console.error('❌ [LPGPage] Clear operation failed:', error)
-          setError('清除操作失敗，請重試')
-        } finally {
-          console.log('🗑️ [LPGPage] Clear operation finished, resetting loading state')
-          setSubmitting(false)
-        }
-      }
-    })
-
-    if (!clearSuccess && currentStatus === 'approved') {
+    if (currentStatus === 'approved') {
       setToast({
         message: '已通過的資料無法清除',
         type: 'error'
       })
+      return
+    }
+
+    setShowClearConfirmModal(true)
+  }
+
+  const confirmClear = async () => {
+    try {
+      // 收集所有要刪除的檔案
+      const allFiles = [...weightProofFiles]
+      monthlyData.forEach(data => {
+        allFiles.push(...data.files)
+      })
+
+      // 收集所有記憶體檔案
+      const allMemoryFiles = [weightProofMemoryFiles, ...monthlyData.map(d => d.memoryFiles)]
+
+      // 呼叫 Hook 清除
+      await clear({
+        filesToDelete: allFiles,
+        memoryFilesToClean: allMemoryFiles
+      })
+
+      // 清除成功後，重置前端狀態
+      setCurrentEntryId(null)
+      setHasSubmittedBefore(false)
+      setUnitWeight(0)
+      setWeightProofFiles([])
+      setWeightProofMemoryFiles([])
+      setMonthlyData(Array.from({ length: 12 }, (_, i) => ({
+        month: i + 1,
+        quantity: 0,
+        totalUsage: 0,
+        files: [],
+        memoryFiles: []
+      })))
+
+      setError(null)
+      setShowClearConfirmModal(false)
+      setSuccess('資料已完全清除')
+
+    } catch (error) {
+      console.error('❌ 清除操作失敗:', error)
+      const errorMessage = error instanceof Error ? error.message : '清除操作失敗，請重試'
+      setError(errorMessage)
+      setShowClearConfirmModal(false)
     }
   }
 
   // Loading 狀態
-  if (loading) {
+  if (dataLoading) {
     return (
-      <div 
-        className="min-h-screen flex items-center justify-center" 
+      <div
+        className="min-h-screen flex items-center justify-center"
         style={{ backgroundColor: designTokens.colors.background }}
       >
         <div className="text-center">
-          <Loader2 
-            className="w-12 h-12 animate-spin mx-auto mb-4" 
-            style={{ color: designTokens.colors.accentPrimary }} 
+          <Loader2
+            className="w-12 h-12 animate-spin mx-auto mb-4"
+            style={{ color: designTokens.colors.accentPrimary }}
           />
           <p style={{ color: designTokens.colors.textPrimary }}>載入中...</p>
         </div>
@@ -436,49 +544,57 @@ const LPGPage = () => {
         
         {/* 頁面標題 */}
         <div className="text-center mb-8">
-          <h1 
-            className="text-3xl font-semibold mb-3" 
+          <h1
+            className="text-3xl font-semibold mb-3"
             style={{ color: designTokens.colors.textPrimary }}
           >
             液化石油氣使用量填報
           </h1>
-          <p 
-            className="text-base" 
+          <p
+            className="text-base"
             style={{ color: designTokens.colors.textSecondary }}
           >
             請填入一桶液化石油氣重量並上傳佐證資料，然後填入各月份使用數據進行碳排放計算
           </p>
         </div>
 
-        {/* 重新提交提示 */}
-        {hasSubmittedBefore && !showSuccessModal && (
-          <div 
-            className="rounded-lg p-4 border-l-4"
-            style={{ 
-              backgroundColor: '#f0f9ff',
-              borderColor: designTokens.colors.accentBlue
-            }}
-          >
-            <div className="flex items-start">
-              <CheckCircle 
-                className="h-5 w-5 mt-0.5 mr-3" 
-                style={{ color: designTokens.colors.accentBlue }} 
-              />
-              <div>
-                <h3 
-                  className="text-sm font-medium mb-1" 
-                  style={{ color: designTokens.colors.accentBlue }}
-                >
-                  資料已提交
-                </h3>
-                <p 
-                  className="text-sm" 
-                  style={{ color: designTokens.colors.textSecondary }}
-                >
-                  您可以繼續編輯資料，修改後請再次點擊「提交填報」以更新記錄。
-                </p>
+        {/* 審核狀態橫幅 - 統一管理 */}
+        {banner && (
+          <div className={`border-l-4 p-4 mb-6 rounded-r-lg ${getBannerColorClasses(banner.type)}`}>
+            <div className="flex items-center">
+              <div className="text-2xl mr-3">{banner.icon}</div>
+              <div className="flex-1">
+                <p className="font-bold text-lg">{banner.title}</p>
+                {banner.message && <p className="text-sm mt-1">{banner.message}</p>}
+                {banner.reason && (
+                  <div className="mt-3 p-3 bg-red-50 rounded-md border border-red-200">
+                    <p className="text-base font-bold text-red-800 mb-1">退回原因：</p>
+                    <p className="text-lg font-semibold text-red-900">{banner.reason}</p>
+                  </div>
+                )}
+                {banner.reviewedAt && (
+                  <p className="text-xs mt-2 opacity-75">
+                    {banner.type === 'rejected' ? '退回時間' : '審核完成時間'}：
+                    {new Date(banner.reviewedAt).toLocaleString()}
+                  </p>
+                )}
               </div>
             </div>
+          </div>
+        )}
+
+        {/* 審核模式指示器 */}
+        {isReviewMode && (
+          <div className="mb-4 p-3 bg-orange-100 border-2 border-orange-300 rounded-lg">
+            <div className="flex items-center justify-center">
+              <Eye className="w-5 h-5 text-orange-600 mr-2" />
+              <span className="text-orange-800 font-medium">
+                📋 審核模式 - 查看填報內容
+              </span>
+            </div>
+            <p className="text-sm text-orange-600 mt-1 text-center">
+              所有輸入欄位已鎖定，僅供審核查看
+            </p>
           </div>
         )}
 
@@ -518,15 +634,15 @@ const LPGPage = () => {
                   setUnitWeight(isNaN(numValue) ? 0 : numValue)
                 }}
                 className={`w-full px-4 py-3 border rounded-lg focus:outline-none focus:ring-2 focus:border-transparent transition-all ${
-                  !editPermissions.canEdit ? 'bg-gray-100 cursor-not-allowed' : ''
+                  isReadOnly ? 'bg-gray-100 cursor-not-allowed' : ''
                 }`}
-                style={{ 
+                style={{
                   color: designTokens.colors.textPrimary,
                   borderColor: designTokens.colors.border,
                   borderRadius: designTokens.borderRadius.md
                 }}
                 onFocus={(e) => {
-                  if (editPermissions.canEdit) {
+                  if (!isReadOnly) {
                     (e.target as HTMLInputElement).style.borderColor = designTokens.colors.accentPrimary;
                     (e.target as HTMLInputElement).style.boxShadow = `0 0 0 3px ${designTokens.colors.accentPrimary}20`
                   }
@@ -536,7 +652,7 @@ const LPGPage = () => {
                   (e.target as HTMLInputElement).style.boxShadow = 'none'
                 }}
                 placeholder="請輸入一桶的重量"
-                disabled={submitting || !editPermissions.canEdit}
+                disabled={isReadOnly || submitting}
               />
               <p 
                 className="text-xs mt-1" 
@@ -561,9 +677,10 @@ const LPGPage = () => {
                 memoryFiles={weightProofMemoryFiles}
                 onMemoryFilesChange={setWeightProofMemoryFiles}
                 maxFiles={3}
-                disabled={submitting || !editPermissions.canUploadFiles}
+                disabled={submitting || isReadOnly || approvalStatus.isApproved}
                 kind="other"
-                mode="edit"
+                mode={isReadOnly || approvalStatus.isApproved ? 'view' : 'edit'}
+                      isAdminReviewMode={isReviewMode && role === 'admin'}
               />
               <p
                 className="text-xs mt-1"
@@ -662,14 +779,14 @@ const LPGPage = () => {
                         updateMonthData(index, 'quantity', isNaN(numValue) ? 0 : numValue)
                       }}
                       className={`w-full px-3 py-2 border rounded-md focus:outline-none focus:ring-2 focus:border-transparent transition-all ${
-                        !editPermissions.canEdit ? 'bg-gray-100 cursor-not-allowed' : ''
+                        isReadOnly ? 'bg-gray-100 cursor-not-allowed' : ''
                       }`}
-                      style={{ 
+                      style={{
                         color: designTokens.colors.textPrimary,
                         borderColor: designTokens.colors.border
                       }}
                       onFocus={(e) => {
-                        if (editPermissions.canEdit) {
+                        if (!isReadOnly) {
                           (e.target as HTMLInputElement).style.borderColor = designTokens.colors.accentPrimary;
                           (e.target as HTMLInputElement).style.boxShadow = `0 0 0 2px ${designTokens.colors.accentPrimary}20`
                         }
@@ -679,7 +796,7 @@ const LPGPage = () => {
                         (e.target as HTMLInputElement).style.boxShadow = 'none'
                       }}
                       placeholder="0"
-                      disabled={submitting || !editPermissions.canEdit}
+                      disabled={isReadOnly || submitting}
                     />
                   </div>
 
@@ -698,9 +815,10 @@ const LPGPage = () => {
                       memoryFiles={data.memoryFiles}
                       onMemoryFilesChange={(memFiles) => handleMonthMemoryFilesChange(data.month, memFiles)}
                       maxFiles={3}
-                      disabled={submitting || !editPermissions.canUploadFiles}
+                      disabled={submitting || isReadOnly || approvalStatus.isApproved}
                       kind="usage_evidence"
-                      mode="edit"
+                      mode={isReadOnly || approvalStatus.isApproved ? 'view' : 'edit'}
+                      isAdminReviewMode={isReviewMode && role === 'admin'}
                     />
                   </div>
                 </div>
@@ -810,12 +928,34 @@ const LPGPage = () => {
                 >
                   提交成功！
                 </h3>
-                <p 
+                <p
                   className="mb-4"
                   style={{ color: designTokens.colors.textSecondary }}
                 >
                   {success}
                 </p>
+                <div
+                  className="rounded-lg p-4 mb-4 text-left"
+                  style={{ backgroundColor: '#f8f9fa' }}
+                >
+                  <p
+                    className="text-base mb-2 font-medium"
+                    style={{ color: designTokens.colors.textPrimary }}
+                  >
+                    您的資料已成功儲存，您可以：
+                  </p>
+                  <ul className="text-base space-y-1">
+                    <li style={{ color: designTokens.colors.textSecondary }}>
+                      • 隨時回來查看或修改資料
+                    </li>
+                    <li style={{ color: designTokens.colors.textSecondary }}>
+                      • 重新上傳新的證明文件
+                    </li>
+                    <li style={{ color: designTokens.colors.textSecondary }}>
+                      • 更新使用記錄數據
+                    </li>
+                  </ul>
+                </div>
                 <button
                   onClick={() => setShowSuccessModal(false)}
                   className="px-6 py-2 text-white rounded-lg transition-colors font-medium"
@@ -848,17 +988,17 @@ const LPGPage = () => {
                   />
                 </div>
                 <div className="flex-1">
-                  <h3 
-                    className="text-lg font-semibold mb-2"
+                  <h3
+                    className="text-xl font-semibold mb-2"
                     style={{ color: designTokens.colors.textPrimary }}
                   >
                     確認清除
                   </h3>
-                  <p 
-                    className="text-sm"
+                  <p
+                    className="text-base"
                     style={{ color: designTokens.colors.textSecondary }}
                   >
-                    清除後，這一頁所有資料都會被移除，確定要繼續嗎？
+                    清除後，這一頁所有資料都會被移除，包括已上傳到伺服器的檔案也會被永久刪除。此操作無法復原，確定要繼續嗎？
                   </p>
                 </div>
               </div>
@@ -866,7 +1006,7 @@ const LPGPage = () => {
                 <button
                   onClick={() => setShowClearConfirmModal(false)}
                   className="px-4 py-2 border rounded-lg transition-colors font-medium"
-                  style={{ 
+                  style={{
                     borderColor: designTokens.colors.border,
                     color: designTokens.colors.textSecondary
                   }}
@@ -874,11 +1014,32 @@ const LPGPage = () => {
                   取消
                 </button>
                 <button
-                  onClick={handleClearAll}
-                  className="px-4 py-2 text-white rounded-lg transition-colors font-medium"
-                  style={{ backgroundColor: designTokens.colors.error }}
+                  onClick={confirmClear}
+                  disabled={clearLoading}
+                  className="px-4 py-2 text-white rounded-lg transition-colors font-medium flex items-center justify-center"
+                  style={{
+                    backgroundColor: clearLoading ? '#9ca3af' : designTokens.colors.error,
+                    opacity: clearLoading ? 0.7 : 1
+                  }}
+                  onMouseEnter={(e) => {
+                    if (!clearLoading) {
+                      (e.target as HTMLButtonElement).style.backgroundColor = '#dc2626';
+                    }
+                  }}
+                  onMouseLeave={(e) => {
+                    if (!clearLoading) {
+                      (e.target as HTMLButtonElement).style.backgroundColor = designTokens.colors.error;
+                    }
+                  }}
                 >
-                  確定清除
+                  {clearLoading ? (
+                    <>
+                      <Loader2 className="w-4 h-4 animate-spin mr-2" />
+                      清除中...
+                    </>
+                  ) : (
+                    '確定清除'
+                  )}
                 </button>
               </div>
             </div>
@@ -886,19 +1047,45 @@ const LPGPage = () => {
         </div>
       )}
 
-      {/* 底部操作欄 */}
-      <BottomActionBar
-        currentStatus={currentStatus}
-        currentEntryId={currentEntryId}
-        isUpdating={isUpdating}
-        hasSubmittedBefore={hasSubmittedBefore}
-        hasAnyData={hasAnyData}
-        editPermissions={editPermissions}
-        submitting={submitting}
-        onSubmit={handleSubmit}
-        onClear={() => setShowClearConfirmModal(true)}
-        designTokens={designTokens}
-      />
+      {/* 底部操作欄 - 唯讀模式和 approved 狀態下隱藏 */}
+      {!isReadOnly && !approvalStatus.isApproved && !isReviewMode && (
+        <BottomActionBar
+          currentStatus={currentStatus}
+          currentEntryId={currentEntryId}
+          isUpdating={isUpdating}
+          hasSubmittedBefore={hasSubmittedBefore}
+          hasAnyData={hasAnyData}
+          banner={banner}
+          editPermissions={editPermissions}
+          submitting={submitting}
+          saving={submitting}
+          onSubmit={handleSubmit}
+          onSave={handleSave}
+          onClear={() => setShowClearConfirmModal(true)}
+          designTokens={designTokens}
+        />
+      )}
+
+      {/* 審核區塊 - 只在審核模式顯示 */}
+      {isReviewMode && currentEntryId && (
+        <ReviewSection
+          entryId={reviewEntryId || currentEntryId}
+          userId={reviewUserId || "current_user"}
+          category="液化石油氣"
+          userName={reviewUserId || "用戶"}
+          amount={monthlyData.reduce((sum, data) => sum + data.totalUsage, 0)}
+          unit="KG"
+          role={role}
+          onSave={handleSave}
+          isSaving={submitting}
+          onApprove={() => {
+            console.log('✅ 液化石油氣填報審核通過 - 由 ReviewSection 處理')
+          }}
+          onReject={(reason) => {
+            console.log('❌ 液化石油氣填報已退回 - 由 ReviewSection 處理:', reason)
+          }}
+        />
+      )}
 
       {/* Toast 通知 */}
       {toast && (

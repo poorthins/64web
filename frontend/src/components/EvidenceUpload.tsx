@@ -1,8 +1,9 @@
 import { useState, useRef, useEffect } from 'react'
 import { Upload, X, File, AlertCircle, CheckCircle, FileText, Trash2, Eye, FileSpreadsheet } from 'lucide-react'
-import { uploadEvidence, uploadEvidenceSimple, deleteEvidence, deleteEvidenceFile, getFileUrl, EvidenceFile, listMSDSFiles, listUsageEvidenceFiles, getCategoryFromPageKey } from '../api/files'
+import { uploadEvidence, uploadEvidenceSimple, deleteEvidence, deleteEvidenceFile, adminDeleteEvidence, getFileUrl, EvidenceFile, listMSDSFiles, listUsageEvidenceFiles, getCategoryFromPageKey } from '../api/files'
 import FilePreview from './FilePreview'
 import { MemoryFile } from '../services/documentHandler'
+import { supabase } from '../lib/supabaseClient'
 
 export type { MemoryFile }
 
@@ -34,7 +35,7 @@ function deduplicateFilesByID(files: EvidenceFile[], context: string = ''): Evid
   return deduplicated
 }
 
-export type EntryStatus = 'submitted' | 'approved' | 'rejected'
+export type EntryStatus = 'saved' | 'submitted' | 'approved' | 'rejected'
 
 interface EvidenceUploadProps {
   pageKey: string
@@ -51,18 +52,21 @@ interface EvidenceUploadProps {
   memoryFiles?: MemoryFile[]
   onMemoryFilesChange?: (files: MemoryFile[]) => void
   hideFileCount?: boolean  // 隱藏檔案數量顯示
+  isAdminReviewMode?: boolean  // 管理員審核模式標記
 }
 
 // 輔助函數：判斷當前狀態是否允許上傳檔案
 function canUploadFiles(status?: EntryStatus): boolean {
   if (!status) return true // 如果沒有狀態，預設允許
-  return status === 'submitted' || status === 'rejected'
+  // 只有 'approved' 狀態不允許上傳，其他狀態都允許
+  return status !== 'approved'
 }
 
 // 輔助函數：判斷當前狀態是否允許刪除檔案
 function canDeleteFiles(status?: EntryStatus): boolean {
   if (!status) return true // 如果沒有狀態，預設允許
-  return status === 'submitted' || status === 'rejected'
+  // 只有 'approved' 狀態不允許刪除，其他狀態都允許
+  return status !== 'approved'
 }
 
 const EvidenceUpload: React.FC<EvidenceUploadProps> = ({
@@ -78,7 +82,8 @@ const EvidenceUpload: React.FC<EvidenceUploadProps> = ({
   mode = 'view',
   memoryFiles = [],
   onMemoryFilesChange,
-  hideFileCount = false
+  hideFileCount = false,
+  isAdminReviewMode = false
 }) => {
 
   const [uploading, setUploading] = useState(false)
@@ -93,10 +98,21 @@ const EvidenceUpload: React.FC<EvidenceUploadProps> = ({
   const fileInputRef = useRef<HTMLInputElement>(null)
   const lastUploadTimeRef = useRef<number>(0) // 追蹤最後一次上傳時間
   const uploadingRef = useRef(false) // 雙重上傳鎖，避免 closure 問題
-  
+
   // 狀態檢查
-  const isStatusUploadDisabled = !canUploadFiles(currentStatus)
-  const isStatusDeleteDisabled = !canDeleteFiles(currentStatus)
+  const isStatusUploadDisabled = isAdminReviewMode ? false : !canUploadFiles(currentStatus)
+  const isStatusDeleteDisabled = isAdminReviewMode ? false : !canDeleteFiles(currentStatus)
+
+  // Debug 輸出
+  console.log('🔍 [EvidenceUpload] Received props:', {
+    pageKey,
+    filesCount: files.length,
+    memoryFilesCount: memoryFiles.length,
+    mode,
+    kind,
+    currentStatus,
+    disabled
+  })
 
   const handleFileSelect = async (selectedFiles: FileList | null) => {
     if (!selectedFiles || selectedFiles.length === 0) {
@@ -135,6 +151,37 @@ const EvidenceUpload: React.FC<EvidenceUploadProps> = ({
 
     if (duplicateFiles.length > 0) {
       setError(`以下檔案已存在：${duplicateFiles.join(', ')}`)
+      return
+    }
+
+    // 檔案類型驗證
+    const allowedExtensions = ['.xlsx', '.xls', '.pdf', '.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp', '.svg']
+    const allowedMimeTypes = [
+      'application/pdf',
+      'application/vnd.ms-excel',
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      'image/jpeg',
+      'image/png',
+      'image/gif',
+      'image/webp',
+      'image/bmp',
+      'image/svg+xml'
+    ]
+
+    const invalidFiles: string[] = []
+    Array.from(selectedFiles).forEach(file => {
+      const fileName = file.name.toLowerCase()
+      const fileExtension = fileName.substring(fileName.lastIndexOf('.'))
+      const isValidExtension = allowedExtensions.includes(fileExtension)
+      const isValidMimeType = file.type && (allowedMimeTypes.includes(file.type) || file.type.startsWith('image/'))
+
+      if (!isValidExtension && !isValidMimeType) {
+        invalidFiles.push(file.name)
+      }
+    })
+
+    if (invalidFiles.length > 0) {
+      setError(`不支援的檔案類型：${invalidFiles.join(', ')}。僅支援 Excel (.xlsx, .xls)、PDF 及圖片檔案`)
       return
     }
 
@@ -349,8 +396,11 @@ const EvidenceUpload: React.FC<EvidenceUploadProps> = ({
 
       const isAssociatedFile = file.entry_id && file.entry_id !== ''
 
-      if (isAssociatedFile) {
-        await deleteEvidenceFile(file.id)
+      // ⭐ 根據模式選擇正確的刪除 API
+      if (isAdminReviewMode && isAssociatedFile) {
+        await adminDeleteEvidence(file.id)  // 管理員 API：不檢查 owner_id
+      } else if (isAssociatedFile) {
+        await deleteEvidenceFile(file.id)   // 一般 API：檢查 owner_id
       } else {
         await deleteEvidence(fileId)
       }
@@ -410,6 +460,25 @@ const EvidenceUpload: React.FC<EvidenceUploadProps> = ({
       }))
     } catch (error) {
       console.warn('Failed to generate thumbnail:', error)
+
+      // ✅ 偵測 404 幽靈檔案並自動清理
+      if (error instanceof Error && error.message.includes('Object not found')) {
+        console.warn(`👻 Ghost file detected in thumbnail: ${file.id} (${file.file_name}), removing...`)
+
+        // 從前端 state 移除
+        const updatedFiles = files.filter(f => f.id !== file.id)
+        onFilesChange(updatedFiles)
+
+        // 從資料庫刪除記錄
+        try {
+          await supabase.from('entry_files').delete().eq('id', file.id)
+          console.log(`🗑️ Deleted ghost file record: ${file.id}`)
+        } catch (dbError) {
+          console.error('Failed to delete ghost file from DB:', dbError)
+        }
+      }
+      // 其他錯誤: 縮圖載入失敗不影響檔案本身
+      // UI 會自動顯示預設圖示 (已有 fallback 機制)
     }
   }
 
@@ -421,10 +490,17 @@ const EvidenceUpload: React.FC<EvidenceUploadProps> = ({
     return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i]
   }
 
+  // ⭐ 工具函數：去掉檔名前綴（diesel_123_ 這種格式）
+  const removeFileNamePrefix = (fileName: string): string => {
+    return fileName.replace(/^[^_]+_/, '')
+  }
+
   const truncateFileName = (fileName: string, maxLength: number = 30): string => {
-    if (fileName.length <= maxLength) return fileName
-    const extension = fileName.split('.').pop()
-    const nameWithoutExt = fileName.substring(0, fileName.lastIndexOf('.'))
+    // ⭐ 先去掉前綴再截斷
+    const cleanName = removeFileNamePrefix(fileName)
+    if (cleanName.length <= maxLength) return cleanName
+    const extension = cleanName.split('.').pop()
+    const nameWithoutExt = cleanName.substring(0, cleanName.lastIndexOf('.'))
     const truncatedName = nameWithoutExt.substring(0, maxLength - extension!.length - 4) + '...'
     return `${truncatedName}.${extension}`
   }
@@ -497,16 +573,8 @@ const EvidenceUpload: React.FC<EvidenceUploadProps> = ({
     })
   }, [files]) // 添加依賴，當 files 變更時重新生成縮圖
 
-  // 清理記憶體檔案的預覽URL，防止記憶體洩漏
-  useEffect(() => {
-    return () => {
-      memoryFiles.forEach(memoryFile => {
-        if (memoryFile.preview) {
-          URL.revokeObjectURL(memoryFile.preview)
-        }
-      })
-    }
-  }, [memoryFiles])
+  // ⚠️ 已移除自動 cleanup：多個元件可能共享同一個 blob URL
+  // 只在 handleMemoryFileRemove (Line 322) 真正刪除時才 revoke
 
   // 檢查是否已達到檔案上限和狀態限制
   const totalFiles = files.length + memoryFiles.length
@@ -533,78 +601,81 @@ const EvidenceUpload: React.FC<EvidenceUploadProps> = ({
         </div>
       )}
 
-      {/* 上傳區域 */}
-      <div
-        className={`
-          min-h-[120px] border-2 border-dashed rounded-lg text-center transition-all duration-200
-          flex flex-col items-center justify-center py-6 px-4
-          ${isUploadDisabled
-            ? 'border-gray-200 bg-gray-50 cursor-not-allowed'
-            : isDragging
-            ? 'border-blue-500 bg-blue-50 scale-[1.02] shadow-lg'
-            : 'border-gray-300 hover:border-blue-400 hover:bg-blue-50 cursor-pointer'
-          }
-        `}
-        onClick={(e) => {
-          // 防止事件冒泡
-          e.stopPropagation()
+      {/* 上傳區域 - 只在未達上限時顯示 */}
+      {!isAtMaxCapacity && (
+        <div
+          className={`
+            min-h-[120px] border-2 border-dashed rounded-lg text-center transition-all duration-200
+            flex flex-col items-center justify-center py-6 px-4
+            ${isUploadDisabled
+              ? 'border-gray-200 bg-gray-50 cursor-not-allowed'
+              : isDragging
+              ? 'border-blue-500 bg-blue-50 scale-[1.02] shadow-lg'
+              : 'border-gray-300 hover:border-blue-400 hover:bg-blue-50 cursor-pointer'
+            }
+          `}
+          onClick={(e) => {
+            // 防止事件冒泡
+            e.stopPropagation()
 
-          // 再次檢查上傳狀態
-          if (!isUploadDisabled && !uploading && fileInputRef.current) {
-            fileInputRef.current.click()
-          }
-        }}
-        onDragOver={isUploadDisabled ? undefined : handleDragOver}
-        onDragLeave={isUploadDisabled ? undefined : handleDragLeave}
-        onDrop={isUploadDisabled ? undefined : handleDrop}
-      >
-        <input
-          ref={fileInputRef}
-          type="file"
-          multiple
-          onChange={(e) => {
-            // 事件處理器中再次檢查狀態
-            if (!uploading && e.target.files) {
-              handleFileSelect(e.target.files)
+            // 再次檢查上傳狀態
+            if (!isUploadDisabled && !uploading && fileInputRef.current) {
+              fileInputRef.current.click()
             }
           }}
-          className="hidden"
-          disabled={isUploadDisabled}
-        />
+          onDragOver={isUploadDisabled ? undefined : handleDragOver}
+          onDragLeave={isUploadDisabled ? undefined : handleDragLeave}
+          onDrop={isUploadDisabled ? undefined : handleDrop}
+        >
+          <input
+            ref={fileInputRef}
+            type="file"
+            multiple
+            accept=".xlsx,.xls,.pdf,.jpg,.jpeg,.png,.gif,.webp,.bmp,.svg,image/*,application/pdf,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            onChange={(e) => {
+              // 事件處理器中再次檢查狀態
+              if (!uploading && e.target.files) {
+                handleFileSelect(e.target.files)
+              }
+            }}
+            className="hidden"
+            disabled={isUploadDisabled}
+          />
 
-        {uploading ? (
-          <div className="flex items-center justify-center space-x-2">
-            <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-blue-600"></div>
-            <span className="text-sm text-gray-600">上傳中...</span>
-          </div>
-        ) : (
-          <>
-            <Upload className={`h-6 w-6 transition-all ${
-              disabled ? 'text-gray-400' :
-              isDragging ? 'text-blue-600 scale-125' : 'text-gray-500'
-            }`} />
-            <div className="text-sm mt-2">
-              <span className={disabled || isStatusUploadDisabled ? 'text-gray-400' : isDragging ? 'text-blue-700 font-semibold' : 'text-blue-600 font-medium'}>
-                {isStatusUploadDisabled
-                  ? `${currentStatus === 'submitted' ? '已提交' : currentStatus === 'approved' ? '已核准' : ''}狀態下無法上傳檔案`
-                  : isDragging
-                    ? '拖放檔案到這裡'
-                    : mode === 'edit'
-                      ? '點擊或拖放檔案暫存'
-                      : '點擊或拖放檔案上傳'
-                }
-              </span>
-              {!isStatusUploadDisabled && (
-                <p className={`text-xs mt-1 transition-colors ${
-                  isDragging ? 'text-blue-600' : 'text-gray-500'
-                }`}>
-                  支援所有檔案類型，最大 10MB
-                </p>
-              )}
+          {uploading ? (
+            <div className="flex items-center justify-center space-x-2">
+              <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-blue-600"></div>
+              <span className="text-sm text-gray-600">上傳中...</span>
             </div>
-          </>
-        )}
-      </div>
+          ) : (
+            <>
+              <Upload className={`h-6 w-6 transition-all ${
+                disabled ? 'text-gray-400' :
+                isDragging ? 'text-blue-600 scale-125' : 'text-gray-500'
+              }`} />
+              <div className="text-sm mt-2">
+                <span className={disabled || isStatusUploadDisabled ? 'text-gray-400' : isDragging ? 'text-blue-700 font-semibold' : 'text-blue-600 font-medium'}>
+                  {isStatusUploadDisabled
+                    ? `${currentStatus === 'submitted' ? '已提交' : currentStatus === 'approved' ? '已核准' : ''}狀態下無法上傳檔案`
+                    : isDragging
+                      ? '拖放檔案到這裡'
+                      : mode === 'edit'
+                        ? '點擊或拖放檔案暫存'
+                        : '點擊或拖放檔案上傳'
+                  }
+                </span>
+                {!isStatusUploadDisabled && (
+                  <p className={`text-xs mt-1 transition-colors ${
+                    isDragging ? 'text-blue-600' : 'text-gray-500'
+                  }`}>
+                    支援 Excel、PDF 及圖片檔案，最大 10MB
+                  </p>
+                )}
+              </div>
+            </>
+          )}
+        </div>
+      )}
 
       {/* 成功訊息 */}
       {successMessage && (
@@ -647,109 +718,229 @@ const EvidenceUpload: React.FC<EvidenceUploadProps> = ({
           )}
 
           {/* 已上傳檔案 */}
-          {files.map((file, index) => (
-            <div
-              key={`uploaded-${file.id}-${index}`}
-              className={`flex items-center justify-between p-3 rounded-lg transition-all ${
-                file.entry_id
-                  ? 'bg-blue-50 border border-blue-200'
-                  : 'bg-gray-50 border border-gray-200'
-              }`}
-            >
-              <div className="flex items-center space-x-3 flex-1 min-w-0">
+          {files.map((file, index) => {
+            // maxFiles=1 時使用卡片式排版
+            if (maxFiles === 1) {
+              return (
                 <div
-                  className="cursor-pointer hover:opacity-75 transition-opacity"
-                  onClick={() => handlePreviewFile(file)}
-                  title="點擊預覽檔案"
+                  key={`uploaded-${file.id}-${index}`}
+                  className="rounded-lg border border-gray-200 overflow-hidden w-36 mx-auto"
                 >
-                  {renderFilePreview(file)}
-                </div>
-                <div className="flex-1 min-w-0">
-                  <div className="text-sm font-medium text-gray-900" title={file.file_name}>
-                    {truncateFileName(file.file_name)}
-                    {file.entry_id ? (
-                      <span className="ml-2 text-xs text-blue-600">(已提交)</span>
+                  {/* 圖片預覽區 */}
+                  <div
+                    className="p-2 bg-gray-50 cursor-pointer hover:opacity-90"
+                    onClick={() => handlePreviewFile(file)}
+                    title="點擊預覽檔案"
+                  >
+                    {file.mime_type.startsWith('image/') && thumbnails[file.id] ? (
+                      <img
+                        src={thumbnails[file.id]}
+                        alt={file.file_name}
+                        className="w-full h-32 object-cover rounded"
+                      />
                     ) : (
-                      <span className="ml-2 text-xs text-green-600">(已上傳)</span>
+                      <div className="w-full h-32 bg-blue-50 rounded flex items-center justify-center">
+                        {renderFilePreview(file)}
+                      </div>
                     )}
                   </div>
-                  <div className="text-xs text-gray-500">
-                    {formatFileSize(file.file_size)}
+
+                  {/* 檔案資訊 */}
+                  <div className="px-2 py-1 bg-white border-t">
+                    <p className="text-xs text-gray-700 truncate" title={removeFileNamePrefix(file.file_name)}>
+                      {removeFileNamePrefix(file.file_name)}
+                    </p>
+                    <p className="text-xs text-gray-500">
+                      {formatFileSize(file.file_size)}
+                    </p>
+                  </div>
+
+                  {/* 操作按鈕 */}
+                  <div className="border-t border-gray-200">
+                    <button
+                      className="w-full py-1.5 text-xs text-red-600 hover:bg-red-50 flex items-center justify-center space-x-1 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                      onClick={() => confirmDelete(file.id)}
+                      disabled={deletingFileId === file.id || isStatusDeleteDisabled || mode === 'view'}
+                      title={mode === 'view' ? "檢視模式下無法刪除檔案" : (isStatusDeleteDisabled ? "當前狀態下無法刪除檔案" : "刪除檔案")}
+                    >
+                      {deletingFileId === file.id ? (
+                        <>
+                          <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-red-600"></div>
+                          <span>刪除中</span>
+                        </>
+                      ) : (
+                        <>
+                          <Trash2 className="h-3 w-3" />
+                          <span>移除</span>
+                        </>
+                      )}
+                    </button>
                   </div>
                 </div>
-              </div>
+              )
+            }
 
-              <div className="flex items-center space-x-2">
-                <button
-                  onClick={() => handlePreviewFile(file)}
-                  className="flex items-center space-x-1 px-2 py-1 text-xs font-medium rounded border border-blue-600 text-blue-600 hover:bg-blue-600 hover:text-white transition-colors"
-                  title="預覽檔案"
-                >
-                  <Eye className="h-3 w-3" />
-                  <span>預覽</span>
-                </button>
-                <button
-                  onClick={() => confirmDelete(file.id)}
-                  disabled={deletingFileId === file.id || isStatusDeleteDisabled}
-                  className="flex items-center space-x-1 px-2 py-1 text-xs font-medium rounded border border-red-600 text-red-600 hover:bg-red-600 hover:text-white transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                  title={isStatusDeleteDisabled ? "當前狀態下無法刪除檔案" : "刪除檔案"}
-                >
-                  {deletingFileId === file.id ? (
-                    <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-red-600"></div>
-                  ) : (
-                    <Trash2 className="h-3 w-3" />
-                  )}
-                  <span>{deletingFileId === file.id ? '刪除中' : '刪除'}</span>
-                </button>
+            // 多檔案時使用列表式排版
+            return (
+              <div
+                key={`uploaded-${file.id}-${index}`}
+                className={`flex items-center justify-between p-3 rounded-lg transition-all ${
+                  file.entry_id
+                    ? 'bg-blue-50 border border-blue-200'
+                    : 'bg-gray-50 border border-gray-200'
+                }`}
+              >
+                <div className="flex items-center space-x-3 flex-1 min-w-0">
+                  <div
+                    className="cursor-pointer hover:opacity-75 transition-opacity"
+                    onClick={() => handlePreviewFile(file)}
+                    title="點擊預覽檔案"
+                  >
+                    {renderFilePreview(file)}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="text-sm font-medium text-gray-900" title={removeFileNamePrefix(file.file_name)}>
+                      {truncateFileName(file.file_name)}
+                      {file.entry_id ? (
+                        <span className="ml-2 text-xs text-blue-600">(已提交)</span>
+                      ) : (
+                        <span className="ml-2 text-xs text-green-600">(已上傳)</span>
+                      )}
+                    </div>
+                    <div className="text-xs text-gray-500">
+                      {formatFileSize(file.file_size)}
+                    </div>
+                  </div>
+                </div>
+
+                <div className="flex items-center space-x-2">
+                  <button
+                    onClick={() => handlePreviewFile(file)}
+                    className="flex items-center space-x-1 px-2 py-1 text-xs font-medium rounded border border-blue-600 text-blue-600 hover:bg-blue-600 hover:text-white transition-colors"
+                    title="預覽檔案"
+                  >
+                    <Eye className="h-3 w-3" />
+                    <span>預覽</span>
+                  </button>
+                  <button
+                    onClick={() => confirmDelete(file.id)}
+                    disabled={deletingFileId === file.id || isStatusDeleteDisabled || mode === 'view'}
+                    className="flex items-center space-x-1 px-2 py-1 text-xs font-medium rounded border border-red-600 text-red-600 hover:bg-red-600 hover:text-white transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                    title={mode === 'view' ? "檢視模式下無法刪除檔案" : (isStatusDeleteDisabled ? "當前狀態下無法刪除檔案" : "刪除檔案")}
+                  >
+                    {deletingFileId === file.id ? (
+                      <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-red-600"></div>
+                    ) : (
+                      <Trash2 className="h-3 w-3" />
+                    )}
+                    <span>{deletingFileId === file.id ? '刪除中' : '刪除'}</span>
+                  </button>
+                </div>
               </div>
-            </div>
-          ))}
+            )
+          })}
 
           {/* 記憶體暫存檔案 */}
-          {memoryFiles.map((memoryFile, index) => (
-            <div
-              key={`memory-${memoryFile.id}-${index}`}
-              className="flex items-center justify-between p-3 rounded-lg transition-all bg-orange-50 border border-orange-200"
-            >
-              <div className="flex items-center space-x-3 flex-1 min-w-0">
+          {memoryFiles.map((memoryFile, index) => {
+            // maxFiles=1 時使用卡片式排版
+            if (maxFiles === 1) {
+              return (
                 <div
-                  className="cursor-pointer hover:opacity-75 transition-opacity"
-                  onClick={() => handlePreviewFile(memoryFile)}
-                  title="點擊預覽檔案"
+                  key={`memory-${memoryFile.id}-${index}`}
+                  className="rounded-lg border border-orange-200 overflow-hidden w-36 mx-auto"
                 >
-                  {renderMemoryFilePreview(memoryFile)}
-                </div>
-                <div className="flex-1 min-w-0">
-                  <div className="text-sm font-medium text-gray-900" title={memoryFile.file_name}>
-                    {truncateFileName(memoryFile.file_name)}
-                    <span className="ml-2 text-xs text-orange-600">(暫存中)</span>
+                  {/* 圖片預覽區 */}
+                  <div
+                    className="p-2 bg-orange-50 cursor-pointer hover:opacity-90"
+                    onClick={() => handlePreviewFile(memoryFile)}
+                    title="點擊預覽檔案"
+                  >
+                    {memoryFile.mime_type.startsWith('image/') && memoryFile.preview ? (
+                      <img
+                        src={memoryFile.preview}
+                        alt={memoryFile.file_name}
+                        className="w-full h-32 object-cover rounded"
+                      />
+                    ) : (
+                      <div className="w-full h-32 bg-orange-100 rounded flex items-center justify-center">
+                        {renderMemoryFilePreview(memoryFile)}
+                      </div>
+                    )}
                   </div>
-                  <div className="text-xs text-gray-500">
-                    {formatFileSize(memoryFile.file_size)}
-                  </div>
-                </div>
-              </div>
 
-              <div className="flex items-center space-x-2">
-                <button
-                  onClick={() => handlePreviewFile(memoryFile)}
-                  className="flex items-center space-x-1 px-2 py-1 text-xs font-medium rounded border border-blue-600 text-blue-600 hover:bg-blue-600 hover:text-white transition-colors"
-                  title="預覽檔案"
-                >
-                  <Eye className="h-3 w-3" />
-                  <span>預覽</span>
-                </button>
-                <button
-                  onClick={() => handleRemoveFile(memoryFile.id)}
-                  className="flex items-center space-x-1 px-2 py-1 text-xs font-medium rounded border border-orange-600 text-orange-600 hover:bg-orange-600 hover:text-white transition-colors"
-                  title="從暫存中移除"
-                >
-                  <Trash2 className="h-3 w-3" />
-                  <span>移除</span>
-                </button>
+                  {/* 檔案資訊 */}
+                  <div className="px-2 py-1 bg-white border-t">
+                    <p className="text-xs text-gray-700 truncate" title={memoryFile.file_name}>
+                      {memoryFile.file_name}
+                    </p>
+                    <p className="text-xs text-orange-600">
+                      {formatFileSize(memoryFile.file_size)} (暫存中)
+                    </p>
+                  </div>
+
+                  {/* 操作按鈕 */}
+                  <div className="border-t border-orange-200">
+                    <button
+                      className="w-full py-1.5 text-xs text-orange-600 hover:bg-orange-50 flex items-center justify-center space-x-1 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                      onClick={() => handleRemoveFile(memoryFile.id)}
+                      disabled={mode === 'view'}
+                      title={mode === 'view' ? "檢視模式下無法移除檔案" : "從暫存中移除"}
+                    >
+                      <Trash2 className="h-3 w-3" />
+                      <span>移除</span>
+                    </button>
+                  </div>
+                </div>
+              )
+            }
+
+            // 多檔案時使用列表式排版
+            return (
+              <div
+                key={`memory-${memoryFile.id}-${index}`}
+                className="flex items-center justify-between p-3 rounded-lg transition-all bg-orange-50 border border-orange-200"
+              >
+                <div className="flex items-center space-x-3 flex-1 min-w-0">
+                  <div
+                    className="cursor-pointer hover:opacity-75 transition-opacity"
+                    onClick={() => handlePreviewFile(memoryFile)}
+                    title="點擊預覽檔案"
+                  >
+                    {renderMemoryFilePreview(memoryFile)}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="text-sm font-medium text-gray-900" title={memoryFile.file_name}>
+                      {truncateFileName(memoryFile.file_name)}
+                      <span className="ml-2 text-xs text-orange-600">(暫存中)</span>
+                    </div>
+                    <div className="text-xs text-gray-500">
+                      {formatFileSize(memoryFile.file_size)}
+                    </div>
+                  </div>
+                </div>
+
+                <div className="flex items-center space-x-2">
+                  <button
+                    onClick={() => handlePreviewFile(memoryFile)}
+                    className="flex items-center space-x-1 px-2 py-1 text-xs font-medium rounded border border-blue-600 text-blue-600 hover:bg-blue-600 hover:text-white transition-colors"
+                    title="預覽檔案"
+                  >
+                    <Eye className="h-3 w-3" />
+                    <span>預覽</span>
+                  </button>
+                  <button
+                    onClick={() => handleRemoveFile(memoryFile.id)}
+                    disabled={mode === 'view'}
+                    className="flex items-center space-x-1 px-2 py-1 text-xs font-medium rounded border border-orange-600 text-orange-600 hover:bg-orange-600 hover:text-white transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                    title={mode === 'view' ? "檢視模式下無法移除檔案" : "從暫存中移除"}
+                  >
+                    <Trash2 className="h-3 w-3" />
+                    <span>移除</span>
+                  </button>
+                </div>
               </div>
-            </div>
-          ))}
+            )
+          })}
         </div>
       )}
 

@@ -40,10 +40,10 @@
 |------|------|----------|------|
 | 範疇一 | WD-40 | wd40 | ✅ 已完成 |
 | 範疇一 | 乙炔 | acetylene | ✅ 已完成 |
-| 範疇一 | 冷媒 | refrigerant | ✅ 已完成 |
+| 範疇一 | 冷媒 | refrigerant | ✅ 已完成（設備清單 + UI/UX 優化） |
 | 範疇一 | 化糞池 | septic_tank | ✅ 已完成 |
 | 範疇一 | 天然氣 | natural_gas | ✅ 已完成 |
-| 範疇一 | 尿素 | urea | ✅ 已完成 |
+| 範疇一 | 尿素 | urea | ✅ 已完成（2025-10-09 修復 2 Bug） |
 | 範疇一 | 柴油(發電機) | diesel_generator | ✅ 已完成 |
 | 範疇一 | 柴油 | diesel | ✅ 已完成 |
 | 範疇一 | 汽油 | gasoline | ✅ 已完成 |
@@ -51,7 +51,7 @@
 | 範疇一 | 滅火器 | fire_extinguisher | ✅ 已完成 |
 | 範疇一 | 焊條 | welding_rod | ✅ 已完成 |
 | 範疇二 | 外購電力 | electricity | ✅ 已完成 |
-| 範疇三 | 員工通勤 | employee_commute | ✅ 已完成 |
+| 範疇三 | 員工通勤 | employee_commute | ✅ 已完成（2025-10-09 重構完成） |
 
 ### 現有架構的問題
 
@@ -414,38 +414,64 @@ submitted（已提交）← 可修改、可清除
 
 ---
 
-## 📅 實施計畫
+## 📅 實施計畫（已更新）
 
-### 階段 1：準備階段（第 1 週）
+### 階段 1：準備階段（✅ 已完成）
 - [x] 討論需求
 - [x] 確認流程
 - [x] 撰寫重構計畫文件
-- [ ] 設計 Hook API
-- [ ] 撰寫 Hook 使用文件
+- [x] 設計 Hook API
+- [x] 撰寫 Hook 使用文件
 
-### 階段 2：開發階段（第 2-3 週）
-- [ ] 開發 `useEnergySubmission`
-- [ ] 開發 `useEnergyReview`
-- [ ] 開發 `useEnergyFiles`
-- [ ] 統一共用組件
-- [ ] 撰寫單元測試
+### 階段 2：開發 Hooks（✅ 已完成）
+- [x] 開發 `useEnergyData`（資料載入）
+- [x] 開發 `useEnergySubmit`（提交邏輯）
+- [x] 開發 `useEnergyClear`（清除邏輯）
+- [ ] 開發 `useEnergyReview`（審核邏輯）← 延後
+- [ ] 統一共用組件（延後）
 
-### 階段 3：試點階段（第 4 週）
-- [ ] 重構 WD40Page（試點）
-- [ ] 完整測試 WD40 所有流程
-- [ ] 修正問題
-- [ ] 確認方案可行
+### 階段 3：WD40 試點（✅ 已完成）
+- [x] 重構 WD40Page（試點）
+- [x] 完整測試 WD40 所有流程
+- [x] 修正資料庫遞迴問題
+- [x] 修正檔案消失問題
+- [x] 修正 approved 狀態檔案刪除問題
+- [x] 確認方案可行
 
-### 階段 4：推廣階段（第 5-6 週）
-- [ ] 重構其他 13 個頁面
-- [ ] 每改一個就測試一個
-- [ ] 撰寫遷移指南
+### 階段 4：14 頁面分析（✅ 已完成）
+- [x] 分析所有 14 個能源頁面結構
+- [x] 分類頁面（高度適用、需要調整、特殊結構）
+- [x] 建立詳細分析報告
+- [x] 制定推廣優先順序
 
-### 階段 5：驗收階段（第 7 週）
-- [ ] 完整回歸測試
+### 階段 5：推廣到 8 個高度適用頁面（⏳ 進行中）
+**第一批（高度適用）：**
+- [x] AcetylenePage （乙炔）✅ 已完成
+- [x] LPGPage （液化石油氣）✅ 已完成（特殊處理）
+- [x] WeldingRodPage （焊條）✅ 已完成
+- [ ] DieselPage （柴油）← **下一步**
+- [ ] GasolinePage （汽油）
+- [ ] NaturalGasPage （天然氣）
+- [ ] UreaPage （尿素）
+- [ ] FireExtinguisherPage （滅火器）
+
+### 階段 6：處理 3 個需要調整的頁面（⏳ 進行中）
+**第二批（需要調整，預估 3-4.5 小時）：**
+- [x] RefrigerantPage （冷媒）✅ 已完成（設備清單 + UI/UX 優化）
+- [ ] SepticTankPage （化糞池）
+- [ ] DieselGeneratorPage （柴油發電機）
+
+### 階段 7：評估特殊結構頁面（⏳ 待評估）
+**第三批（特殊結構）：**
+- [ ] ElectricityPage （外購電力）- 考慮建立專用 Hook
+- [ ] RefuelPage （加油）- 建議保持原狀
+- [ ] CommuteePage （員工通勤）- 建議保持原狀
+
+### 階段 8：驗收與文件（⏳ 待開始）
+- [ ] 完整回歸測試（所有重構頁面）
 - [ ] 效能測試
 - [ ] 文件整理
-- [ ] 上線準備
+- [ ] 總結報告
 
 ---
 
@@ -522,14 +548,73 @@ submitted（已提交）← 可修改、可清除
 
 ---
 
-## 📞 聯絡資訊
+## 📞 相關文件
 
-如有問題，請參考：
-- 完整流程：見 `WORKFLOW.md`
-- Hook 使用：見 `HOOKS.md`
-- 遷移教學：見 `MIGRATION_GUIDE.md`
+### 核心文件
+- **WORKFLOW.md** - 完整工作流程
+- **HOOKS.md** - Hook 使用說明
+- **MIGRATION_CHECKLIST.md** - Hook 套用標準流程
+
+### 進度追蹤
+- **TODO.md** - 下次會話快速啟動
+- **REFACTORING_LOG.md** - 完整重構日誌
+- **PAGES_ANALYSIS.md** - 14 頁面詳細分析
 
 ---
 
-**文件版本：v1.0**  
-**最後更新：2025-01-01**
+## 🔄 後續優化計畫（延後）
+
+### 後端 API 優化
+考慮建立以下新 API，簡化前端邏輯：
+
+#### 1. `submit-with-files` API
+```typescript
+// 一次呼叫完成：儲存資料 + 上傳檔案 + 關聯
+POST /api/energy/submit-with-files
+{
+  pageKey: string,
+  year: number,
+  formData: object,
+  msdsFiles: File[],
+  monthlyFiles: File[][]
+}
+```
+
+#### 2. `delete-with-files` API
+```typescript
+// 一次呼叫完成：刪除記錄 + 刪除所有關聯檔案
+DELETE /api/energy/{entryId}/with-files
+```
+
+**決策：** 先完成前端重構，再評估是否需要後端優化
+
+---
+
+## 🐛 Bug 修復記錄
+
+### 2025-01-03: rejected 重新提交失敗
+
+**問題：**
+- 用戶無法重新提交 rejected 狀態的記錄
+- 錯誤：`RLS Policy 不允許此操作（當前狀態：rejected）`
+
+**根本原因：**
+1. `useEnergySubmit` 使用 `preserveStatus = true`，導致狀態保持 rejected
+2. RLS Policy `entries_update_v3` 要求 `reviewer_id IS NULL`，但 rejected 記錄已有 reviewer_id
+3. 管理員退回時設定 `is_locked = true`，阻擋用戶更新
+
+**修復方案：**
+1. ✅ 修改 `useEnergySubmit.ts` Line 97 → `preserveStatus = false`（提交永遠變 submitted）
+2. ✅ 修改 RLS Policy → `entries_update_v5`（允許 rejected 狀態更新，移除 reviewer_id 限制）
+3. ✅ 修改 `entries.ts` Line 156 → `is_locked = false`（提交時自動解鎖）
+4. ✅ 加強 UPDATE 驗證 → 使用 `.maybeSingle()` 檢查是否真正更新
+
+**影響範圍：**
+- WD40Page ✅ 修復
+- AcetylenePage ✅ 修復
+- 其他頁面：待套用 Hook 時自動修復
+
+---
+
+**文件版本：v2.1**
+**最後更新：2025-01-03**

@@ -8,21 +8,21 @@ interface StatusIndicatorProps {
 }
 
 const statusConfig = {
-  draft: { 
-    color: '#6b7280', 
-    text: '草稿' 
+  saved: {
+    color: '#3b82f6',
+    text: '已暫存'
   },
-  submitted: { 
-    color: '#3b82f6', 
-    text: '已提交' 
+  submitted: {
+    color: '#3b82f6',
+    text: '已提交'
   },
-  approved: { 
-    color: '#10b981', 
-    text: '已通過' 
+  approved: {
+    color: '#10b981',
+    text: '已通過'
   },
-  rejected: { 
-    color: '#ef4444', 
-    text: '已退回' 
+  rejected: {
+    color: '#ef4444',
+    text: '已退回'
   }
 }
 

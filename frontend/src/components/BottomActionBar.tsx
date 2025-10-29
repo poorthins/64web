@@ -1,7 +1,8 @@
 import React from 'react'
-import { Upload, Loader2, Trash2, CheckCircle } from 'lucide-react'
+import { Upload, Loader2, Trash2, CheckCircle, Save } from 'lucide-react'
 import StatusIndicator from './StatusIndicator'
 import { EntryStatus } from './StatusSwitcher'
+import { StatusBannerConfig } from '../hooks/useStatusBanner'
 
 interface BottomActionBarProps {
   // 狀態管理
@@ -10,20 +11,23 @@ interface BottomActionBarProps {
   isUpdating: boolean
   hasSubmittedBefore?: boolean
   hasAnyData?: boolean  // 新增：是否有填寫資料
-  
+  banner?: StatusBannerConfig | null  // 新增：統一的狀態橫幅配置
+
   // 操作權限
   editPermissions: {
     canEdit: boolean
     canUploadFiles: boolean
   }
-  
+
   // 操作狀態
   submitting: boolean
-  
+  saving?: boolean  // 儲存中狀態
+
   // 事件處理
   onSubmit: () => void
+  onSave?: () => void  // 儲存處理函數
   onClear: () => void
-  
+
   // 樣式配置
   designTokens: any
 }
@@ -43,9 +47,12 @@ export default function BottomActionBar({
   isUpdating,
   hasSubmittedBefore = false,
   hasAnyData = false,
+  banner,
   editPermissions,
   submitting,
+  saving = false,
   onSubmit,
+  onSave,
   onClear,
   designTokens
 }: BottomActionBarProps) {
@@ -69,8 +76,20 @@ export default function BottomActionBar({
           <div className="flex items-center justify-between">
             {/* 左側: 狀態顯示區域 */}
             <div className="flex items-center gap-2">
-              {/* 狀態指示器 */}
-              {hasSubmittedBefore && currentStatus ? (
+              {/* 狀態指示器 - 優先使用 banner.type，確保圓點顏色與文字同步 */}
+              {banner ? (
+                // 使用 banner 時：自己畫圓點（顏色根據 banner.type 決定）
+                <div
+                  className="w-2 h-2 rounded-full flex-shrink-0"
+                  style={{
+                    backgroundColor:
+                      banner.type === 'approved' ? '#10b981' :
+                      banner.type === 'rejected' ? '#ef4444' :
+                      '#3b82f6'
+                  }}
+                />
+              ) : hasSubmittedBefore && currentStatus ? (
+                // 沒有 banner：使用原 StatusIndicator
                 <StatusIndicator status={currentStatus} />
               ) : !hasSubmittedBefore && hasAnyData ? (
                 <div className="w-2 h-2 rounded-full bg-yellow-400 animate-pulse" />
@@ -78,34 +97,38 @@ export default function BottomActionBar({
                 <div className="w-2 h-2 rounded-full bg-gray-400" />
               ) : null}
               
-              {/* 狀態文字 */}
+              {/* 狀態文字 - 優先使用 banner，否則使用原邏輯 */}
               <span className="text-sm text-gray-600">
-                {!hasSubmittedBefore ? (
-                  hasAnyData ? "請完成填寫並提交" : "請開始填寫資料"
+                {banner ? (
+                  // 使用統一的 statusText
+                  <span className={`font-medium ${
+                    banner.type === 'approved' ? 'text-green-600' :
+                    banner.type === 'rejected' ? 'text-red-600' :
+                    banner.type === 'pending' ? 'text-blue-600' :
+                    'text-gray-600'
+                  }`}>
+                    {banner.statusText}
+                  </span>
                 ) : (
-                  <>
-                    {currentStatus === 'submitted' && "已提交待審"}
-                    {currentStatus === 'approved' && 
-                      <span className="text-green-600 font-medium">審核通過（已鎖定）</span>
-                    }
-                    {currentStatus === 'rejected' && (
-                      hasAnyData ? 
-                        <span className="text-orange-600 font-medium">
-                          訂正中 - 請完成修改後重新提交
-                        </span> : 
+                  // 向後相容：舊邏輯
+                  !hasSubmittedBefore ? (
+                    hasAnyData ? "請完成填寫並提交" : "請開始填寫資料"
+                  ) : (
+                    <>
+                      {currentStatus === 'submitted' && "已提交待審"}
+                      {currentStatus === 'approved' &&
+                        <span className="text-green-600 font-medium">審核通過（已鎖定）</span>
+                      }
+                      {currentStatus === 'rejected' && (
                         <span className="text-red-600 font-medium">
-                          已退回 - 請修正問題
+                          已退回
                         </span>
-                    )}
-                  </>
+                      )}
+                    </>
+                  )
                 )}
               </span>
-              
-              {/* 退回警示 */}
-              {currentStatus === 'rejected' && (
-                <span className="text-xs text-red-500 ml-2">⚠️ 需要修正</span>
-              )}
-              
+
               {/* 更新中指示器 */}
               {isUpdating && (
                 <Loader2 className="w-4 h-4 animate-spin text-blue-600 ml-2" />
@@ -116,21 +139,21 @@ export default function BottomActionBar({
             <div className="flex items-center space-x-3">
               {/* 清除按鈕 - 審核通過後隱藏 */}
               {canEdit && (
-                <button 
+                <button
                   onClick={onClear}
-                  disabled={submitting || !canEdit}
+                  disabled={submitting || saving || !canEdit}
                   className="px-4 py-2 border rounded-lg disabled:cursor-not-allowed transition-colors flex items-center space-x-2 font-medium disabled:opacity-50"
-                  style={{ 
+                  style={{
                     borderColor: designTokens.colors.border,
                     color: designTokens.colors.textSecondary
                   }}
                   onMouseEnter={(e) => {
-                    if (!submitting && canEdit) {
+                    if (!submitting && !saving && canEdit) {
                       (e.target as HTMLButtonElement).style.backgroundColor = '#f3f4f6';
                     }
                   }}
                   onMouseLeave={(e) => {
-                    if (!submitting && canEdit) {
+                    if (!submitting && !saving && canEdit) {
                       (e.target as HTMLButtonElement).style.backgroundColor = 'transparent';
                     }
                   }}
@@ -139,14 +162,39 @@ export default function BottomActionBar({
                   <span>清除</span>
                 </button>
               )}
-              
+
+              {/* 儲存按鈕 */}
+              {canEdit && onSave && (
+                <button
+                  onClick={onSave}
+                  disabled={saving || submitting || !canEdit}
+                  className={`px-5 py-2 rounded-lg transition-colors flex items-center space-x-2 font-medium disabled:opacity-50 ${
+                    canEdit && !saving && !submitting
+                      ? 'bg-blue-600 text-white hover:bg-blue-700 cursor-pointer'
+                      : 'bg-gray-400 text-gray-200 cursor-not-allowed'
+                  }`}
+                >
+                  {saving ? (
+                    <>
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                      <span>儲存中...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Save className="w-4 h-4" />
+                      <span>儲存</span>
+                    </>
+                  )}
+                </button>
+              )}
+
               {/* 提交按鈕 */}
-              <button 
+              <button
                 onClick={onSubmit}
-                disabled={submitting || !canSubmit}
+                disabled={submitting || saving || !canSubmit}
                 className={`px-6 py-2 rounded-lg transition-colors flex items-center space-x-2 font-medium disabled:opacity-50 ${
-                  canSubmit 
-                    ? 'bg-green-600 text-white hover:bg-green-700 cursor-pointer' 
+                  canSubmit && !saving && !submitting
+                    ? 'bg-green-600 text-white hover:bg-green-700 cursor-pointer'
                     : 'bg-gray-400 text-gray-200 cursor-not-allowed'
                 }`}
               >

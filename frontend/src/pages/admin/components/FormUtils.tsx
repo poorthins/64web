@@ -47,11 +47,8 @@ export const validateUserForm = (data: Partial<UserFormData>, isEditMode: boolea
 
 
   // 目標年份驗證
-  const currentYear = new Date().getFullYear()
   if (!data.targetYear) {
     errors.targetYear = '請選擇目標年份'
-  } else if (data.targetYear < currentYear || data.targetYear > currentYear + 10) {
-    errors.targetYear = `目標年份必須在 ${currentYear} 到 ${currentYear + 10} 之間`
   }
 
   // 能源類別驗證

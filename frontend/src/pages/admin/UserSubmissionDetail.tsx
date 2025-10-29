@@ -1,8 +1,11 @@
 import { useState, useEffect } from 'react'
-import { ArrowLeft, FileText, CheckCircle, XCircle, AlertTriangle, Download, Eye, MessageSquare, Calendar, User, Building, Save, X, Loader2, Lock, Unlock, RotateCcw } from 'lucide-react'
+import { ArrowLeft, FileText, CheckCircle, XCircle, AlertTriangle, Download, Eye, MessageSquare, Calendar, User, Building, Save, X, Loader2, Lock, Unlock, RotateCcw, Package, Edit } from 'lucide-react'
 import { getUserSubmissions, reviewSubmission, Submission, ReviewStatus } from '../../api/adminSubmissions'
 import { getUserDetails, UserProfile } from '../../api/adminUsers'
 import { reviewEntry } from '../../api/reviewEnhancements'
+import { getFileUrlForAdmin } from '../../api/files'
+import { exportUserEntriesWithFiles, exportUserEntriesExcel, downloadFileWithRename } from '../admin/utils/exportUtils'
+import { getUserEntries, updateWD40EntryAsAdmin } from '../../api/entries'
 
 interface UserSubmissionDetailProps {
   userId: string
@@ -40,10 +43,33 @@ const UserSubmissionDetail: React.FC<UserSubmissionDetailProps> = ({
   
   // 檢視詳情
   const [viewingSubmission, setViewingSubmission] = useState<SubmissionWithFiles | null>(null)
-  
+
+  // WD-40 編輯狀態
+  const [editingWD40, setEditingWD40] = useState<SubmissionWithFiles | null>(null)
+  const [wd40EditData, setWD40EditData] = useState<{
+    unitCapacity: number
+    monthlyQuantity: Record<string, number>
+    unit: string
+    notes: string
+  }>({
+    unitCapacity: 0,
+    monthlyQuantity: {},
+    unit: 'ML',
+    notes: ''
+  })
+  const [isSavingWD40, setIsSavingWD40] = useState(false)
+
   // 篩選狀態
   const [statusFilter, setStatusFilter] = useState<'all' | 'pending' | 'approved' | 'needs_fix'>('all')
   const [categoryFilter, setCategoryFilter] = useState<'all' | '範疇一' | '範疇二' | '範疇三'>('all')
+
+  // 下載狀態
+  const [downloadingFileId, setDownloadingFileId] = useState<string | null>(null)
+
+  // ZIP 匯出狀態
+  const [isExporting, setIsExporting] = useState(false)
+  const [exportProgress, setExportProgress] = useState<{ status: string; current?: number; total?: number } | null>(null)
+  const [exportResult, setExportResult] = useState<{ success: number; failed: number; errors: string[] } | null>(null)
 
   useEffect(() => {
     fetchData()
@@ -215,6 +241,114 @@ const UserSubmissionDetail: React.FC<UserSubmissionDetailProps> = ({
     }
   };
 
+  // 下載檔案處理函數
+  const handleDownloadFile = async (file: { id: string; filename: string; file_path: string }) => {
+    try {
+      setDownloadingFileId(file.id)
+
+      // 獲取檔案下載 URL（60秒有效期）
+      const fileUrl = await getFileUrlForAdmin(file.file_path, userId, true)
+
+      // 觸發下載
+      const link = document.createElement('a')
+      link.href = fileUrl
+      link.download = file.filename
+      link.target = '_blank'
+      document.body.appendChild(link)
+      link.click()
+      document.body.removeChild(link)
+
+    } catch (error) {
+      console.error('下載檔案失敗:', error)
+      alert('下載檔案失敗，請稍後再試')
+    } finally {
+      setDownloadingFileId(null)
+    }
+  }
+
+  // 下載 ZIP（Excel + 佐證資料）
+  const handleDownloadZIP = async () => {
+    try {
+      setIsExporting(true)
+      setExportProgress({ status: '正在準備資料...' })
+      setExportResult(null)
+
+      // 取得使用者的所有 entries
+      const entries = await getUserEntries(userId)
+
+      if (!entries || entries.length === 0) {
+        alert('該使用者沒有填報資料')
+        return
+      }
+
+      // 執行匯出
+      const result = await exportUserEntriesWithFiles(
+        userId,
+        userName,
+        entries,
+        (status, current, total) => {
+          setExportProgress({ status, current, total })
+        }
+      )
+
+      setExportResult(result)
+
+      // 顯示結果
+      if (result.failed === 0) {
+        alert(`✅ 下載完成！\n成功：${result.success} 個檔案`)
+      } else {
+        const message = `⚠️ 下載完成（部分檔案失敗）\n\n✅ 成功：${result.success} 個檔案\n❌ 失敗：${result.failed} 個檔案\n\n失敗原因：\n${result.errors.join('\n')}`
+        alert(message)
+      }
+    } catch (error) {
+      console.error('ZIP 匯出失敗:', error)
+      alert(`下載失敗：${error instanceof Error ? error.message : '未知錯誤'}`)
+    } finally {
+      setIsExporting(false)
+      setExportProgress(null)
+    }
+  }
+
+  // 只下載 Excel（不含佐證資料）
+  const handleDownloadExcel = async () => {
+    try {
+      setIsExporting(true)
+      setExportProgress({ status: '正在生成 Excel...' })
+
+      // 取得使用者的所有 entries
+      const entries = await getUserEntries(userId)
+
+      if (!entries || entries.length === 0) {
+        alert('該使用者沒有填報資料')
+        return
+      }
+
+      // 執行匯出
+      await exportUserEntriesExcel(userId, userName, entries)
+
+      alert('✅ Excel 下載完成！')
+    } catch (error) {
+      console.error('Excel 匯出失敗:', error)
+      alert(`下載失敗：${error instanceof Error ? error.message : '未知錯誤'}`)
+    } finally {
+      setIsExporting(false)
+      setExportProgress(null)
+    }
+  }
+
+  // 單檔下載並重命名
+  const handleDownloadFileWithRename = async (file: { id: string; filename: string; file_path: string }, categoryId: string) => {
+    try {
+      setDownloadingFileId(file.id)
+      await downloadFileWithRename(file.file_path, file.filename, categoryId, userId)
+    } catch (error) {
+      console.error('下載檔案失敗:', error)
+      alert('下載檔案失敗，請稍後再試')
+    } finally {
+      setDownloadingFileId(null)
+    }
+  }
+
   const exportToCSV = () => {
     if (submissions.length === 0) return
 
@@ -246,6 +380,62 @@ const UserSubmissionDetail: React.FC<UserSubmissionDetailProps> = ({
     document.body.appendChild(link)
     link.click()
     document.body.removeChild(link)
+  }
+
+  // WD-40 編輯相關函數
+  const openWD40EditModal = (submission: SubmissionWithFiles) => {
+    const payload = (submission as any).payload || {}
+
+    setEditingWD40(submission)
+    setWD40EditData({
+      unitCapacity: payload.unitCapacity || 0,
+      monthlyQuantity: payload.monthlyQuantity || {},
+      unit: submission.unit || 'ML',
+      notes: submission.notes || ''
+    })
+  }
+
+  const handleMonthlyQuantityChange = (month: string, value: number) => {
+    setWD40EditData(prev => ({
+      ...prev,
+      monthlyQuantity: {
+        ...prev.monthlyQuantity,
+        [month]: value
+      }
+    }))
+  }
+
+  const calculateTotalUsage = () => {
+    const { unitCapacity, monthlyQuantity } = wd40EditData
+    return Object.values(monthlyQuantity).reduce((sum, qty) => sum + (qty * unitCapacity), 0)
+  }
+
+  const handleSaveWD40Edit = async (e: React.FormEvent) => {
+    e.preventDefault()
+
+    if (!editingWD40) return
+
+    try {
+      setIsSavingWD40(true)
+
+      await updateWD40EntryAsAdmin(editingWD40.id, {
+        unitCapacity: wd40EditData.unitCapacity,
+        monthlyQuantity: wd40EditData.monthlyQuantity,
+        unit: wd40EditData.unit,
+        notes: wd40EditData.notes
+      })
+
+      // 重新載入資料
+      await fetchData()
+
+      setEditingWD40(null)
+      alert('✅ WD-40 資料編輯成功！')
+    } catch (error) {
+      console.error('編輯 WD-40 失敗:', error)
+      alert(`編輯失敗：${error instanceof Error ? error.message : '未知錯誤'}`)
+    } finally {
+      setIsSavingWD40(false)
+    }
   }
 
   const getStatistics = () => {
@@ -354,8 +544,67 @@ const UserSubmissionDetail: React.FC<UserSubmissionDetailProps> = ({
             <Download className="h-4 w-4" />
             匯出記錄
           </button>
+
+          {/* 新增：下載 ZIP（Excel + 佐證資料）*/}
+          <button
+            onClick={handleDownloadZIP}
+            disabled={isExporting}
+            className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50"
+          >
+            {isExporting ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <Package className="h-4 w-4" />
+            )}
+            下載 ZIP
+          </button>
+
+          {/* 新增：只下載 Excel */}
+          <button
+            onClick={handleDownloadExcel}
+            disabled={isExporting}
+            className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50"
+          >
+            {isExporting ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <FileText className="h-4 w-4" />
+            )}
+            下載 Excel
+          </button>
         </div>
       </div>
+
+      {/* 進度顯示 Modal */}
+      {exportProgress && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-lg p-6 max-w-md w-full mx-4">
+            <h3 className="text-lg font-semibold mb-4">正在下載...</h3>
+            <div className="space-y-3">
+              <div className="text-sm text-gray-600">{exportProgress.status}</div>
+              {exportProgress.total !== undefined && exportProgress.current !== undefined && (
+                <div>
+                  <div className="flex justify-between text-sm text-gray-600 mb-1">
+                    <span>{exportProgress.current} / {exportProgress.total}</span>
+                    <span>{Math.round((exportProgress.current / exportProgress.total) * 100)}%</span>
+                  </div>
+                  <div className="w-full bg-gray-200 rounded-full h-2">
+                    <div
+                      className="bg-blue-600 h-2 rounded-full transition-all duration-300"
+                      style={{ width: `${(exportProgress.current / exportProgress.total) * 100}%` }}
+                    />
+                  </div>
+                </div>
+              )}
+              {!exportProgress.total && (
+                <div className="flex justify-center">
+                  <Loader2 className="h-6 w-6 animate-spin text-blue-600" />
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* 統計卡片 */}
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
@@ -524,6 +773,20 @@ const UserSubmissionDetail: React.FC<UserSubmissionDetailProps> = ({
                           <Eye className="h-4 w-4" />
                         </button>
 
+                        {/* WD-40 編輯按鈕 */}
+                        {(() => {
+                          console.log('[WD40 Debug] category:', submission.category, 'match:', submission.category === 'WD-40');
+                          return submission.category === 'WD-40' && (
+                            <button
+                              onClick={() => openWD40EditModal(submission)}
+                              className="text-indigo-600 hover:text-indigo-900"
+                              title="編輯 WD-40 資料"
+                            >
+                              <Edit className="h-4 w-4" />
+                            </button>
+                          );
+                        })()}
+
                         {/* 智能操作按鈕 */}
                         {reviewStatus.status === 'submitted' && (
                           <>
@@ -672,8 +935,17 @@ const UserSubmissionDetail: React.FC<UserSubmissionDetailProps> = ({
                               {(file.file_size / 1024).toFixed(1)} KB • {new Date(file.upload_date).toLocaleDateString()}
                             </p>
                           </div>
-                          <button className="text-blue-600 hover:text-blue-900">
-                            <Download className="h-4 w-4" />
+                          <button
+                            onClick={() => handleDownloadFile(file)}
+                            disabled={downloadingFileId === file.id}
+                            className="text-blue-600 hover:text-blue-900 disabled:opacity-50 disabled:cursor-not-allowed"
+                            title={downloadingFileId === file.id ? '下載中...' : '下載檔案'}
+                          >
+                            {downloadingFileId === file.id ? (
+                              <Loader2 className="h-4 w-4 animate-spin" />
+                            ) : (
+                              <Download className="h-4 w-4" />
+                            )}
                           </button>
                         </div>
                       ))}
@@ -692,23 +964,20 @@ const UserSubmissionDetail: React.FC<UserSubmissionDetailProps> = ({
                       <div key={review.id} className="border rounded-lg p-3 bg-gray-50">
                         <div className="flex items-center justify-between mb-2">
                           <div className="flex items-center gap-2">
-                            {review.status === 'approved' && <CheckCircle className="h-4 w-4 text-green-500" />}
-                            {review.status === 'needs_fix' && <XCircle className="h-4 w-4 text-red-500" />}
-                            {review.status === 'pending' && <AlertTriangle className="h-4 w-4 text-yellow-500" />}
+                            {review.new_status === 'approved' && <CheckCircle className="h-4 w-4 text-green-500" />}
+                            {review.new_status === 'needs_fix' && <XCircle className="h-4 w-4 text-red-500" />}
+                            {review.new_status === 'pending' && <AlertTriangle className="h-4 w-4 text-yellow-500" />}
                             <span className="text-sm font-medium">
-                              {review.status === 'approved' ? '已通過' : review.status === 'needs_fix' ? '需修正' : '待審核'}
+                              {review.new_status === 'approved' ? '已通過' : review.new_status === 'needs_fix' ? '需修正' : '待審核'}
                             </span>
                           </div>
                           <span className="text-xs text-gray-500">
                             {new Date(review.created_at).toLocaleString()}
                           </span>
                         </div>
-                        {review.note && (
-                          <p className="text-sm text-gray-600">{review.note}</p>
+                        {review.review_notes && (
+                          <p className="text-sm text-gray-600">{review.review_notes}</p>
                         )}
-                        <p className="text-xs text-gray-500 mt-1">
-                          審核者：{review.reviewer_profiles?.display_name || 'N/A'}
-                        </p>
                       </div>
                     ))}
                   </div>
@@ -820,6 +1089,134 @@ const UserSubmissionDetail: React.FC<UserSubmissionDetailProps> = ({
                 關閉
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* WD-40 編輯 Modal */}
+      {editingWD40 && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-lg p-6 w-full max-w-4xl max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between mb-6">
+              <h3 className="text-lg font-medium text-gray-900">
+                編輯 WD-40 資料 - {editingWD40.category}
+              </h3>
+              <button
+                onClick={() => setEditingWD40(null)}
+                className="text-gray-400 hover:text-gray-600"
+              >
+                <X className="h-6 w-6" />
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveWD40Edit} className="space-y-6">
+              {/* 單位容量 */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  單位容量（ML/罐）
+                </label>
+                <input
+                  type="number"
+                  step="0.01"
+                  value={wd40EditData.unitCapacity}
+                  onChange={(e) => setWD40EditData({...wd40EditData, unitCapacity: Number(e.target.value)})}
+                  className="w-full border border-gray-300 rounded-md px-3 py-2 focus:ring-2 focus:ring-blue-500"
+                  required
+                />
+              </div>
+
+              {/* 單位 */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  單位
+                </label>
+                <input
+                  type="text"
+                  value={wd40EditData.unit}
+                  onChange={(e) => setWD40EditData({...wd40EditData, unit: e.target.value})}
+                  className="w-full border border-gray-300 rounded-md px-3 py-2 focus:ring-2 focus:ring-blue-500"
+                  required
+                />
+              </div>
+
+              {/* 月份數量 */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  月份數量（罐）
+                </label>
+                <div className="grid grid-cols-4 gap-3">
+                  {Array.from({ length: 12 }, (_, i) => i + 1).map(month => (
+                    <div key={month}>
+                      <label className="text-xs text-gray-600">{month}月</label>
+                      <input
+                        type="number"
+                        min="0"
+                        step="1"
+                        value={wd40EditData.monthlyQuantity[month.toString()] || 0}
+                        onChange={(e) => handleMonthlyQuantityChange(month.toString(), Number(e.target.value))}
+                        className="block w-full border border-gray-300 rounded px-2 py-1 text-sm focus:ring-2 focus:ring-blue-500"
+                      />
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* 總用量顯示（唯讀）*/}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  總用量（自動計算）
+                </label>
+                <div className="px-3 py-2 bg-gray-100 border border-gray-300 rounded-md text-gray-700">
+                  {calculateTotalUsage().toFixed(2)} {wd40EditData.unit}
+                </div>
+                <p className="text-xs text-gray-500 mt-1">
+                  = 月份數量總和 × 單位容量
+                </p>
+              </div>
+
+              {/* 備註 */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  備註
+                </label>
+                <textarea
+                  value={wd40EditData.notes}
+                  onChange={(e) => setWD40EditData({...wd40EditData, notes: e.target.value})}
+                  className="w-full border border-gray-300 rounded-md px-3 py-2 focus:ring-2 focus:ring-blue-500"
+                  rows={3}
+                  placeholder="選填"
+                />
+              </div>
+
+              {/* 按鈕 */}
+              <div className="flex justify-end gap-3 pt-4">
+                <button
+                  type="button"
+                  onClick={() => setEditingWD40(null)}
+                  className="px-4 py-2 text-gray-700 bg-gray-200 rounded-lg hover:bg-gray-300"
+                  disabled={isSavingWD40}
+                >
+                  取消
+                </button>
+                <button
+                  type="submit"
+                  disabled={isSavingWD40}
+                  className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50"
+                >
+                  {isSavingWD40 ? (
+                    <>
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                      儲存中...
+                    </>
+                  ) : (
+                    <>
+                      <Save className="h-4 w-4" />
+                      儲存修改
+                    </>
+                  )}
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}

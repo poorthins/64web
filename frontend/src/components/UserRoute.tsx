@@ -25,14 +25,21 @@ const UserRoute: React.FC<UserRouteProps> = ({ children, energyCategory }) => {
     )
   }
 
-  // 如果是管理員且在審核模式，允許訪問
+  // 先判斷是否為審核模式（避免競態條件導致的誤判）
   const isReviewMode = searchParams.get('mode') === 'review'
-  if (role === 'admin' && isReviewMode) {
-    console.log('🔓 管理員審核模式 - 允許訪問填報頁面', energyCategory ? `(${energyCategory})` : '')
-    return <>{children}</>
+
+  if (isReviewMode) {
+    if (role === 'admin') {
+      console.log('🔓 管理員審核模式 - 允許訪問填報頁面', energyCategory ? `(${energyCategory})` : '')
+      return <>{children}</>
+    } else {
+      // 非管理員嘗試進入審核模式
+      console.log('🔒 非管理員無法進入審核模式')
+      return <Navigate to="/app" replace />
+    }
   }
 
-  // 如果是管理員但不在審核模式，重定向到管理員頁面
+  // 非審核模式下，管理員跳轉到管理頁面
   if (role === 'admin') {
     console.log('🔒 管理員一般模式 - 重定向到管理頁面')
     return <Navigate to="/app" replace />

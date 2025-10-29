@@ -56,6 +56,7 @@ export function useStatusManager({
 
       // 顯示成功訊息
       const statusLabels: Record<EntryStatus, string> = {
+        saved: '已暫存',
         submitted: '已提交',
         approved: '已核准',
         rejected: '已駁回'
@@ -92,6 +93,7 @@ export function useStatusManager({
   const canAutoTransition = useCallback((fromStatus: EntryStatus, toStatus: EntryStatus): boolean => {
     // 定義允許的自動轉換路徑
     const allowedTransitions: Record<EntryStatus, EntryStatus[]> = {
+      saved: [], // 已暫存不允許自動轉換
       submitted: [], // 已提交不允許自動轉換
       approved: [], // 已核准不允許自動轉換
       rejected: ['submitted'] // 已駁回可以自動轉為已提交
