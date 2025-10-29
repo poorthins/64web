@@ -94,7 +94,7 @@ describe('外購電力 API 測試', () => {
       // Mock 插入成功
       const insertMock = vi.fn(() => ({
         select: vi.fn(() => ({
-          single: vi.fn(() => Promise.resolve({
+          maybeSingle: vi.fn(() => Promise.resolve({
             data: { id: 'electricity-entry-id' },
             error: null
           }))
@@ -154,7 +154,7 @@ describe('外購電力 API 測試', () => {
 
       const insertMock = vi.fn(() => ({
         select: vi.fn(() => ({
-          single: vi.fn(() => Promise.resolve({
+          maybeSingle: vi.fn(() => Promise.resolve({
             data: { id: 'electricity-entry-id' },
             error: null
           }))
@@ -219,7 +219,7 @@ describe('外購電力 API 測試', () => {
 
       const insertMock = vi.fn(() => ({
         select: vi.fn(() => ({
-          single: vi.fn(() => Promise.resolve({
+          maybeSingle: vi.fn(() => Promise.resolve({
             data: { id: 'cross-month-entry-id' },
             error: null
           }))
@@ -338,7 +338,7 @@ describe('外購電力 API 測試', () => {
 
       const insertMock = vi.fn(() => ({
         select: vi.fn(() => ({
-          single: vi.fn(() => Promise.resolve({
+          maybeSingle: vi.fn(() => Promise.resolve({
             data: { id: 'valid-entry-id' },
             error: null
           }))
@@ -374,7 +374,7 @@ describe('外購電力 API 測試', () => {
 
       const insertMock = vi.fn(() => ({
         select: vi.fn(() => ({
-          single: vi.fn(() => Promise.resolve({
+          maybeSingle: vi.fn(() => Promise.resolve({
             data: { id: 'filtered-entry-id' },
             error: null
           }))
@@ -399,7 +399,7 @@ describe('外購電力 API 測試', () => {
     it('應該成功更新現有外購電力記錄', async () => {
       const existingEntry = {
         id: 'existing-electricity-id',
-        status: 'draft',
+        status: 'saved',
         page_key: 'electricity'
       }
 
@@ -419,7 +419,7 @@ describe('外購電力 API 測試', () => {
       const updateMock = vi.fn(() => ({
         eq: vi.fn(() => ({
           select: vi.fn(() => ({
-            single: vi.fn(() => Promise.resolve({
+            maybeSingle: vi.fn(() => Promise.resolve({
               data: { id: 'existing-electricity-id' },
               error: null
             }))
@@ -471,7 +471,7 @@ describe('外購電力 API 測試', () => {
       const updateMock = vi.fn(() => ({
         eq: vi.fn(() => ({
           select: vi.fn(() => ({
-            single: vi.fn(() => Promise.resolve({
+            maybeSingle: vi.fn(() => Promise.resolve({
               data: { id: 'approved-electricity-id' },
               error: null
             }))

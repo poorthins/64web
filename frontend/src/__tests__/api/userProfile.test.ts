@@ -144,7 +144,7 @@ describe('userProfile API', () => {
     it('應該成功取得當前用戶詳細資料', async () => {
       const selectMock = vi.fn(() => ({
         eq: vi.fn(() => ({
-          single: vi.fn(() => Promise.resolve({
+          maybeSingle: vi.fn(() => Promise.resolve({
             data: mockUsers[0],
             error: null
           }))
@@ -167,7 +167,7 @@ describe('userProfile API', () => {
     it('應該處理用戶不存在的情況', async () => {
       const selectMock = vi.fn(() => ({
         eq: vi.fn(() => ({
-          single: vi.fn(() => Promise.resolve({
+          maybeSingle: vi.fn(() => Promise.resolve({
             data: null,
             error: { code: 'PGRST116' }
           }))
@@ -185,7 +185,7 @@ describe('userProfile API', () => {
     it('應該處理其他資料庫錯誤', async () => {
       const selectMock = vi.fn(() => ({
         eq: vi.fn(() => ({
-          single: vi.fn(() => Promise.resolve({
+          maybeSingle: vi.fn(() => Promise.resolve({
             data: null,
             error: { message: 'Database error' }
           }))
@@ -215,7 +215,7 @@ describe('userProfile API', () => {
       // Mock getCurrentUserDetails with DB format categories
       const selectMock1 = vi.fn(() => ({
         eq: vi.fn(() => ({
-          single: vi.fn(() => Promise.resolve({
+          maybeSingle: vi.fn(() => Promise.resolve({
             data: {
               ...mockUsers[0],
               filling_config: {
@@ -256,7 +256,7 @@ describe('userProfile API', () => {
       // Mock getCurrentUserDetails
       const selectMock1 = vi.fn(() => ({
         eq: vi.fn(() => ({
-          single: vi.fn(() => Promise.resolve({
+          maybeSingle: vi.fn(() => Promise.resolve({
             data: {
               ...mockUsers[0],
               filling_config: {
@@ -299,7 +299,7 @@ describe('userProfile API', () => {
       // Mock getCurrentUserDetails - no filling_config
       const selectMock1 = vi.fn(() => ({
         eq: vi.fn(() => ({
-          single: vi.fn(() => Promise.resolve({
+          maybeSingle: vi.fn(() => Promise.resolve({
             data: {
               ...mockUsers[0],
               filling_config: null
@@ -337,7 +337,7 @@ describe('userProfile API', () => {
     it('應該處理用戶不存在的情況', async () => {
       const selectMock = vi.fn(() => ({
         eq: vi.fn(() => ({
-          single: vi.fn(() => Promise.resolve({
+          maybeSingle: vi.fn(() => Promise.resolve({
             data: null,
             error: { code: 'PGRST116' }
           }))
@@ -356,7 +356,7 @@ describe('userProfile API', () => {
       // Mock getCurrentUserDetails with mixed categories
       const selectMock1 = vi.fn(() => ({
         eq: vi.fn(() => ({
-          single: vi.fn(() => Promise.resolve({
+          maybeSingle: vi.fn(() => Promise.resolve({
             data: {
               ...mockUsers[0],
               filling_config: {
@@ -411,7 +411,7 @@ describe('userProfile API', () => {
       // Mock getCurrentUserPermissions call chain
       const selectMock1 = vi.fn(() => ({
         eq: vi.fn(() => ({
-          single: vi.fn(() => Promise.resolve({
+          maybeSingle: vi.fn(() => Promise.resolve({
             data: {
               ...mockUsers[0],
               filling_config: {
@@ -450,7 +450,7 @@ describe('userProfile API', () => {
       // Mock getCurrentUserPermissions call chain with DB format
       const selectMock1 = vi.fn(() => ({
         eq: vi.fn(() => ({
-          single: vi.fn(() => Promise.resolve({
+          maybeSingle: vi.fn(() => Promise.resolve({
             data: {
               ...mockUsers[0],
               filling_config: {
@@ -497,7 +497,7 @@ describe('userProfile API', () => {
     it('應該處理用戶沒有能源類別權限的情況', async () => {
       const selectMock1 = vi.fn(() => ({
         eq: vi.fn(() => ({
-          single: vi.fn(() => Promise.resolve({
+          maybeSingle: vi.fn(() => Promise.resolve({
             data: {
               ...mockUsers[0],
               filling_config: {
@@ -527,7 +527,7 @@ describe('userProfile API', () => {
     it('應該處理用戶不存在的情況', async () => {
       const selectMock = vi.fn(() => ({
         eq: vi.fn(() => ({
-          single: vi.fn(() => Promise.resolve({
+          maybeSingle: vi.fn(() => Promise.resolve({
             data: null,
             error: { code: 'PGRST116' }
           }))

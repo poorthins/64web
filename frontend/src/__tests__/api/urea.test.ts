@@ -115,7 +115,7 @@ describe('尿素 API 測試', () => {
       // Mock 插入成功
       const insertMock = vi.fn(() => ({
         select: vi.fn(() => ({
-          single: vi.fn(() => Promise.resolve({
+          maybeSingle: vi.fn(() => Promise.resolve({
             data: { id: 'urea-entry-id' },
             error: null
           }))
@@ -175,7 +175,7 @@ describe('尿素 API 測試', () => {
 
       const insertMock = vi.fn(() => ({
         select: vi.fn(() => ({
-          single: vi.fn(() => Promise.resolve({
+          maybeSingle: vi.fn(() => Promise.resolve({
             data: { id: 'urea-entry-id' },
             error: null
           }))
@@ -247,7 +247,7 @@ describe('尿素 API 測試', () => {
 
       const insertMock = vi.fn(() => ({
         select: vi.fn(() => ({
-          single: vi.fn(() => Promise.resolve({
+          maybeSingle: vi.fn(() => Promise.resolve({
             data: { id: 'daily-record-entry-id' },
             error: null
           }))
@@ -370,7 +370,7 @@ describe('尿素 API 測試', () => {
 
       const insertMock = vi.fn(() => ({
         select: vi.fn(() => ({
-          single: vi.fn(() => Promise.resolve({
+          maybeSingle: vi.fn(() => Promise.resolve({
             data: { id: 'valid-urea-entry-id' },
             error: null
           }))
@@ -406,7 +406,7 @@ describe('尿素 API 測試', () => {
 
       const insertMock = vi.fn(() => ({
         select: vi.fn(() => ({
-          single: vi.fn(() => Promise.resolve({
+          maybeSingle: vi.fn(() => Promise.resolve({
             data: { id: 'filtered-urea-entry-id' },
             error: null
           }))
@@ -451,7 +451,7 @@ describe('尿素 API 測試', () => {
       const updateMock = vi.fn(() => ({
         eq: vi.fn(() => ({
           select: vi.fn(() => ({
-            single: vi.fn(() => Promise.resolve({
+            maybeSingle: vi.fn(() => Promise.resolve({
               data: { id: 'existing-urea-id' },
               error: null
             }))
@@ -503,7 +503,7 @@ describe('尿素 API 測試', () => {
       const updateMock = vi.fn(() => ({
         eq: vi.fn(() => ({
           select: vi.fn(() => ({
-            single: vi.fn(() => Promise.resolve({
+            maybeSingle: vi.fn(() => Promise.resolve({
               data: { id: 'approved-urea-id' },
               error: null
             }))
@@ -576,7 +576,7 @@ describe('尿素 API 測試', () => {
 
       const insertMock = vi.fn(() => ({
         select: vi.fn(() => ({
-          single: vi.fn(() => Promise.resolve({
+          maybeSingle: vi.fn(() => Promise.resolve({
             data: { id: 'complex-urea-entry-id' },
             error: null
           }))
@@ -642,7 +642,7 @@ describe('尿素 API 測試', () => {
 
       const insertMock = vi.fn(() => ({
         select: vi.fn(() => ({
-          single: vi.fn(() => Promise.resolve({
+          maybeSingle: vi.fn(() => Promise.resolve({
             data: { id: 'single-month-entry-id' },
             error: null
           }))
@@ -683,7 +683,7 @@ describe('尿素 API 測試', () => {
 
       const insertMock = vi.fn(() => ({
         select: vi.fn(() => ({
-          single: vi.fn(() => Promise.resolve({
+          maybeSingle: vi.fn(() => Promise.resolve({
             data: { id: 'precision-entry-id' },
             error: null
           }))

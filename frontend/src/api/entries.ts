@@ -103,8 +103,11 @@ export async function upsertEnergyEntry(input: UpsertEntryInput, preserveStatus:
     // 計算總使用量
     const total = sumMonthly(input.monthly)
 
-    // 檢查總使用量是否大於 0（資料庫約束要求）
-    if (total <= 0) {
+    // 純檔案上傳頁面（只需要檔案，不需要數值）
+    const PURE_FILE_UPLOAD_PAGES = ['employee_commute'];
+
+    // 對於需要數值的頁面，檢查 total > 0
+    if (total <= 0 && !PURE_FILE_UPLOAD_PAGES.includes(input.page_key)) {
       throw new Error('總使用量必須大於 0，請至少填入一個月份的使用量')
     }
 
@@ -153,6 +156,7 @@ export async function upsertEnergyEntry(input: UpsertEntryInput, preserveStatus:
         ...(input.payload || {})       // 然後合併主要的 payload（優先級更高）
       },
       status: status,
+      is_locked: false,        // 提交時自動解鎖，允許後續編輯
       // 設定期間範圍（年度範圍）
       period_start: `${input.period_year}-01-01`,
       period_end: `${input.period_year}-12-31`
@@ -166,16 +170,31 @@ export async function upsertEnergyEntry(input: UpsertEntryInput, preserveStatus:
     if (existingEntry) {
       // 更新現有記錄
       console.log('⏫ [upsertEnergyEntry] Updating existing entry:', existingEntry.id)
-      const updateResult = await supabase
+      console.log('⏫ [upsertEnergyEntry] New status will be:', status)
+      const { data: updateData, error: updateError } = await supabase
         .from('energy_entries')
         .update(entryData)
         .eq('id', existingEntry.id)
         .select('id')
-        .single()
-      
-      data = updateResult.data
-      error = updateResult.error
-      console.log('✅ [upsertEnergyEntry] Update result:', { data, error })
+        .maybeSingle()  // 使用 maybeSingle() 允許 0 筆結果
+
+      if (updateError) {
+        console.error('❌ [upsertEnergyEntry] Update error:', updateError)
+        error = updateError
+        data = null
+      } else if (!updateData) {
+        // RLS Policy 阻擋了更新（返回 null 但沒有 error）
+        console.error('❌ [upsertEnergyEntry] UPDATE returned no data - blocked by RLS Policy')
+        console.error('   Current entry status:', existingEntry.status)
+        console.error('   Attempted new status:', status)
+        error = new Error(`更新記錄失敗：RLS Policy 不允許此操作（當前狀態：${existingEntry.status}）`)
+        data = null
+      } else {
+        // 驗證成功：確實更新了資料
+        data = { id: updateData.id }
+        error = null
+        console.log('✅ [upsertEnergyEntry] Update verified successful:', updateData.id)
+      }
     } else {
       // 插入新記錄
       console.log('📝 [upsertEnergyEntry] Creating new entry...')
@@ -183,8 +202,8 @@ export async function upsertEnergyEntry(input: UpsertEntryInput, preserveStatus:
         .from('energy_entries')
         .insert(entryData)
         .select('id')
-        .single()
-      
+        .maybeSingle()
+
       data = insertResult.data
       error = insertResult.error
       console.log('✅ [upsertEnergyEntry] Insert result:', { data, error })
@@ -437,4 +456,30 @@ export function validateMonthlyData(monthly: Record<string, number>): {
     valid: errors.length === 0,
     errors
   }
+}
+
+//fromgpt
+export async function patchEnergyEntryPayload(entryId: string, patch: any) {
+  if (!entryId) throw new Error('entryId 不可為空')
+
+  // 讀出舊的 payload
+  const { data: row, error: fetchErr } = await supabase
+    .from('energy_entries')
+    .select('payload')
+    .eq('id', entryId)
+    .maybeSingle()
+
+  if (fetchErr) throw new Error('讀取資料失敗：' + fetchErr.message)
+  const oldPayload = row?.payload || {}
+
+  // 合併舊的 payload + 新的 patch
+  const newPayload = { ...oldPayload, ...patch }
+
+  // 寫回資料庫
+  const { error: updateErr } = await supabase
+    .from('energy_entries')
+    .update({ payload: newPayload })
+    .eq('id', entryId)
+
+  if (updateErr) throw new Error('更新失敗：' + updateErr.message)
 }

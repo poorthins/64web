@@ -197,7 +197,7 @@ describe('adminUsers API', () => {
       // Mock profiles insert
       const insertMock = vi.fn(() => ({
         select: vi.fn(() => ({
-          single: vi.fn(() => Promise.resolve({
+          maybeSingle: vi.fn(() => Promise.resolve({
             data: { ...mockUsers[0], id: 'new-user-id', email: 'test@example.com' },
             error: null
           }))
@@ -262,7 +262,7 @@ describe('adminUsers API', () => {
       // Mock profile query
       const selectMock1 = vi.fn(() => ({
         eq: vi.fn(() => ({
-          single: vi.fn(() => Promise.resolve({
+          maybeSingle: vi.fn(() => Promise.resolve({
             data: mockUsers[0],
             error: null
           }))
@@ -291,7 +291,7 @@ describe('adminUsers API', () => {
     it('應該處理用戶不存在', async () => {
       const selectMock = vi.fn(() => ({
         eq: vi.fn(() => ({
-          single: vi.fn(() => Promise.resolve({
+          maybeSingle: vi.fn(() => Promise.resolve({
             data: null,
             error: { message: 'Not found' }
           }))
@@ -352,7 +352,7 @@ describe('adminUsers API', () => {
     it('應該取得用戶詳細資料', async () => {
       const selectMock = vi.fn(() => ({
         eq: vi.fn(() => ({
-          single: vi.fn(() => Promise.resolve({
+          maybeSingle: vi.fn(() => Promise.resolve({
             data: mockUsers[0],
             error: null
           }))
@@ -372,7 +372,7 @@ describe('adminUsers API', () => {
     it('應該處理用戶不存在', async () => {
       const selectMock = vi.fn(() => ({
         eq: vi.fn(() => ({
-          single: vi.fn(() => Promise.resolve({
+          maybeSingle: vi.fn(() => Promise.resolve({
             data: null,
             error: { code: 'PGRST116' }
           }))

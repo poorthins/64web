@@ -199,7 +199,7 @@ describe('entries API', () => {
       // Mock 插入成功
       const insertMock = vi.fn(() => ({
         select: vi.fn(() => ({
-          single: vi.fn(() => Promise.resolve({
+          maybeSingle: vi.fn(() => Promise.resolve({
             data: { id: 'new-entry-id' },
             error: null
           }))
@@ -222,7 +222,7 @@ describe('entries API', () => {
           eq: vi.fn(() => ({
             eq: vi.fn(() => ({
               maybeSingle: vi.fn(() => Promise.resolve({
-                data: { id: 'existing-id', status: 'draft' },
+                data: { id: 'existing-id', status: 'saved' },
                 error: null
               }))
             }))
@@ -234,7 +234,7 @@ describe('entries API', () => {
       const updateMock = vi.fn(() => ({
         eq: vi.fn(() => ({
           select: vi.fn(() => ({
-            single: vi.fn(() => Promise.resolve({
+            maybeSingle: vi.fn(() => Promise.resolve({
               data: { id: 'existing-id' },
               error: null
             }))
@@ -278,7 +278,7 @@ describe('entries API', () => {
       const updateMock = vi.fn(() => ({
         eq: vi.fn(() => ({
           select: vi.fn(() => ({
-            single: vi.fn(() => Promise.resolve({
+            maybeSingle: vi.fn(() => Promise.resolve({
               data: { id: 'existing-id' },
               error: null
             }))
@@ -314,7 +314,7 @@ describe('entries API', () => {
       // Mock 插入失敗
       const insertMock = vi.fn(() => ({
         select: vi.fn(() => ({
-          single: vi.fn(() => Promise.resolve({
+          maybeSingle: vi.fn(() => Promise.resolve({
             data: null,
             error: { message: 'Database error' }
           }))
