@@ -13,7 +13,6 @@ import { useEnergyData } from '../../hooks/useEnergyData'
 import { useMultiRecordSubmit } from '../../hooks/useMultiRecordSubmit'
 import { useEnergyClear } from '../../hooks/useEnergyClear'
 import { useSubmitGuard } from '../../hooks/useSubmitGuard'
-import { useGhostFileCleaner } from '../../hooks/useGhostFileCleaner'
 import { useRecordFileMapping } from '../../hooks/useRecordFileMapping'
 import { useSubmissions } from '../admin/hooks/useSubmissions'
 import { useRole } from '../../hooks/useRole'
@@ -146,7 +145,6 @@ export default function RefrigerantPage() {
   } = useEnergyClear(currentEntryId, currentStatus)
 
   // 幽靈檔案清理 Hook
-  const { cleanFiles } = useGhostFileCleaner()
 
   // 檔案映射 Hook
   const {
@@ -235,30 +233,25 @@ export default function RefrigerantPage() {
       )
 
       if (refrigerantFiles.length > 0) {
-        // ✅ 先清理幽靈檔案，再分配
-        const cleanAndAssignFiles = async () => {
-          const validFiles = await cleanFiles(refrigerantFiles)
-          console.log('✅ [RefrigerantPage] Valid files after cleanup:', validFiles.length)
-
-          setRefrigerantData(prev => {
-            const userRows = prev.filter(r => !r.isExample)
-            // ⭐ 使用 recordId 查詢檔案（不再用陣列索引）
-            const updated = userRows.map((item) => {
-              const recordFiles = getRecordFiles(item.id, validFiles)
-              return {
-                ...item,
-                evidenceFiles: recordFiles,
-                memoryFiles: []  // ✅ 清空 memoryFiles，避免重複提交
-              }
-            })
-            return withExampleFirst(updated)
+        // ✅ 檔案已在 useEnergyData hook 中清理，直接分配
+        console.log('✅ [RefrigerantPage] Assigning files:', refrigerantFiles.length)
+        
+        setRefrigerantData(prev => {
+          const userRows = prev.filter(r => !r.isExample)
+          // ⭐ 使用 recordId 查詢檔案（不再用陣列索引）
+          const updated = userRows.map((item) => {
+            const recordFiles = getRecordFiles(item.id, refrigerantFiles)
+            return {
+              ...item,
+              evidenceFiles: recordFiles,
+              memoryFiles: []  // ✅ 清空 memoryFiles，避免重複提交
+            }
           })
-        }
-
-        cleanAndAssignFiles()
+          return withExampleFirst(updated)
+        })
       }
     }
-  }, [loadedFiles, pageKey, dataLoading, cleanFiles, getRecordFiles])
+  }, [loadedFiles, pageKey, dataLoading, getRecordFiles])
 
   const addNewEntry = () => {
     const newEntry: RefrigerantData = {
@@ -729,9 +722,9 @@ export default function RefrigerantPage() {
                           type="text"
                           value={data.brandName}
                           onChange={(e) => updateEntry(data.id, 'brandName', e.target.value)}
-                          disabled={isReadOnly || approvalStatus.isApproved}
+                          disabled={isReadOnly}
                           className={`w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500 hover:border-brand-300 transition-colors duration-200 ${
-                            isReviewMode || approvalStatus.isApproved ? 'bg-gray-100 cursor-not-allowed' : ''
+                            isReadOnly ? 'bg-gray-100 cursor-not-allowed' : ''
                           }`}
                         />
                       </td>
@@ -740,9 +733,9 @@ export default function RefrigerantPage() {
                           type="text"
                           value={data.modelNumber}
                           onChange={(e) => updateEntry(data.id, 'modelNumber', e.target.value)}
-                          disabled={isReadOnly || approvalStatus.isApproved}
+                          disabled={isReadOnly}
                           className={`w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500 hover:border-brand-300 transition-colors duration-200 ${
-                            isReviewMode || approvalStatus.isApproved ? 'bg-gray-100 cursor-not-allowed' : ''
+                            isReadOnly ? 'bg-gray-100 cursor-not-allowed' : ''
                           }`}
                         />
                       </td>
@@ -751,9 +744,9 @@ export default function RefrigerantPage() {
                           type="text"
                           value={data.equipmentLocation}
                           onChange={(e) => updateEntry(data.id, 'equipmentLocation', e.target.value)}
-                          disabled={isReadOnly || approvalStatus.isApproved}
+                          disabled={isReadOnly}
                           className={`w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500 hover:border-brand-300 transition-colors duration-200 ${
-                            isReviewMode || approvalStatus.isApproved ? 'bg-gray-100 cursor-not-allowed' : ''
+                            isReadOnly ? 'bg-gray-100 cursor-not-allowed' : ''
                           }`}
                         />
                       </td>
@@ -762,9 +755,9 @@ export default function RefrigerantPage() {
                           type="text"
                           value={data.refrigerantType}
                           onChange={(e) => updateEntry(data.id, 'refrigerantType', e.target.value)}
-                          disabled={isReadOnly || approvalStatus.isApproved}
+                          disabled={isReadOnly}
                           className={`w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500 hover:border-brand-300 transition-colors duration-200 ${
-                            isReviewMode || approvalStatus.isApproved ? 'bg-gray-100 cursor-not-allowed' : ''
+                            isReadOnly ? 'bg-gray-100 cursor-not-allowed' : ''
                           }`}
                         />
                       </td>
@@ -775,9 +768,9 @@ export default function RefrigerantPage() {
                           step="0.01"
                           value={data.fillAmount || ''}
                           onChange={(e) => updateEntry(data.id, 'fillAmount', parseFloat(e.target.value) || 0)}
-                          disabled={isReadOnly || approvalStatus.isApproved}
+                          disabled={isReadOnly}
                           className={`w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500 hover:border-brand-300 transition-colors duration-200 ${
-                            isReviewMode || approvalStatus.isApproved ? 'bg-gray-100 cursor-not-allowed' : ''
+                            isReadOnly ? 'bg-gray-100 cursor-not-allowed' : ''
                           }`}
                         />
                       </td>
@@ -785,9 +778,9 @@ export default function RefrigerantPage() {
                         <select
                           value={data.unit}
                           onChange={(e) => updateEntry(data.id, 'unit', e.target.value as 'gram' | 'kg')}
-                          disabled={isReadOnly || approvalStatus.isApproved}
+                          disabled={isReadOnly}
                           className={`w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500 hover:border-brand-300 transition-colors duration-200 bg-white ${
-                            isReviewMode || approvalStatus.isApproved ? 'bg-gray-100 cursor-not-allowed' : ''
+                            isReadOnly ? 'bg-gray-100 cursor-not-allowed' : ''
                           }`}
                         >
                           <option value="kg">公斤</option>
@@ -827,7 +820,7 @@ export default function RefrigerantPage() {
                           {refrigerantData.filter(r => !r.isExample).length > 1 && (
                             <button
                               onClick={() => removeEntry(data.id)}
-                              disabled={isReadOnly || approvalStatus.isApproved}
+                              disabled={isReadOnly}
                               className={`text-red-500 hover:text-red-700 p-1 rounded-lg hover:bg-red-50 transition-colors duration-200 ${
                                 isReviewMode || approvalStatus.isApproved ? 'opacity-50 cursor-not-allowed' : ''
                               }`}
@@ -850,7 +843,7 @@ export default function RefrigerantPage() {
             <div className="mt-6">
               <button
                 onClick={addNewEntry}
-                disabled={isReadOnly || approvalStatus.isApproved}
+                disabled={isReadOnly}
                 className={`w-full py-3 bg-green-500 hover:bg-green-600 text-white rounded-lg font-medium transition-colors ${
                   isReviewMode || approvalStatus.isApproved ? 'opacity-50 cursor-not-allowed bg-gray-400 hover:bg-gray-400' : ''
                 }`}

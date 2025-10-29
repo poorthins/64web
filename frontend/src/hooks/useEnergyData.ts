@@ -73,7 +73,7 @@ export function useEnergyData(
 
       setEntry(loadedEntry)
 
-      // 2. 如果有 entry，載入關聯檔案（所有狀態都載入，不判斷草稿）
+      // 2. 如果有 entry，載入關聯檔案
       if (loadedEntry?.id) {
         let loadedFiles = await getEntryFiles(loadedEntry.id)
 
@@ -82,7 +82,7 @@ export function useEnergyData(
           new Map(loadedFiles.map(f => [f.id, f])).values()
         )
 
-        console.log('🔍 [useEnergyData] Files loaded for entry:', loadedEntry.id, 'Count:', uniqueFiles.length, uniqueFiles)
+        console.log('🔍 [useEnergyData] Files loaded for entry:', loadedEntry.id, 'Count:', uniqueFiles.length)
         setFiles(uniqueFiles)
       } else {
         // 沒有 entry，清空檔案
