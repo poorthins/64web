@@ -264,6 +264,9 @@ const AcetylenePage = () => {
               }
             }
           })
+
+        // ✅ 更新 monthlyData 狀態，讓檔案顯示在 UI
+        setMonthlyData(newMonthlyData)
         // ✅ 不清空 memoryFiles - 讓新上傳的檔案保留
         // 只在 submit 成功、clear 操作、cleanup 時才清空
       }
