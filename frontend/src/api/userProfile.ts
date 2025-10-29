@@ -95,7 +95,7 @@ export async function getCurrentUserDetails(): Promise<UserPermissions | null> {
       .from('profiles')
       .select('id, display_name, role, is_active, email, company, job_title, phone, filling_config')
       .eq('id', userId)
-      .single()
+      .maybeSingle()
 
     if (userError) {
       if (userError.code === 'PGRST116') {

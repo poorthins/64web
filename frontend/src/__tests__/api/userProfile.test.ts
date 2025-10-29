@@ -246,10 +246,10 @@ describe('userProfile API', () => {
       expect(result).not.toBeNull()
       expect(result).toHaveProperty('energy_categories')
 
-      // 應該轉換為前端格式
+      // 應該保持資料庫格式（目前不做轉換）
       expect(result?.energy_categories).toEqual(['septic_tank', 'electricity'])
-      expect(result?.energy_categories).not.toContain('septic_tank')
-      expect(result?.energy_categories).not.toContain('electricity')
+      expect(result?.energy_categories).toContain('septic_tank')
+      expect(result?.energy_categories).toContain('electricity')
     })
 
     it('應該結合基本資料和權限推斷', async () => {
@@ -392,9 +392,6 @@ describe('userProfile API', () => {
       expect(result?.energy_categories).toContain('natural_gas') // 不需要轉換
       expect(result?.energy_categories).toContain('electricity') // electricity → electricity
 
-      // 檢查原始的資料庫格式不存在
-      expect(result?.energy_categories).not.toContain('septic_tank')
-      expect(result?.energy_categories).not.toContain('electricity')
     })
 
     it('應該處理錯誤情況', async () => {
@@ -484,14 +481,6 @@ describe('userProfile API', () => {
 
       const hasElectricityBill = await hasEnergyCategory('electricity')
       expect(hasElectricityBill).toBe(true)
-
-      // Reset mocks for third call - 檢查原始資料庫格式應該檢查失敗
-      mockSupabase.from
-        .mockReturnValueOnce({ select: selectMock1 })
-        .mockReturnValueOnce({ select: selectMock2 })
-
-      const hasElectricity = await hasEnergyCategory('electricity')
-      expect(hasElectricity).toBe(false) // 應該找不到，因為已經轉換成 electricity
     })
 
     it('應該處理用戶沒有能源類別權限的情況', async () => {
