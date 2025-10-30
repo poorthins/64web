@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Users, FileText, CheckCircle, XCircle, Plus, RefreshCw, Search, Filter, Calendar, Eye } from 'lucide-react'
+import { getCategoryName, createPageMap } from './data/energyConfig'
 import StatsCard from './components/StatsCard'
 import UserCard from './components/UserCard'
 import SearchBar from './components/SearchBar'
@@ -28,24 +29,6 @@ import { toast } from 'react-hot-toast'
 
 // 標籤類型
 type TabType = 'users' | 'submitted' | 'approved' | 'rejected'
-
-// 能源類別列表
-const energyCategories = [
-  { id: 'wd40', name: 'WD-40' },
-  { id: 'acetylene', name: '乙炔' },
-  { id: 'refrigerant', name: '冷媒' },
-  { id: 'septic_tank', name: '化糞池' }, // Fixed: unified page_key to 'septic_tank'
-  { id: 'natural_gas', name: '天然氣' },
-  { id: 'urea', name: '尿素' },
-  { id: 'diesel_generator', name: '柴油(發電機)' },
-  { id: 'diesel', name: '柴油' },
-  { id: 'gasoline', name: '汽油' },
-  { id: 'lpg', name: '液化石油氣' },
-  { id: 'fire_extinguisher', name: '滅火器' },
-  { id: 'welding_rod', name: '焊條' },
-  { id: 'electricity', name: '外購電力' },
-  { id: 'employee_commute', name: '員工通勤' }
-]
 
 const AdminDashboard: React.FC = () => {
   const navigate = useNavigate()
@@ -78,23 +61,8 @@ const AdminDashboard: React.FC = () => {
   const [showRejectModal, setShowRejectModal] = useState(false)
   const [rejectingSubmission, setRejectingSubmission] = useState<PendingReviewEntry | ReviewedEntry | null>(null)
 
-  // 頁面映射表
-  const pageMap: Record<string, string> = {
-    'wd40': '/app/wd40',
-    'acetylene': '/app/acetylene',
-    'refrigerant': '/app/refrigerant',
-    'septic_tank': '/app/septic_tank', // Fixed: unified page_key to 'septic_tank'
-    'natural_gas': '/app/natural_gas',
-    'urea': '/app/urea',
-    'diesel_generator': '/app/diesel_generator',
-    'diesel': '/app/diesel',
-    'gasoline': '/app/gasoline',
-    'lpg': '/app/lpg',
-    'fire_extinguisher': '/app/fire_extinguisher',
-    'welding_rod': '/app/welding_rod',
-    'electricity': '/app/electricity',
-    'employee_commute': '/app/employee_commute'
-  }
+  // 使用統一的頁面映射表
+  const pageMap = createPageMap()
 
   // 組合載入狀態和錯誤
   const isLoading = usersLoading || metricsLoading
@@ -283,18 +251,7 @@ const AdminDashboard: React.FC = () => {
     })
   }, [convertedUsers, searchQuery, selectedStatuses])
 
-  // 取得類別名稱
-  const getCategoryName = (pageKey: string, category?: string) => {
-    let found = energyCategories.find(c => c.id === pageKey)?.name
-    if (found) return found
-
-    if (category) {
-      found = energyCategories.find(c => c.id === category)?.name
-      if (found) return found
-    }
-
-    return pageKey || category || '未知類別'
-  }
+  // getCategoryName 已從 energyConfig 導入
 
   // 狀態變更處理
   const handleStatusChange = async (entryId: string, newStatus: 'approved' | 'rejected', notes?: string) => {
