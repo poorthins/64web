@@ -1,4 +1,4 @@
-import { UserFormData } from '../data/mockData'
+import { UserFormData } from '../types/admin'
 
 export interface ValidationErrors {
   name?: string

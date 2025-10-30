@@ -1,6 +1,7 @@
 import React, { useState, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { energyCategories, scopeLabels, UserFormData } from './data/mockData'
+import { energyCategories, scopeLabels } from './data/energyConfig'
+import { UserFormData } from './types/admin'
 import { InputField, SelectField } from './components/FormUtils'
 import { PageHeader } from './components/PageHeader'
 import { PasswordStrengthIndicator } from './components/PasswordStrengthIndicator'

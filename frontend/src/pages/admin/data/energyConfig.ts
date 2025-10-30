@@ -46,6 +46,18 @@ export const SCOPE_LABELS = {
 } as const
 
 /**
+ * 相容舊程式碼的 alias
+ * @deprecated 請改用 SCOPE_LABELS
+ */
+export const scopeLabels = SCOPE_LABELS
+
+/**
+ * 相容舊程式碼的 alias
+ * @deprecated 請改用 ENERGY_CONFIG
+ */
+export const energyCategories = [...ENERGY_CONFIG]
+
+/**
  * 根據 page_key 取得類別名稱
  */
 export function getCategoryName(pageKey: string, fallbackCategory?: string): string {

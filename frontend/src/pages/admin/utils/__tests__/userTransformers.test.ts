@@ -6,7 +6,7 @@ import {
   formDataToUpdateUserData
 } from '../userTransformers'
 import type { User as APIUser, UserProfile } from '../../../../api/adminUsers'
-import type { UserFormData } from '../../data/mockData'
+import type { UserFormData } from '../../types/admin'
 
 describe('userTransformers', () => {
   describe('apiUserToUIUser', () => {

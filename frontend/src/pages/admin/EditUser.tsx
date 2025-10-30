@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
-import { energyCategories, scopeLabels, UserFormData } from './data/mockData'
+import { energyCategories, scopeLabels } from './data/energyConfig'
+import { UserFormData } from './types/admin'
 import { InputField, SelectField, validateUserForm, hasErrors, getFieldError } from './components/FormUtils'
 import { EditUserSkeleton } from './components/EditUserSkeleton'
 import { PageHeader } from './components/PageHeader'

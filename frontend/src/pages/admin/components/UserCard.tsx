@@ -1,5 +1,6 @@
 import React from 'react'
-import { User, statusColors, statusLabels } from '../data/mockData'
+import { User } from '../types/admin'
+import { statusColors, statusLabels } from '../constants/userStatus'
 
 interface UserCardProps {
   user: User

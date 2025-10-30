@@ -1,5 +1,6 @@
 import React from 'react'
-import { UserStatus, statusLabels, statusColors } from '../data/mockData'
+import { UserStatus } from '../types/admin'
+import { statusColors, statusLabels } from '../constants/userStatus'
 
 interface StatusFilterProps {
   selectedStatuses: UserStatus[]

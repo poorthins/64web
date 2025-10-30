@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { toast } from 'react-hot-toast'
 import { exportSingleUser } from '../utils/userExportUtils'
 import { handleAPIError, showErrorToast, withRetry } from '../utils/errorHandler'
-import type { User } from '../data/mockData'
+import type { User } from '../types/admin'
 
 export interface ExportProgress {
   status: string

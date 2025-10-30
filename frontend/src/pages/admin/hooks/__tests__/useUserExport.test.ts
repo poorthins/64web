@@ -4,7 +4,7 @@ import { useUserExport } from '../useUserExport'
 import * as userExportUtils from '../../utils/userExportUtils'
 import * as errorHandler from '../../utils/errorHandler'
 import { toast } from 'react-hot-toast'
-import type { User } from '../../data/mockData'
+import type { User } from '../../types/admin'
 
 // Mock dependencies
 vi.mock('react-hot-toast')

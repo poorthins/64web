@@ -4,7 +4,7 @@
  */
 
 import { UserProfile, CreateUserData, UserUpdateData, User as APIUser } from '../../../api/adminUsers'
-import { User, UserStatus, UserFormData } from '../data/mockData'
+import { User, UserStatus, UserFormData } from '../types/admin'
 
 /**
  * API User → UI User (for AdminDashboard)
