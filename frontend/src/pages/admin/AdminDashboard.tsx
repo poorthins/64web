@@ -13,11 +13,11 @@ import { PageHeader } from './components/PageHeader'
 import RejectModal from './components/RejectModal'
 import { UserStatus, statusLabels, User } from './data/mockData'
 import { demonstrateFileRenaming } from './utils/exportUtils'
-import { exportSingleUser } from './utils/userExportUtils'
 import { handleAPIError, showErrorToast, withRetry } from './utils/errorHandler'
 import { useKeyboardShortcuts, createCommonShortcuts, showShortcutToast } from './hooks/useKeyboardShortcuts'
 import { useUsers } from './hooks/useUsers'
 import { useMetrics } from './hooks/useMetrics'
+import { useUserExport } from './hooks/useUserExport'
 import {
   getPendingReviewEntries,
   getReviewedEntries,
@@ -40,6 +40,15 @@ const AdminDashboard: React.FC = () => {
   // API hooks
   const { users, isLoading: usersLoading, error: usersError, refreshUsers, createNewUser, updateExistingUser, toggleStatus } = useUsers()
   const { metrics, isLoading: metricsLoading, error: metricsError, refreshMetrics } = useMetrics()
+  const {
+    selectedUser,
+    showExportModal,
+    isExporting: isUserExporting,
+    exportProgress,
+    handleQuickExport,
+    handleExportConfirm,
+    handleExportClose
+  } = useUserExport()
 
   // 提交項目資料
   const [submissions, setSubmissions] = useState<(PendingReviewEntry | ReviewedEntry)[]>([])
@@ -48,10 +57,6 @@ const AdminDashboard: React.FC = () => {
   // UI state
   const [searchQuery, setSearchQuery] = useState('')
   const [selectedStatuses, setSelectedStatuses] = useState<UserStatus[]>([])
-  const [showUserExportModal, setShowUserExportModal] = useState(false)
-  const [selectedUser, setSelectedUser] = useState<User | null>(null)
-  const [isUserExporting, setIsUserExporting] = useState(false)
-  const [exportProgress, setExportProgress] = useState<{ status: string; current?: number; total?: number } | null>(null)
   const [lastUpdated, setLastUpdated] = useState<Date>(new Date())
   const [isRefreshing, setIsRefreshing] = useState(false)
   const [showCreateUserModal, setShowCreateUserModal] = useState(false)
@@ -74,40 +79,15 @@ const AdminDashboard: React.FC = () => {
     return users.map(apiUserToUIUser)
   }, [users])
 
-  // 統計數據
+  // 統計數據 - 只使用 metrics API
   const statistics = useMemo(() => {
-    const baseStats = {
+    return {
       totalUsers: users.length,
-      submitted: 0,
-      approved: 0,
-      rejected: 0
+      submitted: metrics?.pendingReviews ?? 0,
+      approved: metrics?.approvedReviews ?? 0,
+      rejected: metrics?.needsFixReviews ?? 0
     }
-
-    if (metrics) {
-      return {
-        ...baseStats,
-        submitted: metrics.pendingReviews,
-        approved: metrics.approvedReviews,
-        rejected: metrics.needsFixReviews
-      }
-    }
-
-    // 從提交資料計算
-    if (submissions.length > 0) {
-      const submitted = submissions.filter(s => !('status' in s) || s.status === 'submitted').length
-      const approved = submissions.filter(s => 'status' in s && s.status === 'approved').length
-      const rejected = submissions.filter(s => 'status' in s && s.status === 'rejected').length
-
-      return {
-        ...baseStats,
-        submitted,
-        approved,
-        rejected
-      }
-    }
-
-    return baseStats
-  }, [metrics, users.length, submissions])
+  }, [metrics, users.length])
 
   // 載入提交資料
   const loadSubmissions = async () => {
@@ -268,52 +248,6 @@ const AdminDashboard: React.FC = () => {
   }
 
   // 快捷匯出功能
-  const handleQuickExport = (user: User) => {
-    setSelectedUser(user)
-    setShowUserExportModal(true)
-  }
-
-  const handleUserExportConfirm = async () => {
-    if (!selectedUser) return
-
-    setIsUserExporting(true)
-    setExportProgress({ status: '正在準備...' })
-
-    try {
-      const result = await withRetry(() =>
-        exportSingleUser(
-          selectedUser.id,
-          selectedUser.name,
-          (status, current, total) => {
-            setExportProgress({ status, current, total })
-          }
-        )
-      )
-
-      setShowUserExportModal(false)
-      setExportProgress(null)
-
-      if (result.failed === 0) {
-        toast.success(`✅ 下載完成！成功：${result.success} 個檔案`)
-      } else {
-        toast.success(`⚠️ 部分檔案失敗\n成功：${result.success}\n失敗：${result.failed}`)
-      }
-    } catch (err: any) {
-      const apiError = handleAPIError(err)
-      showErrorToast(apiError)
-      setExportProgress(null)
-    } finally {
-      setIsUserExporting(false)
-    }
-  }
-
-  const handleUserExportClose = () => {
-    if (!isUserExporting) {
-      setShowUserExportModal(false)
-      setSelectedUser(null)
-      setExportProgress(null)
-    }
-  }
 
   // 用戶管理面板組件
   const UserManagementPanel = () => (
@@ -645,9 +579,9 @@ const AdminDashboard: React.FC = () => {
 
       {/* 用戶匯出對話框 */}
       <UserExportModal
-        isOpen={showUserExportModal}
-        onClose={handleUserExportClose}
-        onConfirm={handleUserExportConfirm}
+        isOpen={showExportModal}
+        onClose={handleExportClose}
+        onConfirm={handleExportConfirm}
         userName={selectedUser?.name || ''}
         companyName={selectedUser?.department || ''}
         isExporting={isUserExporting}

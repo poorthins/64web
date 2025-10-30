@@ -6,13 +6,14 @@ import {
   updateUser,
   getUserById,
   getUserWithPermissions,
+  type User,
   type UserProfile,
   type CreateUserData,
   type UserUpdateData
 } from '../../../api/adminUsers'
 
 export interface UseUsersState {
-  users: UserProfile[]
+  users: User[]  // User includes entries_count
   isLoading: boolean
   error: string | null
   lastFetch: Date | null
