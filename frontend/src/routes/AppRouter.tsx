@@ -30,8 +30,6 @@ import UserDetailPage from '../pages/admin/UserDetailPage'
 import AdminDashboard from '../pages/admin/AdminDashboard'
 import CreateUser from '../pages/admin/CreateUser'
 import EditUser from '../pages/admin/EditUser'
-import StatisticsDetail from '../pages/admin/StatisticsDetail'
-import EnhancedSubmissionManagement from '../pages/admin/EnhancedSubmissionManagement'
 import AdminRoute from '../components/AdminRoute'
 import UserRoute from '../components/UserRoute'
 import FixUserRoles from '../pages/FixUserRoles'
@@ -70,11 +68,6 @@ function AppRouter() {
               <Route path="admin/edit/:userId" element={
                 <AdminRoute fallback={<DashboardPage />}>
                   <EditUser />
-                </AdminRoute>
-              } />
-              <Route path="admin/statistics" element={
-                <AdminRoute fallback={<DashboardPage />}>
-                  <StatisticsDetail />
                 </AdminRoute>
               } />
 

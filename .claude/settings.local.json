@@ -16,7 +16,10 @@
       "Bash(git reset:*)",
       "Bash(awk:*)",
       "Bash(xargs:*)",
-      "Bash(npx tsx:*)"
+      "Bash(npx tsx:*)",
+      "Bash(find:*)",
+      "Bash(sort:*)",
+      "Bash(git rm:*)"
     ],
     "deny": [],
     "ask": []
