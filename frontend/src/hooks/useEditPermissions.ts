@@ -16,15 +16,17 @@ export interface EditPermissions {
  *
  * @param status - 當前填報狀態
  * @param isReviewMode - 是否為審核模式（管理員查看時）
+ * @param role - 用戶角色（'admin' | 'user'）
  * @returns EditPermissions
  */
 export function useEditPermissions(
   status: EntryStatus,
-  isReviewMode: boolean = false
+  isReviewMode: boolean = false,
+  role?: string
 ): EditPermissions {
   return useMemo(() => {
-    // ✅ 審核模式：強制唯讀，不管 status 是什麼
-    if (isReviewMode) {
+    // ✅ 審核模式：只有非管理員強制唯讀
+    if (isReviewMode && role !== 'admin') {
       return {
         canEdit: false,
         canUploadFiles: false,
@@ -86,7 +88,7 @@ export function useEditPermissions(
           statusDescription: '草稿狀態，可完全編輯'
         }
     }
-  }, [status, isReviewMode])  // ← 依賴項加入 isReviewMode
+  }, [status, isReviewMode, role])  // ← 依賴項加入 role
 }
 
 /**

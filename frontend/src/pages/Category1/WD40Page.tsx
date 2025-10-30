@@ -232,9 +232,12 @@ const WD40Page = () => {
     Array.from({ length: 12 }, () => [])
   )
 
+  // 審核模式下只有管理員可編輯
+  const isReadOnly = isReviewMode && role !== 'admin'
+
   // 編輯權限控制
-  const editPermissions = useEditPermissions(currentStatus || 'saved')
-  
+  const editPermissions = useEditPermissions(currentStatus || 'saved', isReadOnly, role)
+
   // 判斷是否有資料
   const hasAnyData = useMemo(() => {
     const hasMonthlyData = monthlyData?.some(m => m.quantity > 0) || false
@@ -242,9 +245,6 @@ const WD40Page = () => {
     const hasMemoryFiles = msdsMemoryFiles.length > 0 || monthlyMemoryFiles.some(files => files.length > 0)
     return hasMonthlyData || hasBasicData || hasMemoryFiles
   }, [monthlyData, unitCapacity, carbonRate, msdsMemoryFiles, monthlyMemoryFiles])
-  
-  // 審核模式下只有管理員可編輯
-  const isReadOnly = isReviewMode && role !== 'admin'
 
   // 管理員審核儲存 Hook
   const { save: adminSave, saving: adminSaving } = useAdminSave(pageKey, reviewEntryId)
@@ -514,12 +514,11 @@ const WD40Page = () => {
           files: filesToUpload
         })
 
-        // 清空記憶體檔案
-        setMsdsMemoryFiles([])
-        setMonthlyMemoryFiles(Array.from({ length: 12 }, () => []))
-
         await reloadAndSync()
         reloadApprovalStatus()
+        // 清空記憶體檔案（在 reloadAndSync 之後，避免檔案暫時消失）
+        setMsdsMemoryFiles([])
+        setMonthlyMemoryFiles(Array.from({ length: 12 }, () => []))
         setToast({ message: '[SUCCESS] 儲存成功！資料已更新', type: 'success' })
         return
       }

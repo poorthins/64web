@@ -16,6 +16,7 @@ import { useEnergyClear } from '../../hooks/useEnergyClear'
 import { useSubmitGuard } from '../../hooks/useSubmitGuard'
 import { useGhostFileCleaner } from '../../hooks/useGhostFileCleaner'
 import { useRecordFileMapping } from '../../hooks/useRecordFileMapping'
+import { useReloadWithFileSync } from '../../hooks/useReloadWithFileSync'
 import { useSubmissions } from '../admin/hooks/useSubmissions'
 import { useRole } from '../../hooks/useRole'
 import { listMSDSFiles, listUsageEvidenceFiles, commitEvidence, deleteEvidence, EvidenceFile, uploadEvidenceWithEntry, deleteEvidenceFile } from '../../api/files'
@@ -84,6 +85,9 @@ const UreaPage = () => {
     reload
   } = useEnergyData(pageKey, year, entryIdToLoad)
 
+  // Reload 同步 Hook
+  const { reloadAndSync } = useReloadWithFileSync(reload)
+
   // 審核狀態 Hook
   const { reload: reloadApprovalStatus, ...approvalStatus } = useApprovalStatus(pageKey, year)
 
@@ -139,7 +143,7 @@ const UreaPage = () => {
   ])
 
   // 編輯權限控制
-  const editPermissions = useEditPermissions(currentStatus, isReadOnly)
+  const editPermissions = useEditPermissions(currentStatus, isReadOnly, role)
   
   // 判斷是否有資料
   const hasAnyData = useMemo(() => {
@@ -464,19 +468,21 @@ const UreaPage = () => {
         const filesToUpload: Array<{
           file: File
           metadata: {
-            recordIndex: number
+            recordId?: string
+            allRecordIds?: string[]
             fileType: 'usage_evidence' | 'msds' | 'other'
           }
         }> = []
 
         // 收集每筆記錄的使用證明檔案
-        usageRecords.forEach((record, recordIndex) => {
+        usageRecords.forEach((record) => {
           if (record.memoryFiles && record.memoryFiles.length > 0) {
             record.memoryFiles.forEach(mf => {
               filesToUpload.push({
                 file: mf.file,
                 metadata: {
-                  recordIndex,
+                  recordId: record.id,
+                  allRecordIds: [record.id],
                   fileType: 'usage_evidence' as const
                 }
               })
@@ -484,12 +490,11 @@ const UreaPage = () => {
           }
         })
 
-        // 收集 MSDS 檔案
-        msdsMemoryFiles.forEach((mf, index) => {
+        // 收集 MSDS 檔案（頁面級別，不綁定特定記錄）
+        msdsMemoryFiles.forEach((mf) => {
           filesToUpload.push({
             file: mf.file,
             metadata: {
-              recordIndex: index,
               fileType: 'msds' as const
             }
           })
@@ -509,16 +514,15 @@ const UreaPage = () => {
           files: filesToUpload
         })
 
-        // 清空記憶體檔案
+        await reloadAndSync()
+        filesAssignedRef.current = false
+        reloadApprovalStatus()
+        // 清空記憶體檔案（在 reloadAndSync 之後，避免檔案暫時消失）
         setMsdsMemoryFiles([])
         setUsageRecords(prev => prev.map(record => ({
           ...record,
           memoryFiles: []
         })))
-
-        await reload()
-        filesAssignedRef.current = false
-        reloadApprovalStatus()
         setToast({ message: '✅ 儲存成功！資料已更新', type: 'success' })
         return
       }
@@ -854,7 +858,7 @@ const UreaPage = () => {
                       value={record.date}
                       onChange={(e) => updateUsageRecord(record.id, 'date', e.target.value)}
                       className={`w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:border-transparent transition-all ${
-                        isReviewMode || approvalStatus.isApproved ? 'bg-gray-100 cursor-not-allowed' : ''
+                        isReadOnly || approvalStatus.isApproved ? 'bg-gray-100 cursor-not-allowed' : ''
                       }`}
                       style={{
                         color: designTokens.colors.textPrimary,
@@ -876,7 +880,7 @@ const UreaPage = () => {
                       value={record.quantity || ''}
                       onChange={(e) => updateUsageRecord(record.id, 'quantity', parseFloat(e.target.value) || 0)}
                       className={`w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:border-transparent transition-all ${
-                        isReviewMode || approvalStatus.isApproved ? 'bg-gray-100 cursor-not-allowed' : ''
+                        isReadOnly || approvalStatus.isApproved ? 'bg-gray-100 cursor-not-allowed' : ''
                       }`}
                       style={{
                         color: designTokens.colors.textPrimary,

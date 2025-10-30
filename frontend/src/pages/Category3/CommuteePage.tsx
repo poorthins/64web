@@ -82,7 +82,7 @@ export default function CommutePage() {
   const isReadOnly = isReviewMode && role !== 'admin'
 
   // 編輯權限控制
-  const editPermissions = useEditPermissions(currentStatus, isReadOnly)
+  const editPermissions = useEditPermissions(currentStatus, isReadOnly, role)
 
   // 幽靈檔案清理 Hook
   const { cleanFiles } = useGhostFileCleaner()

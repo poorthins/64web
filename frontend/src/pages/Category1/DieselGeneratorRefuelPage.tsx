@@ -91,10 +91,10 @@ export default function DieselGeneratorRefuelPage() {
   // u89d2u8272u6aa2u67e5
   const { role } = useRole()
 
-  const editPermissions = useEditPermissions(currentStatus || 'submitted')
-
   // 審核模式時為唯讀
   const isReadOnly = isReviewMode
+
+  const editPermissions = useEditPermissions(currentStatus || 'submitted', isReadOnly, role)
 
   const calculateTotals = useCallback((records: RefuelRecord[]) => {
     const totalQuantity = records.reduce((sum, record) => sum + record.quantity, 0)

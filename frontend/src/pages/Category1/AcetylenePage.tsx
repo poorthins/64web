@@ -132,8 +132,11 @@ const AcetylenePage = () => {
     Array.from({ length: 12 }, () => [])
   )
 
+  // 審核模式下只有管理員可編輯
+  const isReadOnly = isReviewMode && role !== 'admin'
+
   // 編輯權限控制
-  const editPermissions = useEditPermissions(currentStatus)
+  const editPermissions = useEditPermissions(currentStatus, isReadOnly, role)
 
   // 判斷是否有資料
   const hasAnyData = useMemo(() => {
@@ -143,9 +146,6 @@ const AcetylenePage = () => {
     const hasMemoryFiles = unitWeightMemoryFiles.length > 0 || monthlyMemoryFiles.some(files => files.length > 0)
     return hasMonthlyData || hasBasicData || hasFiles || hasMemoryFiles
   }, [monthlyData, unitWeight, unitWeightFiles, unitWeightMemoryFiles, monthlyMemoryFiles])
-  
-  // 審核模式下只有管理員可編輯
-  const isReadOnly = isReviewMode && role !== 'admin'
 
   // 管理員審核儲存 Hook
   const { save: adminSave, saving: adminSaving } = useAdminSave(pageKey, reviewEntryId)
@@ -1023,7 +1023,7 @@ const AcetylenePage = () => {
       )}
 
       {/* 審核區塊 - 只在審核模式顯示 */}
-      {isReviewMode && currentEntryId && (
+      {isReviewMode && (
         <ReviewSection
           entryId={reviewEntryId || currentEntryId}
           userId={reviewUserId || "current_user"}

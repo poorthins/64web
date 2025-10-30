@@ -53,6 +53,7 @@ interface EvidenceUploadProps {
   onMemoryFilesChange?: (files: MemoryFile[]) => void
   hideFileCount?: boolean  // 隱藏檔案數量顯示
   isAdminReviewMode?: boolean  // 管理員審核模式標記
+  onFileDeleted?: () => void  // 檔案刪除成功後的回調（用於 reload）
 }
 
 // 輔助函數：判斷當前狀態是否允許上傳檔案
@@ -83,7 +84,8 @@ const EvidenceUpload: React.FC<EvidenceUploadProps> = ({
   memoryFiles = [],
   onMemoryFilesChange,
   hideFileCount = false,
-  isAdminReviewMode = false
+  isAdminReviewMode = false,
+  onFileDeleted
 }) => {
 
   const [uploading, setUploading] = useState(false)
@@ -418,6 +420,9 @@ const EvidenceUpload: React.FC<EvidenceUploadProps> = ({
 
       setSuccessMessage('檔案已成功刪除')
       setTimeout(() => setSuccessMessage(null), 3000)
+
+      // 呼叫刪除回調，讓父組件可以 reload
+      onFileDeleted?.()
     } catch (error) {
       console.error('Delete error:', error)
       let errorMessage = error instanceof Error ? error.message : '刪除失敗'

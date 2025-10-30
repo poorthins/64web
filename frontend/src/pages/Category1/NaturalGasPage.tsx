@@ -103,7 +103,7 @@ const NaturalGasPage = () => {
   const { save: adminSave, saving: adminSaving } = useAdminSave(pageKey, reviewEntryId)
 
   const effectiveStatus = (approvalStatus?.status || frontendStatus?.currentStatus || initialStatus) as EntryStatus
-  const editPermissions = useEditPermissions(effectiveStatus, isReadOnly)
+  const editPermissions = useEditPermissions(effectiveStatus, isReadOnly, role)
   const { cleanFiles } = useGhostFileCleaner()
 
   // 🔍 Debug: 審核狀態檢查
@@ -907,12 +907,11 @@ const NaturalGasPage = () => {
           files: filesToUpload
         })
 
-        // 清空記憶體檔案
-        setHeatValueMemoryFiles([])
-        setBillMemoryFiles({})
-
         await reload()
         reloadApprovalStatus()
+        // 清空記憶體檔案（在 reload 之後，避免檔案暫時消失）
+        setHeatValueMemoryFiles([])
+        setBillMemoryFiles({})
         setToast({ message: '✅ 儲存成功！資料已更新', type: 'success' })
         return
       }

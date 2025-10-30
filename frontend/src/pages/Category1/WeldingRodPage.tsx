@@ -16,6 +16,8 @@ import { useSubmitGuard } from '../../hooks/useSubmitGuard'
 import { useGhostFileCleaner } from '../../hooks/useGhostFileCleaner'
 import { useReloadWithFileSync } from '../../hooks/useReloadWithFileSync'
 import { useSubmissions } from '../admin/hooks/useSubmissions'
+import { useRole } from '../../hooks/useRole'
+import { useAdminSave } from '../../hooks/useAdminSave'
 import { listMSDSFiles, listUsageEvidenceFiles, commitEvidence, deleteEvidence, EvidenceFile, uploadEvidenceWithEntry } from '../../api/files'
 import { upsertEnergyEntry, sumMonthly, UpsertEntryInput, updateEntryStatus, getEntryByPageKeyAndYear } from '../../api/entries'
 import { designTokens } from '../../utils/designTokens'
@@ -24,15 +26,13 @@ interface MonthData {
   month: number
   quantity: number      // 使用數量 (支)
   files: EvidenceFile[]
-  memoryFiles: MemoryFile[]
 }
 
 const createInitialMonthlyData = (): MonthData[] => {
   return Array.from({ length: 12 }, (_, i) => ({
     month: i + 1,
     quantity: 0,
-    files: [],
-    memoryFiles: []
+    files: []
   }))
 }
 
@@ -44,6 +44,15 @@ const WeldingRodPage = () => {
   const isReviewMode = searchParams.get('mode') === 'review'
   const reviewEntryId = searchParams.get('entryId')
   const reviewUserId = searchParams.get('userId')
+
+  // 角色檢查
+  const { role } = useRole()
+
+  // 審核模式下只有管理員可編輯
+  const isReadOnly = isReviewMode && role !== 'admin'
+
+  // 管理員審核儲存 Hook
+  const { save: adminSave, saving: adminSaving } = useAdminSave('welding_rod', reviewEntryId)
 
   const [loading, setLoading] = useState(true)
   const { executeSubmit, submitting } = useSubmitGuard()
@@ -80,11 +89,14 @@ const WeldingRodPage = () => {
   const [msdsFiles, setMsdsFiles] = useState<EvidenceFile[]>([])
   const [msdsMemoryFiles, setMsdsMemoryFiles] = useState<MemoryFile[]>([])
   const [monthlyData, setMonthlyData] = useState<MonthData[]>(createInitialMonthlyData())
+  const [monthlyMemoryFiles, setMonthlyMemoryFiles] = useState<MemoryFile[][]>(
+    Array.from({ length: 12 }, () => [])
+  )
 
   const pageKey = 'welding_rod'
   
   // 編輯權限控制
-  const editPermissions = useEditPermissions(frontendCurrentStatus || 'submitted', isReviewMode)
+  const editPermissions = useEditPermissions(frontendCurrentStatus || 'submitted', isReviewMode, role)
 
   const monthNames = [
     '1月', '2月', '3月', '4月', '5月', '6月',
@@ -176,36 +188,48 @@ const WeldingRodPage = () => {
         const validFiles = await cleanFiles(loadedFiles)
         console.log('✅ [WeldingRodPage] Valid files after cleanup:', validFiles.length)
 
-        // 分類檔案：MSDS 和月份檔案
+        // 分類檔案：MSDS
         const msdsFilesFromLoad = validFiles.filter(f => f.file_type === 'msds')
         setMsdsFiles(msdsFilesFromLoad)
 
-        // 載入各月份使用證明檔案
-        const monthlyDataWithFiles = createInitialMonthlyData().map(monthData => {
-          const monthFiles = validFiles.filter(f =>
-            f.file_type === 'usage_evidence' && f.month === monthData.month
-          )
+        // ✅ 使用函數式更新，確保獲取最新的 monthlyData
+        setMonthlyData(currentMonthlyData => {
+          // 深拷貝 monthlyData，避免引用問題
+          const newMonthlyData = currentMonthlyData.map(data => ({
+            ...data,
+            files: [...data.files]  // 深拷貝 files
+          }))
 
-          // 從資料庫讀取該月份的數量
-          let quantity = 0
+          // ✅ 累加檔案而非覆蓋
+          validFiles
+            .filter(f => f.file_type === 'usage_evidence' && f.month)
+            .forEach(file => {
+              const monthIndex = file.month! - 1
+              if (monthIndex >= 0 && monthIndex < 12) {
+                const exists = newMonthlyData[monthIndex].files.some(
+                  ef => ef.id === file.id
+                )
+                if (!exists) {
+                  newMonthlyData[monthIndex].files.push(file)
+                }
+              }
+            })
 
-          // 優先從 monthlyQuantity 讀取（新格式，直接存數量）
-          if (loadedEntry?.payload?.monthlyQuantity?.[monthData.month.toString()]) {
-            quantity = loadedEntry.payload.monthlyQuantity[monthData.month.toString()]
-          } else if (loadedEntry?.payload?.monthly?.[monthData.month.toString()]) {
-            // 向後相容：舊資料只有 monthly（totalWeight），需要反推 quantity
-            const totalWeight = loadedEntry.payload.monthly[monthData.month.toString()]
-            quantity = unitWeight > 0 ? Math.round(totalWeight / unitWeight) : 0
+          // ✅ 從 payload 載入數量
+          if (loadedEntry?.payload) {
+            newMonthlyData.forEach(data => {
+              const monthKey = data.month.toString()
+              if (loadedEntry.payload.monthlyQuantity?.[monthKey]) {
+                data.quantity = loadedEntry.payload.monthlyQuantity[monthKey]
+              } else if (loadedEntry.payload.monthly?.[monthKey]) {
+                const totalWeight = loadedEntry.payload.monthly[monthKey]
+                data.quantity = unitWeight > 0 ? Math.round(totalWeight / unitWeight) : 0
+              }
+            })
           }
 
-          return {
-            ...monthData,
-            quantity,
-            files: monthFiles
-          }
+          return newMonthlyData
         })
-
-        setMonthlyData(monthlyDataWithFiles)
 
         if (loadedEntry?.id) {
           handleDataChanged()
@@ -252,9 +276,11 @@ const WeldingRodPage = () => {
   }
 
   const handleMonthMemoryFilesChange = (month: number, memFiles: MemoryFile[]) => {
-    setMonthlyData(prev => prev.map(data =>
-      data.month === month ? { ...data, memoryFiles: memFiles } : data
-    ))
+    setMonthlyMemoryFiles(prev => {
+      const newFiles = [...prev]
+      newFiles[month - 1] = memFiles
+      return newFiles
+    })
   }
 
   const getTotalWeight = () => {
@@ -284,7 +310,8 @@ const WeldingRodPage = () => {
 
     monthlyData.forEach((data, index) => {
       if (data.quantity > 0) {
-        const totalFiles = data.files.length + (data.memoryFiles ? data.memoryFiles.length : 0)
+        const monthMemoryFiles = monthlyMemoryFiles[index] || []
+        const totalFiles = data.files.length + monthMemoryFiles.length
         if (totalFiles === 0) {
           errors.push(`${monthNames[index]}有使用量但未上傳使用證明`)
         }
@@ -324,7 +351,7 @@ const WeldingRodPage = () => {
       })
 
       // 分開 MSDS 檔案和月份檔案
-      const monthlyFiles: MemoryFile[][] = monthlyData.map(m => m.memoryFiles || [])
+      const monthlyFiles: MemoryFile[][] = monthlyMemoryFiles
 
       // 使用 Hook 提交（符合 Hook 的參數格式）
       await submit({
@@ -367,6 +394,84 @@ const WeldingRodPage = () => {
       setError(null)
       setSuccess(null)
 
+      // 審核模式：使用 useAdminSave hook
+      if (isReviewMode && reviewEntryId) {
+        console.log('📝 管理員審核模式：使用 useAdminSave hook', reviewEntryId)
+
+        // 準備檔案列表
+        const filesToUpload: Array<{
+          file: File
+          metadata: {
+            month?: number
+            fileType: 'usage_evidence' | 'msds' | 'other'
+          }
+        }> = []
+
+        // 收集 MSDS 檔案
+        msdsMemoryFiles.forEach((mf) => {
+          filesToUpload.push({
+            file: mf.file,
+            metadata: {
+              fileType: 'msds' as const
+            }
+          })
+        })
+
+        // 收集每月使用量佐證檔案
+        monthlyMemoryFiles.forEach((memFiles, monthIndex) => {
+          if (memFiles && memFiles.length > 0) {
+            memFiles.forEach(mf => {
+              filesToUpload.push({
+                file: mf.file,
+                metadata: {
+                  month: monthIndex + 1,
+                  fileType: 'usage_evidence' as const
+                }
+              })
+            })
+          }
+        })
+
+        // 準備每月數據
+        const monthly: Record<string, number> = {}
+        const monthlyQuantity: Record<string, number> = {}
+        monthlyData.forEach(data => {
+          if (data.quantity > 0) {
+            monthly[data.month.toString()] = data.quantity * unitWeight
+            monthlyQuantity[data.month.toString()] = data.quantity
+          }
+        })
+
+        await adminSave({
+          updateData: {
+            unit: 'KG',
+            amount: getTotalWeight(),
+            payload: {
+              monthly,
+              monthlyQuantity,
+              unitCapacity: unitWeight,
+              carbonRate: carbonContent
+            }
+          },
+          files: filesToUpload
+        })
+
+        await reloadAndSync()
+        approvalStatus.reload()
+
+        // ✅ 額外等待，確保 useEffect 的異步操作完成
+        // 100ms (reloadAndSync) + 150ms = 250ms 總延遲
+        await new Promise(resolve => setTimeout(resolve, 150))
+
+        // 清空記憶體檔案（在 reloadAndSync 之後，避免檔案暫時消失）
+        setMsdsMemoryFiles([])
+        setMonthlyMemoryFiles(Array.from({ length: 12 }, () => []))
+
+        setToast({ message: '✅ 儲存成功！資料已更新', type: 'success' })
+        return
+      }
+
+      // 非審核模式：原本的邏輯
       // 準備每月數據 (以重量為單位)
       const monthly: Record<string, number> = {}
       const monthlyQuantity: Record<string, number> = {}
@@ -378,7 +483,7 @@ const WeldingRodPage = () => {
       })
 
       // 分開 MSDS 檔案和月份檔案
-      const monthlyFiles: MemoryFile[][] = monthlyData.map(m => m.memoryFiles || [])
+      const monthlyFiles: MemoryFile[][] = monthlyMemoryFiles
 
       // 使用 Hook 暫存
       const entry_id = await save({
@@ -420,7 +525,7 @@ const WeldingRodPage = () => {
       })
 
       // 收集所有記憶體檔案
-      const allMemoryFiles = [msdsMemoryFiles, ...monthlyData.map(d => d.memoryFiles)]
+      const allMemoryFiles = [msdsMemoryFiles, ...monthlyMemoryFiles]
 
       // 使用 Hook 清除
       await clear({
@@ -434,6 +539,7 @@ const WeldingRodPage = () => {
       setMsdsFiles([])
       setMsdsMemoryFiles([])
       setMonthlyData(createInitialMonthlyData())
+      setMonthlyMemoryFiles(Array.from({ length: 12 }, () => []))
       setHasChanges(false)
       setCurrentEntryId(null)
       setHasSubmittedBefore(false)
@@ -634,9 +740,9 @@ const WeldingRodPage = () => {
                     const numValue = inputValue === '' ? 0 : parseFloat(inputValue)
                     setUnitWeight(isNaN(numValue) ? 0 : numValue)
                   }}
-                  disabled={isReviewMode || approvalStatus.isApproved || submitting || !editPermissions.canEdit}
+                  disabled={isReadOnly || approvalStatus.isApproved || submitting || !editPermissions.canEdit}
                   className={`w-full px-4 py-3 border rounded-lg focus:outline-none focus:ring-2 focus:border-transparent transition-all ${
-                    isReviewMode || approvalStatus.isApproved ? 'bg-gray-100 cursor-not-allowed' : ''
+                    isReadOnly || approvalStatus.isApproved ? 'bg-gray-100 cursor-not-allowed' : ''
                   }`}
                   style={{
                     color: designTokens.colors.textPrimary,
@@ -675,9 +781,9 @@ const WeldingRodPage = () => {
                     const numValue = inputValue === '' ? 0 : parseFloat(inputValue)
                     setCarbonContent(isNaN(numValue) ? 0 : numValue)
                   }}
-                  disabled={isReviewMode || approvalStatus.isApproved || submitting || !editPermissions.canEdit}
+                  disabled={isReadOnly || approvalStatus.isApproved || submitting || !editPermissions.canEdit}
                   className={`w-full px-4 py-3 border rounded-lg focus:outline-none focus:ring-2 focus:border-transparent transition-all ${
-                    isReviewMode || approvalStatus.isApproved ? 'bg-gray-100 cursor-not-allowed' : ''
+                    isReadOnly || approvalStatus.isApproved ? 'bg-gray-100 cursor-not-allowed' : ''
                   }`}
                   style={{
                     color: designTokens.colors.textPrimary,
@@ -716,7 +822,7 @@ const WeldingRodPage = () => {
                 maxFiles={3}
                 disabled={submitting || !editPermissions.canUploadFiles}
                 kind="msds"  // 維持後端型別，僅前端顯示改名
-                mode={isReviewMode || approvalStatus.isApproved ? "view" : "edit"}
+                mode={isReadOnly || approvalStatus.isApproved ? "view" : "edit"}
               />
             </div>
           </div>
@@ -824,9 +930,9 @@ const WeldingRodPage = () => {
                         const numValue = inputValue === '' ? 0 : parseInt(inputValue)
                         updateMonthData(index, 'quantity', isNaN(numValue) ? 0 : numValue)
                       }}
-                      disabled={isReviewMode || approvalStatus.isApproved || submitting || !editPermissions.canEdit}
+                      disabled={isReadOnly || approvalStatus.isApproved || submitting || !editPermissions.canEdit}
                       className={`w-full px-3 py-2 border rounded-md focus:outline-none focus:ring-2 focus:border-transparent transition-all ${
-                        isReviewMode || approvalStatus.isApproved ? 'bg-gray-100 cursor-not-allowed' : ''
+                        isReadOnly || approvalStatus.isApproved ? 'bg-gray-100 cursor-not-allowed' : ''
                       }`}
                       style={{
                         color: designTokens.colors.textPrimary,
@@ -858,12 +964,12 @@ const WeldingRodPage = () => {
                       month={data.month}
                       files={data.files}
                       onFilesChange={(files) => handleMonthFilesChange(data.month, files)}
-                      memoryFiles={data.memoryFiles}
+                      memoryFiles={monthlyMemoryFiles[data.month - 1] || []}
                       onMemoryFilesChange={(memFiles) => handleMonthMemoryFilesChange(data.month, memFiles)}
                       maxFiles={3}
                       disabled={submitting || !editPermissions.canUploadFiles}
                       kind="usage_evidence"
-                      mode={isReviewMode || approvalStatus.isApproved ? "view" : "edit"}
+                      mode={isReadOnly || approvalStatus.isApproved ? "view" : "edit"}
                     />
                   </div>
                 </div>
@@ -881,6 +987,9 @@ const WeldingRodPage = () => {
             userName="填報用戶" // 可以從用戶資料獲取
             amount={getTotalQuantity()}
             unit="支"
+            role={role}
+            onSave={handleSave}
+            isSaving={submitting}
             onApprove={() => {
               // ReviewSection 會處理 API 呼叫和導航
               // 這裡可以加入額外的本地狀態處理（如果需要）

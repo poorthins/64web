@@ -14,6 +14,7 @@ import { useMultiRecordSubmit } from '../../hooks/useMultiRecordSubmit'
 import { useEnergyClear } from '../../hooks/useEnergyClear'
 import { useSubmitGuard } from '../../hooks/useSubmitGuard'
 import { useRecordFileMapping } from '../../hooks/useRecordFileMapping'
+import { useReloadWithFileSync } from '../../hooks/useReloadWithFileSync'
 import { useSubmissions } from '../admin/hooks/useSubmissions'
 import { useRole } from '../../hooks/useRole'
 import { useAdminSave } from '../../hooks/useAdminSave'
@@ -107,7 +108,7 @@ export default function RefrigerantPage() {
   // 管理員審核儲存 Hook
   const { save: adminSave, saving: adminSaving } = useAdminSave(pageKey, reviewEntryId)
 
-  const editPermissions = useEditPermissions(currentStatus, isReadOnly)
+  const editPermissions = useEditPermissions(currentStatus, isReadOnly, role)
 
   // 資料載入 Hook
   const entryIdToLoad = isReviewMode && reviewEntryId ? reviewEntryId : undefined
@@ -118,6 +119,9 @@ export default function RefrigerantPage() {
     error: dataError,
     reload
   } = useEnergyData(pageKey, year, entryIdToLoad)
+
+  // Reload 同步 Hook
+  const { reloadAndSync } = useReloadWithFileSync(reload)
 
   // 審核狀態 Hook
   const { reload: reloadApprovalStatus, ...approvalStatus } = useApprovalStatus(pageKey, year)
@@ -419,13 +423,14 @@ export default function RefrigerantPage() {
         }> = []
 
         // 收集每筆設備的銘牌檔案
-        userRows.forEach((record, recordIndex) => {
+        userRows.forEach((record) => {
           if (record.memoryFiles && record.memoryFiles.length > 0) {
             record.memoryFiles.forEach(mf => {
               filesToUpload.push({
                 file: mf.file,
                 metadata: {
-                  recordIndex,
+                  recordId: record.id,
+                  allRecordIds: [record.id],
                   fileType: 'other' as const
                 }
               })
@@ -445,15 +450,14 @@ export default function RefrigerantPage() {
           files: filesToUpload
         })
 
-        // 清空記憶體檔案
+        await reloadAndSync()
+        reloadApprovalStatus()
+        // 清空記憶體檔案（在 reloadAndSync 之後，避免檔案暫時消失）
         setRefrigerantData(prev => {
           const userRows = prev.filter(r => !r.isExample)
           const cleared = userRows.map(r => ({ ...r, memoryFiles: [] }))
           return withExampleFirst(cleared)
         })
-
-        await reload()
-        reloadApprovalStatus()
         setSuccess('✅ 儲存成功！資料已更新')
         return
       }

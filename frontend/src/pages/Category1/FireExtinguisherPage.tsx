@@ -14,6 +14,7 @@ import { useRecordFileMapping } from '../../hooks/useRecordFileMapping'
 import { useStatusBanner, getBannerColorClasses } from '../../hooks/useStatusBanner'
 import { useRole } from '../../hooks/useRole'
 import { useAdminSave } from '../../hooks/useAdminSave'
+import { useReloadWithFileSync } from '../../hooks/useReloadWithFileSync'
 
 import EvidenceUpload, { MemoryFile } from '../../components/EvidenceUpload'
 import BottomActionBar from '../../components/BottomActionBar'
@@ -74,6 +75,7 @@ export default function FireExtinguisherPage() {
   } = useRecordFileMapping(pageKey, entry?.id || null)
   const { clear, clearing } = useEnergyClear(entry?.id || null, (entry?.status as EntryStatus) || 'submitted')
   const { cleanFiles } = useGhostFileCleaner()
+  const { reloadAndSync } = useReloadWithFileSync(reload)
 
   const frontendStatus = useFrontendStatus({
     initialStatus: (entry?.status as EntryStatus) || 'submitted',
@@ -87,7 +89,7 @@ export default function FireExtinguisherPage() {
   // 管理員審核儲存 Hook
   const { save: adminSave, saving: adminSaving } = useAdminSave(pageKey, reviewEntryId)
 
-  const editPermissions = useEditPermissions(currentStatus || 'submitted', isReadOnly)
+  const editPermissions = useEditPermissions(currentStatus || 'submitted', isReadOnly, role)
 
   const submitting = submitLoading || clearing
 
@@ -100,6 +102,12 @@ export default function FireExtinguisherPage() {
 
   // 已上傳的檢修表檔案（從 Supabase）
   const [uploadedInspectionFiles, setUploadedInspectionFiles] = useState<EvidenceFile[]>([])
+
+  // 追蹤已載入的 entry ID
+  const [lastLoadedEntryId, setLastLoadedEntryId] = useState<string | null>(null)
+
+  // 本地檔案狀態（用於即時更新 UI，避免 reload）
+  const [localFiles, setLocalFiles] = useState<EvidenceFile[]>([])
 
   const [newRecord, setNewRecord] = useState<Omit<FireExtinguisherRecord, 'id'>>({
     type: 'ABC 乾粉滅火器',
@@ -301,7 +309,8 @@ export default function FireExtinguisherPage() {
               file: mf.file,
               metadata: {
                 month: 1,
-                fileType: 'other' as const
+                fileType: 'other' as const,
+                allRecordIds: [record.id]
               }
             })
           })
@@ -325,15 +334,14 @@ export default function FireExtinguisherPage() {
           files: filesToUpload
         })
 
-        // 清空記憶體檔案
+        await reloadAndSync()
+        reloadApprovalStatus()
+        // 清空記憶體檔案（在 reload 之後，避免檔案暫時消失）
         setData(prev => ({
           inspectionReports: [],
           records: prev.records.map(r => ({ ...r, nameplatePhotos: [] })),
           fileMapping: prev.fileMapping
         }))
-
-        await reload()
-        reloadApprovalStatus()
         return
       }
 
@@ -373,17 +381,17 @@ export default function FireExtinguisherPage() {
         }
       }
 
-      // 清空記憶體檔案
+      await reloadAndSync()
+
+      // 重新載入審核狀態，更新狀態橫幅
+      reloadApprovalStatus()
+
+      // 清空記憶體檔案（在 reload 之後，避免檔案暫時消失）
       setData(prev => ({
         ...prev,
         inspectionReports: [],
         records: prev.records.map(r => ({ ...r, nameplatePhotos: [] }))
       }))
-
-      await reload()
-
-      // 重新載入審核狀態，更新狀態橫幅
-      reloadApprovalStatus()
 
       setShowSuccess(true)
       setTimeout(() => setShowSuccess(false), 3000)
@@ -403,7 +411,7 @@ export default function FireExtinguisherPage() {
 
       // 收集所有記錄的檔案
       data.records.forEach(record => {
-        const recordFiles = getRecordFiles(record.id, files)
+        const recordFiles = getRecordFiles(record.id, localFiles)
         filesToDelete.push(...recordFiles)
       })
 
@@ -421,6 +429,7 @@ export default function FireExtinguisherPage() {
         fileMapping: {}
       })
       setUploadedInspectionFiles([])
+      setLocalFiles([])
       setNewRecord({
         type: 'ABC 乾粉滅火器',
         quantity: 1,
@@ -438,64 +447,28 @@ export default function FireExtinguisherPage() {
       setErrorMessage(msg)
       setShowError(true)
     }
-  }, [data, uploadedInspectionFiles, files, clear, getRecordFiles])
+  }, [data, uploadedInspectionFiles, localFiles, clear, getRecordFiles])
 
-  // ==================== 載入：從 entry 還原資料 ====================
+  // ==================== 載入：從 entry 還原記錄資料 ====================
   useEffect(() => {
     if (!entry) return
+    if (dataLoading) return
 
+    // 判斷是否應該載入表單資料
+    const isNewEntry = entry.id !== lastLoadedEntryId
+    const shouldLoadFormData = isInitialLoad.current || isNewEntry
 
-    // ⭐ 等待檔案載入完成（避免在 files = [] 時執行）
-    if (dataLoading) {
-      console.log('🔍 [Load] 等待檔案載入中...')
-      return
+    // 同步前端狀態（總是更新）
+    if (entry.status) {
+      setCurrentStatus(entry.status as EntryStatus)
     }
 
-    console.log('🔍 [Load] === 開始載入資料 ===')
-    console.log('🔍 [Load] files 總數:', files.length)
-    console.log('🔍 [Load] pageKey:', pageKey)
+    // 只在首次載入或切換 entry 時設定表單欄位
+    if (!shouldLoadFormData) return
 
-    // 檢查檔案欄位命名（診斷用）
-    if (files.length > 0) {
-      const sampleFile = files[0] as any
-      console.log('🔍 [Load] 檔案範例:', {
-        id: sampleFile.id,
-        page_key: sampleFile.page_key,
-        record_id: sampleFile.record_id,
-        recordId: sampleFile.recordId,
-        record_index: sampleFile.record_index,
-        recordIndex: sampleFile.recordIndex
-      })
-    }
-
-    // 載入檢修表檔案（同時檢查兩種命名）
-    const inspectionFiles = (files as any[]).filter(f => {
-      const match = f.page_key === pageKey &&
-        (f.record_id == null && f.recordId == null) &&
-        (f.record_index == null && f.recordIndex == null)
-
-      if (f.page_key === pageKey) {
-        console.log('🔍 [Load] 檢查檔案:', f.id.substring(0, 8), {
-          record_id: f.record_id,
-          recordId: f.recordId,
-          record_index: f.record_index,
-          recordIndex: f.recordIndex,
-          匹配檢修表: match
-        })
-      }
-
-      return match
-    })
-
-    console.log('🔍 [Load] 過濾後的檢修表檔案數:', inspectionFiles.length)
-    setUploadedInspectionFiles(inspectionFiles as EvidenceFile[])
-
-    // ⭐ 初次載入：從 payload 還原記錄資料
-    if (isInitialLoad.current) {
-      // 同步前端狀態
-      if (entry.status) {
-        setCurrentStatus(entry.status as EntryStatus)
-      }
+    console.log('🔍 [Load] === 載入 entry payload ===')
+    console.log('🔍 [Load] entry ID:', entry.id)
+    console.log('🔍 [Load] isNewEntry:', isNewEntry, '(last:', lastLoadedEntryId, ')')
 
     // 載入記錄資料
     if (entry.payload?.fireExtinguisherData) {
@@ -519,14 +492,47 @@ export default function FireExtinguisherPage() {
       console.log('🔍 [Load] fileMapping 已載入')
     }
 
+    // 記錄已載入的 entry ID
+    setLastLoadedEntryId(entry.id)
     isInitialLoad.current = false
+  }, [entry, dataLoading, lastLoadedEntryId, setCurrentStatus, loadFileMapping])
+
+  // ==================== 載入：分配檔案到檢修表 ====================
+  useEffect(() => {
+    if (files.length === 0) return
+
+    console.log('🔍 [Load] === 開始載入檔案 ===')
+    console.log('🔍 [Load] files 總數:', files.length)
+    console.log('🔍 [Load] pageKey:', pageKey)
+
+    // 清理幽靈檔案，再分類
+    const cleanAndAssignFiles = async () => {
+      const validFiles = await cleanFiles(files)
+      console.log('✅ [Load] 有效檔案數:', validFiles.length)
+
+      // 同步到 localFiles
+      setLocalFiles(validFiles)
+
+      // 載入檢修表檔案
+      const inspectionFiles = (validFiles as any[]).filter(f => {
+        const match = f.page_key === pageKey &&
+          (f.record_id == null && f.recordId == null) &&
+          (f.record_ids == null || f.record_ids.length === 0) &&
+          (f.record_index == null && f.recordIndex == null)
+        return match
+      })
+
+      console.log('🔍 [Load] 過濾後的檢修表檔案數:', inspectionFiles.length)
+      setUploadedInspectionFiles(inspectionFiles as EvidenceFile[])
     }
-  }, [entry, files, pageKey, isInitialLoad, loadFileMapping, dataLoading])
+
+    cleanAndAssignFiles()
+  }, [files, cleanFiles, pageKey])
 
   // ==================== 清理幽靈檔案 ====================
   useEffect(() => {
     // ⭐ 嚴格條件檢查，避免在狀態未準備好時執行
-    if (!entry || files.length === 0 || data.records.length === 0) return
+    if (!entry || localFiles.length === 0 || data.records.length === 0) return
     if (dataLoading) return  // 等待資料載入完成
 
     console.log('🗑️ [Clean] === 開始檢查幽靈檔案 ===')
@@ -541,7 +547,7 @@ export default function FireExtinguisherPage() {
 
       // 記錄檔案
       data.records.forEach(record => {
-        const recordFiles = getRecordFiles(record.id, files)
+        const recordFiles = getRecordFiles(record.id, localFiles)
         console.log('🗑️ [Clean] 記錄', record.id, '的檔案:', recordFiles.length, '個')
         recordFiles.forEach(f => ids.add(f.id))
       })
@@ -552,11 +558,11 @@ export default function FireExtinguisherPage() {
 
     const cleanGhost = async () => {
       const validFileIds = collectValidIds()
-      const ghostFiles = (files as any[]).filter(
+      const ghostFiles = (localFiles as any[]).filter(
         f => f.page_key === pageKey && !validFileIds.has(f.id)
       )
 
-      console.log('🗑️ [Clean] 所有檔案數:', files.length)
+      console.log('🗑️ [Clean] 所有檔案數:', localFiles.length)
       console.log('🗑️ [Clean] 幽靈檔案數:', ghostFiles.length)
 
       if (ghostFiles.length > 0) {
@@ -567,7 +573,7 @@ export default function FireExtinguisherPage() {
     }
 
     cleanGhost()
-  }, [entry, files, data.records, uploadedInspectionFiles, pageKey, getRecordFiles, cleanFiles, dataLoading])
+  }, [entry, localFiles, data.records, uploadedInspectionFiles, pageKey, getRecordFiles, cleanFiles, dataLoading])
 
   // ==================== Loading ====================
   if (dataLoading) {
@@ -653,7 +659,7 @@ export default function FireExtinguisherPage() {
                 disabled={submitting || !editPermissions.canUploadFiles || isReadOnly || approvalStatus.isApproved}
                 kind="other"
                 mode={isReadOnly ? "view" : "edit"}
-                            isAdminReviewMode={isReviewMode && role === 'admin'}
+                isAdminReviewMode={isReviewMode && role === 'admin'}
               />
               <p className="text-sm mt-1 text-gray-500">
                 {isReviewMode ? '已上傳的消防安全設備檢修表' : '請上傳消防安全設備檢修表或相關證明文件（全年度共用）'}
@@ -769,7 +775,7 @@ export default function FireExtinguisherPage() {
               <h2 className="text-2xl font-bold mb-4 text-gray-900">滅火器清單</h2>
               <div className="space-y-4">
                 {data.records.map((record, index) => {
-                  const recordFiles = getRecordFiles(record.id, files)
+                  const recordFiles = getRecordFiles(record.id, localFiles)
                   console.log('🔍 [Render] 記錄檔案:', record.id, '→', recordFiles.length, '個檔案')
 
                   return (
@@ -818,7 +824,16 @@ export default function FireExtinguisherPage() {
                         <EvidenceUpload
                           pageKey={pageKey}
                           files={recordFiles}
-                          onFilesChange={() => {}}
+                          onFilesChange={(updatedFiles) => {
+                            // ✅ 直接更新 localFiles，不要 reload（跟化糞池一樣）
+                            setLocalFiles(prev => {
+                              // 從 prev 中移除被刪除的檔案
+                              const deletedFileIds = recordFiles
+                                .filter(f => !updatedFiles.find(uf => uf.id === f.id))
+                                .map(f => f.id)
+                              return prev.filter(f => !deletedFileIds.includes(f.id))
+                            })
+                          }}
                           memoryFiles={record.nameplatePhotos}
                           onMemoryFilesChange={(memFiles) => {
                             setData(prev => ({
@@ -832,7 +847,7 @@ export default function FireExtinguisherPage() {
                           disabled={submitting || isReadOnly || approvalStatus.isApproved}
                           kind="other"
                           mode={isReadOnly ? 'view' : 'edit'}
-                      isAdminReviewMode={isReviewMode && role === 'admin'}
+                          isAdminReviewMode={isReviewMode && role === 'admin'}
                         />
                       </div>
                     </div>

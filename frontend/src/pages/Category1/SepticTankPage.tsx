@@ -70,7 +70,6 @@ export default function SepticTankPage() {
   })
 
   const { currentStatus, setCurrentStatus, handleDataChanged, handleSubmitSuccess, isInitialLoad } = frontendStatus
-  const editPermissions = useEditPermissions(currentStatus)
 
   // 資料載入 Hook
   const entryIdToLoad = isReviewMode && reviewEntryId ? reviewEntryId : undefined
@@ -94,6 +93,11 @@ export default function SepticTankPage() {
   // 角色檢查
   const { role } = useRole()
 
+  // 審核模式下只有管理員可編輯
+  const isReadOnly = isReviewMode && role !== 'admin'
+
+  const editPermissions = useEditPermissions(currentStatus, isReadOnly, role)
+
   // 清除 Hook
   const {
     clear,
@@ -104,9 +108,6 @@ export default function SepticTankPage() {
 
   // 幽靈檔案清理 Hook
   const { cleanFiles } = useGhostFileCleaner()
-
-  // 審核模式下只有管理員可編輯
-  const isReadOnly = isReviewMode && role !== 'admin'
 
   // 管理員審核儲存 Hook
   const { save: adminSave, saving: adminSaving } = useAdminSave(pageKey, reviewEntryId)
@@ -315,11 +316,10 @@ export default function SepticTankPage() {
           files: filesToUpload
         })
 
-        // 清空記憶體檔案
-        setAnnualEvidence(prev => ({ ...prev, memoryFiles: [] }))
-
         await reload()
         reloadApprovalStatus()
+        // 清空記憶體檔案（在 reload 之後，避免檔案暫時消失）
+        setAnnualEvidence(prev => ({ ...prev, memoryFiles: [] }))
         setSuccess('✅ 儲存成功！資料已更新')
         setShowSuccessModal(true)
         return

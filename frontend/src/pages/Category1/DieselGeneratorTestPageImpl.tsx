@@ -17,6 +17,7 @@ import { useStatusBanner, getBannerColorClasses } from '../../hooks/useStatusBan
 import { useRecordFileMapping } from '../../hooks/useRecordFileMapping'
 import { useRole } from '../../hooks/useRole'
 import { useAdminSave } from '../../hooks/useAdminSave'
+import { useReloadWithFileSync } from '../../hooks/useReloadWithFileSync'
 import { commitEvidence, getEntryFiles, EvidenceFile, uploadEvidenceWithEntry } from '../../api/files'
 import { upsertEnergyEntry, UpsertEntryInput, getEntryByPageKeyAndYear } from '../../api/entries'
 import { supabase } from '../../lib/supabaseClient'
@@ -106,7 +107,7 @@ const DieselGeneratorTestPage = () => {
   const { save: adminSave, saving: adminSaving } = useAdminSave(pageKey, reviewEntryId)
 
   // 編輯權限控制
-  const editPermissions = useEditPermissions(currentStatus, isReadOnly)
+  const editPermissions = useEditPermissions(currentStatus, isReadOnly, role)
 
   // 審核狀態 Hook
   const { reload: reloadApprovalStatus, ...approvalStatus } = useApprovalStatus(pageKey, year)
@@ -115,6 +116,7 @@ const DieselGeneratorTestPage = () => {
   const banner = useStatusBanner(approvalStatus, isReviewMode)
 
   const { cleanFiles } = useGhostFileCleaner()
+  const { reloadAndSync } = useReloadWithFileSync(reload)
 
   // 清除 Hook
   const {
@@ -499,7 +501,8 @@ const DieselGeneratorTestPage = () => {
               file: mf.file,
               metadata: {
                 recordIndex: generatorIndex,
-                fileType: 'other' as const
+                fileType: 'other' as const,
+                allRecordIds: [generator.id]
               }
             })
           })
@@ -519,14 +522,13 @@ const DieselGeneratorTestPage = () => {
           files: filesToUpload
         })
 
-        // 清空記憶體檔案
+        await reloadAndSync()
+        reloadApprovalStatus()
+        // 清空記憶體檔案（在 reload 之後，避免檔案暫時消失）
         setGenerators(prev => prev.map(g => ({
           ...g,
           nameplateMemoryFiles: []
         })))
-
-        await reload()
-        reloadApprovalStatus()
         setToast({ message: '✅ 儲存成功！資料已更新', type: 'success' })
         setSubmitting(false)
         return

@@ -93,7 +93,7 @@ const ElectricityBillPage = () => {
   const isReadOnly = isReviewMode && role !== 'admin'
 
   const effectiveStatus = (approvalStatus?.status || frontendStatus?.currentStatus || initialStatus) as EntryStatus
-  const editPermissions = useEditPermissions(effectiveStatus, isReadOnly)
+  const editPermissions = useEditPermissions(effectiveStatus, isReadOnly, role)
   const { cleanFiles } = useGhostFileCleaner()
 
   // 🔍 Debug: 審核狀態檢查

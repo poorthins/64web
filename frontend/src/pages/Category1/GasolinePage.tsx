@@ -97,7 +97,7 @@ export default function GasolinePage() {
   // 審核模式下只有管理員可編輯
   const isReadOnly = isReviewMode && role !== 'admin'
 
-  const editPermissions = useEditPermissions(currentStatus, isReadOnly)
+  const editPermissions = useEditPermissions(currentStatus, isReadOnly, role)
 
   // 資料載入 Hook
   const entryIdToLoad = isReviewMode && reviewEntryId ? reviewEntryId : undefined
@@ -526,11 +526,10 @@ export default function GasolinePage() {
           files: filesToUpload
         })
 
-        // 清空記憶體檔案
-        setGroupMemoryFiles({})
-
         await reload()
         reloadApprovalStatus()
+        // 清空記憶體檔案（在 reload 之後，避免檔案暫時消失）
+        setGroupMemoryFiles({})
         setSuccess('✅ 儲存成功！資料已更新')
         return
       }

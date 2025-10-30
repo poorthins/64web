@@ -72,6 +72,15 @@ const EditUser: React.FC = () => {
       }
     })
 
+    // 特殊處理：密碼欄位（永遠不顯示原始值，只檢查是否有輸入）
+    if (formData.password && formData.password.trim() !== '') {
+      changeMap['password'] = {
+        original: '********',
+        current: '********',
+        label: '密碼'
+      }
+    }
+
     return changeMap
   }, [originalData, formData])
 

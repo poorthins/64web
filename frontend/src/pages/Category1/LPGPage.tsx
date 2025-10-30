@@ -10,7 +10,8 @@ import { useEditPermissions } from '../../hooks/useEditPermissions'
 import { useFrontendStatus } from '../../hooks/useFrontendStatus'
 import { useApprovalStatus } from '../../hooks/useApprovalStatus'
 import { useStatusBanner, getBannerColorClasses } from '../../hooks/useStatusBanner'
-import { useEnergyPageLoader } from '../../hooks/useEnergyPageLoader'
+import { useEnergyData } from '../../hooks/useEnergyData'
+import { useGhostFileCleaner } from '../../hooks/useGhostFileCleaner'
 import { useEnergySubmit } from '../../hooks/useEnergySubmit'
 import { useEnergyClear } from '../../hooks/useEnergyClear'
 import { useSubmitGuard } from '../../hooks/useSubmitGuard'
@@ -30,7 +31,6 @@ interface MonthData {
   quantity: number      // 使用數量 (桶)
   totalUsage: number    // 總重量 (KG)
   files: EvidenceFile[]
-  memoryFiles: MemoryFile[]  // 暫存檔案
 }
 
 const LPGPage = () => {
@@ -66,7 +66,7 @@ const LPGPage = () => {
   const [year] = useState(new Date().getFullYear())
   const pageKey = 'lpg'
 
-  // 資料載入 Hook - 統一處理 entry 和 files 的載入與分類
+  // 資料載入 Hook
   const entryIdToLoad = isReviewMode && reviewEntryId ? reviewEntryId : undefined
   const {
     entry: loadedEntry,
@@ -74,54 +74,7 @@ const LPGPage = () => {
     loading: dataLoading,
     error: dataError,
     reload
-  } = useEnergyPageLoader({
-    pageKey,
-    year,
-    entryId: entryIdToLoad,
-    onEntryLoad: (entry) => {
-      const entryStatus = entry.status as EntryStatus
-      setInitialStatus(entryStatus)
-      setCurrentStatus(entryStatus)  // 同步前端狀態
-      setCurrentEntryId(entry.id)
-      setHasSubmittedBefore(true)
-
-      // 載入單位重量
-      const entryUnitWeight = entry.payload?.notes?.match(/單位重量: ([\d.]+)/)?.[1]
-      if (entryUnitWeight) {
-        setUnitWeight(parseFloat(entryUnitWeight))
-      }
-
-      // 載入月份數據
-      if (entry.payload?.monthly) {
-        const monthly = entry.payload.monthly
-        const weight = entryUnitWeight ? parseFloat(entryUnitWeight) : 0
-
-        setMonthlyData(prev => prev.map(data => {
-          const totalUsage = monthly[data.month.toString()] || 0
-          const quantity = weight > 0 ? totalUsage / weight : 0
-          return {
-            ...data,
-            quantity,
-            totalUsage,
-            files: []  // 檔案由 onFilesLoad 處理
-          }
-        }))
-      }
-    },
-    onFilesLoad: (files) => {
-      // 載入重量證明檔案
-      const msdsFiles = files.filter(f => f.file_type === 'msds' || f.file_type === 'other')
-      setWeightProofFiles(msdsFiles)
-
-      // 分配月份檔案
-      setMonthlyData(prev => prev.map(data => ({
-        ...data,
-        files: files.filter(f => 
-          f.month === data.month && f.file_type === 'usage_evidence'
-        ) as EvidenceFile[]
-      })))
-    }
-  })
+  } = useEnergyData(pageKey, year, entryIdToLoad)
 
   // 審核狀態 Hook
   const { reload: reloadApprovalStatus, ...approvalStatus } = useApprovalStatus(pageKey, year)
@@ -151,10 +104,13 @@ const LPGPage = () => {
     clearError: clearClearError
   } = useEnergyClear(currentEntryId, currentStatus)
 
+  // 幽靈檔案清理 Hook
+  const { cleanFiles } = useGhostFileCleaner()
 
   // Reload 同步 Hook
   const { reloadAndSync } = useReloadWithFileSync(reload)
 
+  const [lastLoadedEntryId, setLastLoadedEntryId] = useState<string | null>(null)
   const [unitWeight, setUnitWeight] = useState<number>(0) // 單位重量 (KG/桶)
   const [weightProofFiles, setWeightProofFiles] = useState<EvidenceFile[]>([])
   const [weightProofMemoryFiles, setWeightProofMemoryFiles] = useState<MemoryFile[]>([])
@@ -163,28 +119,28 @@ const LPGPage = () => {
       month: i + 1,
       quantity: 0,
       totalUsage: 0,
-      files: [] as EvidenceFile[],
-      memoryFiles: [] as MemoryFile[]
+      files: [] as EvidenceFile[]
     }))
+  )
+  const [monthlyMemoryFiles, setMonthlyMemoryFiles] = useState<MemoryFile[][]>(
+    Array.from({ length: 12 }, () => [])
   )
 
   const isInitialLoad = useRef(true)
-  
+  // 審核模式下只有管理員可編輯
+  const isReadOnly = isReviewMode && role !== 'admin'
+
   // 編輯權限控制
-  const editPermissions = useEditPermissions(currentStatus)
+  const editPermissions = useEditPermissions(currentStatus, isReadOnly, role)
 
   // 判斷是否有資料
   const hasAnyData = useMemo(() => {
-    const hasMonthlyData = monthlyData.some(m => m.quantity > 0)
+    const hasMonthlyData = monthlyData?.some(m => m.quantity > 0) || false
     const hasBasicData = unitWeight > 0
-    const hasFiles = weightProofFiles.length > 0
-    const hasMemoryFiles = weightProofMemoryFiles.length > 0 ||
-                          monthlyData.some(m => m.memoryFiles.length > 0)
+    const hasFiles = (weightProofFiles?.length || 0) > 0
+    const hasMemoryFiles = weightProofMemoryFiles.length > 0 || monthlyMemoryFiles.some(files => files.length > 0)
     return hasMonthlyData || hasBasicData || hasFiles || hasMemoryFiles
-  }, [monthlyData, unitWeight, weightProofFiles, weightProofMemoryFiles])
-
-  // 審核模式下只有管理員可編輯
-  const isReadOnly = isReviewMode && role !== 'admin'
+  }, [monthlyData, unitWeight, weightProofFiles, weightProofMemoryFiles, monthlyMemoryFiles])
 
   // 管理員審核儲存 Hook
   const { save: adminSave, saving: adminSaving } = useAdminSave(pageKey, reviewEntryId)
@@ -194,24 +150,116 @@ const LPGPage = () => {
     '7月', '8月', '9月', '10月', '11月', '12月'
   ]
 
-  // 組件清理 - 確保離開頁面時清除所有狀態
+  // 處理載入的 entry：將資料載入到表單狀態
   useEffect(() => {
-    return () => {
-      // 重置所有表單狀態
+    if (loadedEntry?.payload) {
+      // 判斷是否應該載入表單資料
+      const isNewEntry = loadedEntry.id !== lastLoadedEntryId
+      const shouldLoadFormData = isInitialLoad.current || isNewEntry
+
+      // 設定 entry 資訊（總是更新）
+      const entryStatus = loadedEntry.status as EntryStatus
+      setCurrentEntryId(loadedEntry.id)
+      setHasSubmittedBefore(true)
+      setInitialStatus(entryStatus)
+      setCurrentStatus(entryStatus)  // 同步前端狀態
+
+      // 只在首次載入或切換 entry 時設定表單欄位
+      if (!shouldLoadFormData) return
+
+      console.log('✅ [LPG] Loading existing entry (initial load):', {
+        id: loadedEntry.id,
+        status: loadedEntry.status,
+        hasPayload: !!loadedEntry.payload
+      })
+
+      // 載入單位重量
+      const entryUnitWeight = loadedEntry.payload?.notes?.match(/單位重量: ([\d.]+)/)?.[1]
+      if (entryUnitWeight) {
+        setUnitWeight(parseFloat(entryUnitWeight))
+      }
+
+      // 載入月份數據
+      if (loadedEntry.payload?.monthly) {
+        const monthly = loadedEntry.payload.monthly
+        const weight = entryUnitWeight ? parseFloat(entryUnitWeight) : 0
+
+        const newMonthlyData = Array.from({ length: 12 }, (_, i) => {
+          const month = i + 1
+          const monthKey = month.toString()
+          const totalUsage = monthly[monthKey] || 0
+          const quantity = weight > 0 ? totalUsage / weight : 0
+          return {
+            month,
+            quantity,
+            totalUsage,
+            files: []
+          }
+        })
+        setMonthlyData(newMonthlyData)
+      }
+
+      // 記錄已載入的 entry ID
+      setLastLoadedEntryId(loadedEntry.id)
+      isInitialLoad.current = false
+    } else if (loadedEntry === null && !dataLoading) {
+      // 沒有 entry，重置為初始狀態
+      console.log('📝 [LPGPage] No existing entry found')
+      setCurrentEntryId(null)
+      setHasSubmittedBefore(false)
+      setInitialStatus('saved')
       setUnitWeight(0)
-      setWeightProofFiles([])
       setMonthlyData(Array.from({ length: 12 }, (_, i) => ({
         month: i + 1,
         quantity: 0,
         totalUsage: 0,
-        files: [],
-        memoryFiles: []
+        files: []
       })))
-      setError(null)
-      setSuccess(null)
+      setLastLoadedEntryId(null)
+      isInitialLoad.current = false
     }
-  }, [])
+  }, [loadedEntry, dataLoading])
 
+  // 處理載入的檔案：分類到 MSDS 和月份檔案
+  useEffect(() => {
+    if (loadedFiles.length > 0) {
+      console.log('📁 [LPGPage] Loading files:', loadedFiles.length)
+
+      // 清理幽靈檔案，再分類
+      const cleanAndAssignFiles = async () => {
+        const validFiles = await cleanFiles(loadedFiles)
+        console.log('✅ [LPGPage] Valid files after cleanup:', validFiles.length)
+
+        // 分類 MSDS 檔案（重量證明）
+        const msds = validFiles.filter(f => f.file_type === 'msds' || f.file_type === 'other')
+        setWeightProofFiles(msds)
+
+        // 分配月份檔案（深拷貝避免引用問題）
+        const newMonthlyData = monthlyData.map(data => ({
+          ...data,
+          files: [...data.files]  // 深拷貝 files 陣列
+        }))
+        validFiles
+          .filter(f => f.file_type === 'usage_evidence' && f.month)
+          .forEach(file => {
+            const monthIndex = file.month! - 1
+            if (monthIndex >= 0 && monthIndex < 12) {
+              const exists = newMonthlyData[monthIndex].files.some(
+                ef => ef.id === file.id
+              )
+              if (!exists) {
+                newMonthlyData[monthIndex].files.push(file)
+              }
+            }
+          })
+
+        // 更新 monthlyData 狀態，讓檔案顯示在 UI
+        setMonthlyData(newMonthlyData)
+      }
+
+      cleanAndAssignFiles()
+    }
+  }, [loadedFiles, cleanFiles])
 
   // 計算總使用量
   useEffect(() => {
@@ -247,9 +295,12 @@ const LPGPage = () => {
   }
 
   const handleMonthMemoryFilesChange = (month: number, memFiles: MemoryFile[]) => {
-    setMonthlyData(prev => prev.map(data =>
-      data.month === month ? { ...data, memoryFiles: memFiles } : data
-    ))
+    console.log(`📁 [LPGPage] Month ${month} memory files changed:`, memFiles.length)
+    setMonthlyMemoryFiles(prev => {
+      const newFiles = [...prev]
+      newFiles[month - 1] = memFiles
+      return newFiles
+    })
   }
 
   const getTotalUsage = () => {
@@ -258,6 +309,12 @@ const LPGPage = () => {
 
   const validateData = () => {
     const errors: string[] = []
+
+    console.log('🔍 [LPGPage] Validating data...', {
+      weightProofFiles: weightProofFiles.length,
+      weightProofMemoryFiles: weightProofMemoryFiles.length,
+      monthlyMemoryFiles: monthlyMemoryFiles.map((files, i) => ({ month: i + 1, count: files.length }))
+    })
 
     if (weightProofFiles.length === 0 && weightProofMemoryFiles.length === 0) {
       errors.push('請上傳重量證明資料')
@@ -268,8 +325,12 @@ const LPGPage = () => {
     }
 
     monthlyData.forEach((data, index) => {
-      if (data.quantity > 0 && data.files.length === 0 && data.memoryFiles.length === 0) {
-        errors.push(`${monthNames[index]}有使用量但未上傳使用證明`)
+      if (data.quantity > 0) {
+        const monthMemoryFiles = monthlyMemoryFiles[index] || []
+        const totalFiles = data.files.length + monthMemoryFiles.length
+        if (totalFiles === 0) {
+          errors.push(`${monthNames[index]}有使用量但未上傳使用證明`)
+        }
       }
     })
 
@@ -294,10 +355,7 @@ const LPGPage = () => {
         }
       })
 
-      // 準備月份檔案陣列（12個月）
-      const monthlyFiles: MemoryFile[][] = monthlyData.map(data => data.memoryFiles)
-
-      // ⭐ 使用 Hook 提交（教訓 #1 防護：notes 參數）
+      // 呼叫 Hook 提交
       const entry_id = await submit({
         formData: {
           unitCapacity: 0,  // LPG 不使用
@@ -305,23 +363,22 @@ const LPGPage = () => {
           monthly,
           monthlyQuantity,
           unit: 'KG',
-          notes: `單位重量: ${unitWeight} KG/桶`  // ⭐ 傳入 notes
+          notes: `單位重量: ${unitWeight} KG/桶`
         },
         msdsFiles: [],
-        monthlyFiles,
-        evidenceFiles: weightProofMemoryFiles  // ⭐ 重量佐證檔案
+        monthlyFiles: monthlyMemoryFiles,
+        evidenceFiles: weightProofMemoryFiles  // 重量佐證檔案
       })
 
-      if (!currentEntryId) {
-        setCurrentEntryId(entry_id)
-      }
+      // 更新 currentEntryId
+      setCurrentEntryId(entry_id)
 
-      // ⭐ 教訓 #4 防護：確保 reload 在檔案上傳後執行
+      // 重新載入後端資料並等待同步完成
       await reloadAndSync()
 
       // 清空記憶體檔案
       setWeightProofMemoryFiles([])
-      setMonthlyData(prev => prev.map(data => ({ ...data, memoryFiles: [] })))
+      setMonthlyMemoryFiles(Array.from({ length: 12 }, () => []))
 
       await handleSubmitSuccess()
 
@@ -370,9 +427,9 @@ const LPGPage = () => {
         }> = []
 
         // 收集每個月份的使用證明檔案
-        monthlyData.forEach((data, monthIndex) => {
-          if (data.memoryFiles && data.memoryFiles.length > 0) {
-            data.memoryFiles.forEach(mf => {
+        monthlyMemoryFiles.forEach((memFiles, monthIndex) => {
+          if (memFiles && memFiles.length > 0) {
+            memFiles.forEach(mf => {
               filesToUpload.push({
                 file: mf.file,
                 metadata: {
@@ -410,19 +467,14 @@ const LPGPage = () => {
           },
           files: filesToUpload
         })
-        // 清空記憶體檔案
-        setWeightProofMemoryFiles([])
-        setMonthlyData(prev => prev.map(data => ({ ...data, memoryFiles: [] })))
-
-
         await reloadAndSync()
         reloadApprovalStatus()
+        // 清空記憶體檔案（在 reloadAndSync 之後，避免檔案暫時消失）
+        setWeightProofMemoryFiles([])
+        setMonthlyMemoryFiles(Array.from({ length: 12 }, () => []))
         setToast({ message: '[SUCCESS] 儲存成功！資料已更新', type: 'success' })
         return
       }
-
-      // 準備月份檔案陣列（12個月）
-      const monthlyFiles: MemoryFile[][] = monthlyData.map(data => data.memoryFiles)
 
       // 非審核模式：原本的邏輯
       const entry_id = await save({
@@ -435,19 +487,19 @@ const LPGPage = () => {
           notes: `單位重量: ${unitWeight} KG/桶`
         },
         msdsFiles: [],
-        monthlyFiles,
+        monthlyFiles: monthlyMemoryFiles,
         evidenceFiles: weightProofMemoryFiles
       })
 
-      if (!currentEntryId) {
-        setCurrentEntryId(entry_id)
-      }
+      // 更新 currentEntryId
+      setCurrentEntryId(entry_id)
 
+      // 重新載入後端資料並等待同步完成
       await reloadAndSync()
 
       // 清空記憶體檔案
       setWeightProofMemoryFiles([])
-      setMonthlyData(prev => prev.map(data => ({ ...data, memoryFiles: [] })))
+      setMonthlyMemoryFiles(Array.from({ length: 12 }, () => []))
 
       // 重新載入審核狀態，更新狀態橫幅
       reloadApprovalStatus()
@@ -485,27 +537,25 @@ const LPGPage = () => {
         allFiles.push(...data.files)
       })
 
-      // 收集所有記憶體檔案
-      const allMemoryFiles = [weightProofMemoryFiles, ...monthlyData.map(d => d.memoryFiles)]
-
       // 呼叫 Hook 清除
       await clear({
         filesToDelete: allFiles,
-        memoryFilesToClean: allMemoryFiles
+        memoryFilesToClean: [weightProofMemoryFiles, ...monthlyMemoryFiles]
       })
 
       // 清除成功後，重置前端狀態
       setCurrentEntryId(null)
       setHasSubmittedBefore(false)
+      setInitialStatus('saved')
       setUnitWeight(0)
       setWeightProofFiles([])
       setWeightProofMemoryFiles([])
+      setMonthlyMemoryFiles(Array.from({ length: 12 }, () => []))
       setMonthlyData(Array.from({ length: 12 }, (_, i) => ({
         month: i + 1,
         quantity: 0,
         totalUsage: 0,
-        files: [],
-        memoryFiles: []
+        files: []
       })))
 
       setError(null)
@@ -812,7 +862,7 @@ const LPGPage = () => {
                       month={data.month}
                       files={data.files}
                       onFilesChange={(files) => handleMonthFilesChange(data.month, files)}
-                      memoryFiles={data.memoryFiles}
+                      memoryFiles={monthlyMemoryFiles[data.month - 1] || []}
                       onMemoryFilesChange={(memFiles) => handleMonthMemoryFilesChange(data.month, memFiles)}
                       maxFiles={3}
                       disabled={submitting || isReadOnly || approvalStatus.isApproved}
@@ -1067,7 +1117,7 @@ const LPGPage = () => {
       )}
 
       {/* 審核區塊 - 只在審核模式顯示 */}
-      {isReviewMode && currentEntryId && (
+      {isReviewMode && (
         <ReviewSection
           entryId={reviewEntryId || currentEntryId}
           userId={reviewUserId || "current_user"}
