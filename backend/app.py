@@ -231,6 +231,80 @@ def create_entry_review(entry_id):
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
+@app.route('/api/admin/users/<user_id>', methods=['PUT'])
+def update_user(user_id):
+    try:
+        # 驗證管理員權限
+        auth_header = request.headers.get('Authorization')
+        user = get_user_from_token(auth_header)
+        if not user or user.get('role') != 'admin':
+            return jsonify({"error": "Unauthorized"}), 403
+
+        data = request.get_json()
+        supabase = get_supabase_admin()
+
+        # 處理 auth.users 的更新（email 和 password）
+        auth_updates = {}
+        if 'email' in data and data['email']:
+            auth_updates['email'] = data['email']
+        if 'password' in data and data['password']:
+            auth_updates['password'] = data['password']
+
+        if auth_updates:
+            supabase.auth.admin.update_user_by_id(
+                user_id,
+                auth_updates
+            )
+
+        # 準備 profiles 表的更新資料
+        profile_updates = {}
+
+        # 基本欄位
+        if 'display_name' in data:
+            profile_updates['display_name'] = data['display_name']
+        if 'email' in data:
+            profile_updates['email'] = data['email']
+        if 'company' in data:
+            profile_updates['company'] = data['company']
+        if 'job_title' in data:
+            profile_updates['job_title'] = data['job_title']
+        if 'phone' in data:
+            profile_updates['phone'] = data['phone']
+        if 'role' in data:
+            profile_updates['role'] = data['role']
+        if 'is_active' in data:
+            profile_updates['is_active'] = data['is_active']
+
+        # 處理 filling_config 更新
+        if 'energy_categories' in data or 'target_year' in data or 'diesel_generator_version' in data:
+            # 先取得當前的 filling_config
+            current_profile = supabase.table('profiles').select('filling_config').eq('id', user_id).single().execute()
+            current_config = current_profile.data.get('filling_config', {}) if current_profile.data else {}
+
+            # 合併更新
+            filling_config = {**current_config}
+            if 'energy_categories' in data:
+                filling_config['energy_categories'] = data['energy_categories']
+            if 'target_year' in data:
+                filling_config['target_year'] = data['target_year']
+            if 'diesel_generator_version' in data:
+                if data['diesel_generator_version']:
+                    filling_config['diesel_generator_mode'] = data['diesel_generator_version']
+                elif 'diesel_generator_mode' in filling_config:
+                    del filling_config['diesel_generator_mode']
+
+            profile_updates['filling_config'] = filling_config
+
+        # 更新 profiles 表
+        if profile_updates:
+            supabase.table('profiles').update(profile_updates).eq('id', user_id).execute()
+
+        return jsonify({"success": True})
+
+    except Exception as e:
+        print(f"Error in update_user: {str(e)}")
+        return jsonify({"error": str(e)}), 500
+
 @app.route('/api/admin/create-user', methods=['POST'])
 def create_user():
     try:

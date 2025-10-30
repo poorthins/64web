@@ -305,106 +305,50 @@ export async function bulkUpdateUserStatus(userIds: string[], isActive: boolean)
 }
 
 /**
- * 更新使用者資料
+ * 更新使用者資料（透過後端 API，使用 service_role key）
  */
 export async function updateUser(userId: string, userData: UserUpdateData): Promise<void> {
   try {
     const authResult = await validateAuth()
     if (authResult.error) throw authResult.error
 
-    // 先獲取當前用戶資料來比較 email 是否有變更
-    const { data: currentUser } = await supabase
-      .from('profiles')
-      .select('email')
-      .eq('id', userId)
-      .single()
+    // 準備後端 API 請求資料
+    const requestData: any = {}
 
-    // 處理 password 更新 - 使用 Supabase 專門的 API
-    if (userData.password) {
-      const { error: passwordError } = await supabase.auth.admin.updateUserById(
-        userId,
-        { password: userData.password }
-      )
+    // 基本欄位
+    if (userData.display_name !== undefined) requestData.display_name = userData.display_name
+    if (userData.email !== undefined) requestData.email = userData.email
+    if (userData.password !== undefined) requestData.password = userData.password
+    if (userData.company !== undefined) requestData.company = userData.company
+    if (userData.job_title !== undefined) requestData.job_title = userData.job_title
+    if (userData.phone !== undefined) requestData.phone = userData.phone
+    if (userData.role !== undefined) requestData.role = userData.role
+    if (userData.is_active !== undefined) requestData.is_active = userData.is_active
 
-      if (passwordError) {
-        console.error('Error updating user password:', passwordError)
-        throw handleAPIError(passwordError, '無法更新使用者密碼')
-      }
+    // 能源類別和配置（轉換為資料庫格式）
+    if (userData.energy_categories !== undefined) {
+      requestData.energy_categories = convertFrontendKeysToDb(userData.energy_categories)
+    }
+    if (userData.target_year !== undefined) requestData.target_year = userData.target_year
+    if (userData.diesel_generator_version !== undefined) {
+      requestData.diesel_generator_version = userData.diesel_generator_version
     }
 
-    // 處理 email 更新 - 只在真的有變更時才更新 auth.users
-    if (userData.email && userData.email !== currentUser?.email) {
-      const { error: emailError } = await supabase.auth.admin.updateUserById(
-        userId,
-        { email: userData.email }
-      )
+    // 呼叫後端 API
+    const response = await fetch(`${API_BASE_URL}/api/admin/users/${userId}`, {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${authResult.session?.access_token}`
+      },
+      body: JSON.stringify(requestData)
+    })
 
-      if (emailError) {
-        console.error('Error updating user email in auth:', emailError)
-        throw handleAPIError(emailError, '無法更新使用者 email')
-      }
-    }
+    const result = await response.json()
 
-    // 準備 profiles 表的更新資料
-    const profileData = { ...userData }
-
-    // 移除已處理過的欄位
-    delete profileData.password // password 已在上面處理
-
-    // 如果 email 沒有變更，從更新資料中移除
-    if (userData.email === currentUser?.email) {
-      delete profileData.email
-    }
-
-    // 移除不存在的欄位，將其儲存在 filling_config 中
-    delete profileData.energy_categories
-    delete profileData.target_year
-    delete profileData.diesel_generator_version
-
-    // 處理 filling_config 更新
-    if (userData.energy_categories !== undefined || userData.target_year !== undefined || userData.diesel_generator_version !== undefined) {
-      // 先取得目前的 filling_config
-      const { data: currentProfile } = await supabase
-        .from('profiles')
-        .select('filling_config')
-        .eq('id', userId)
-        .single()
-
-      const currentConfig = currentProfile?.filling_config || {}
-
-      // 轉換前端格式的能源類別為資料庫格式
-      const convertedEnergyCategories = userData.energy_categories !== undefined
-        ? convertFrontendKeysToDb(userData.energy_categories)
-        : undefined;
-
-      profileData.filling_config = {
-        ...currentConfig,
-        ...(convertedEnergyCategories !== undefined && { energy_categories: convertedEnergyCategories }),
-        ...(userData.target_year !== undefined && { target_year: userData.target_year })
-      }
-
-      // 處理柴油發電機版本：允許設置為 undefined 來清除
-      if (userData.diesel_generator_version !== undefined) {
-        if (userData.diesel_generator_version) {
-          profileData.filling_config.diesel_generator_mode = userData.diesel_generator_version
-        } else {
-          // 如果傳入 undefined，則從 config 中移除
-          delete profileData.filling_config.diesel_generator_mode
-        }
-      }
-    }
-
-    // 只在有資料需要更新時才執行更新
-    if (Object.keys(profileData).length > 0) {
-      const { error } = await supabase
-        .from('profiles')
-        .update(profileData)
-        .eq('id', userId)
-
-      if (error) {
-        console.error('Error updating user profile:', error)
-        throw handleAPIError(error, '無法更新使用者資料')
-      }
+    if (!response.ok) {
+      console.error('Error updating user via backend:', result)
+      throw new Error(result.error || '更新使用者失敗')
     }
   } catch (error) {
     console.error('Error in updateUser:', error)
