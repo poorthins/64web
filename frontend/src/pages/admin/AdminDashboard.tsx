@@ -2,6 +2,7 @@ import React, { useState, useEffect, useMemo, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Users, FileText, CheckCircle, XCircle, Plus, RefreshCw, Search, Filter, Calendar, Eye } from 'lucide-react'
 import { getCategoryName, createPageMap } from './data/energyConfig'
+import { apiUserToUIUser } from './utils/userTransformers'
 import StatsCard from './components/StatsCard'
 import UserCard from './components/UserCard'
 import SearchBar from './components/SearchBar'
@@ -68,31 +69,9 @@ const AdminDashboard: React.FC = () => {
   const isLoading = usersLoading || metricsLoading
   const error = usersError || metricsError
 
-  // 將 API UserProfile 轉換為 UI User 格式
-  const convertAPIUserToUIUser = (apiUser: any): User => {
-    let status: UserStatus = 'submitted'
-    if (!apiUser.is_active) {
-      status = 'rejected'
-    } else if (apiUser.entries_count > 0) {
-      status = 'approved'
-    }
-
-    return {
-      id: apiUser.id,
-      name: apiUser.display_name || '未知用戶',
-      email: apiUser.email || '',
-      department: apiUser.company || apiUser.job_title || '未知部門',
-      status,
-      submissionDate: new Date().toISOString().split('T')[0],
-      lastActivity: new Date().toISOString().split('T')[0],
-      entries: apiUser.entries_count || 0,
-      avatar: '👤'
-    }
-  }
-
   // 轉換 API 用戶資料為 UI 格式
   const convertedUsers: User[] = useMemo(() => {
-    return users.map(convertAPIUserToUIUser)
+    return users.map(apiUserToUIUser)
   }, [users])
 
   // 統計數據

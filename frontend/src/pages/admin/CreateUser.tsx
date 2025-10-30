@@ -9,6 +9,7 @@ import { useFormValidation, createValidationRules } from './hooks/useFormValidat
 import { useKeyboardShortcuts, createCommonShortcuts } from './hooks/useKeyboardShortcuts'
 import { useUsers } from './hooks/useUsers'
 import { type CreateUserData } from '../../api/adminUsers'
+import { formDataToCreateUserData } from './utils/userTransformers'
 
 const CreateUser: React.FC = () => {
   const navigate = useNavigate()
@@ -144,21 +145,7 @@ const CreateUser: React.FC = () => {
 
     try {
       // 將表單資料轉換為 API 格式
-      const createUserData: CreateUserData = {
-        email: formData.email,
-        password: formData.password,
-        display_name: formData.name,
-        company: formData.company,
-        job_title: '', // 不使用部門資訊
-        phone: '', // 這個表單沒有電話欄位，使用空字串
-        role: 'user', // 預設為一般用戶
-        filling_config: {
-          diesel_generator_mode: formData.dieselGeneratorVersion || 'refuel'
-        },
-        energy_categories: formData.energyCategories,
-        target_year: formData.targetYear,
-        diesel_generator_version: formData.dieselGeneratorVersion
-      }
+      const createUserData = formDataToCreateUserData(formData)
 
       // 正在建立用戶
 

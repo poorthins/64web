@@ -12,6 +12,7 @@ import { useUsers, useUser } from './hooks/useUsers'
 import { useSubmissions } from './hooks/useSubmissions'
 import { type UserUpdateData, getUserEnergyEntries } from '../../api/adminUsers'
 import { exportUserEntriesExcel } from './utils/exportUtils'
+import { apiUserToFormData, formDataToUpdateUserData } from './utils/userTransformers'
 
 const EditUser: React.FC = () => {
   const navigate = useNavigate()
@@ -76,30 +77,11 @@ const EditUser: React.FC = () => {
 
   const hasUnsavedChanges = Object.keys(changes).length > 0
 
-  // 轉換 API 用戶資料為表單格式
-  const convertAPIUserToFormData = (apiUser: any): UserFormData => {
-    const fillingConfig = apiUser.filling_config || {}
-    console.log('🔍 [診斷] API 返回的 filling_config:', fillingConfig);
-    console.log('🔍 [診斷] diesel_generator_mode 值:', fillingConfig.diesel_generator_mode);
-
-    return {
-      name: apiUser.display_name || '',
-      email: apiUser.email || '',
-      password: '', // 空白表示不更改密碼，輸入新密碼則更新
-      company: apiUser.company || '',
-      targetYear: fillingConfig.target_year || new Date().getFullYear(),
-      energyCategories: fillingConfig.energy_categories || [],
-      dieselGeneratorVersion: fillingConfig.diesel_generator_mode || undefined,
-      isActive: apiUser.is_active ?? true
-      // 加完 console.log 確認這行是否正確
-    }
-  }
-
   // 當 API 載入完成後更新表單資料
   useEffect(() => {
     if (user && !isLoading) {
       console.log('🔍 [診斷] 原始 user 資料:', user);
-      const userData = convertAPIUserToFormData(user)
+      const userData = apiUserToFormData(user)
       console.log('🔍 [診斷] 轉換後的 formData:', userData);
       console.log('🔍 [診斷] dieselGeneratorVersion:', userData.dieselGeneratorVersion);
       setFormData(userData)
@@ -183,23 +165,9 @@ const EditUser: React.FC = () => {
 
     try {
       // 準備 API 更新資料
-      const updateData: UserUpdateData = {
-        display_name: formData.name,
-        email: formData.email,
-        company: formData.company,
-        job_title: '',
-        is_active: formData.isActive,
-        energy_categories: formData.energyCategories,
-        target_year: formData.targetYear,
-        diesel_generator_version: formData.dieselGeneratorVersion
-      }
+      const updateData = formDataToUpdateUserData(formData)
       console.log('🔍 [診斷] 準備發送的 updateData:', updateData);
-      console.log('🔍 [診斷] diesel_generator_version 要更新成:', updateData.diesel_generator_version);
-
-      // 密碼直接更新
-      if (formData.password) {
-        updateData.password = formData.password
-      }
+      console.log('🔍 [診斷] diesel_generator_version 要更新成:', updateData.filling_config?.diesel_generator_mode);
 
       // 正在更新用戶資料
 
