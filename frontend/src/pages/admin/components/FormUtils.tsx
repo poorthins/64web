@@ -82,7 +82,8 @@ export const InputField: React.FC<{
   error?: string
   placeholder?: string
   required?: boolean
-}> = ({ label, name, type = 'text', value, onChange, onBlur, error, placeholder, required = false }) => {
+  helpText?: string
+}> = ({ label, name, type = 'text', value, onChange, onBlur, error, placeholder, required = false, helpText }) => {
   return (
     <div className="space-y-1">
       <label htmlFor={name} className="block text-sm font-medium text-gray-700">
@@ -105,6 +106,11 @@ export const InputField: React.FC<{
         <p className="text-sm text-red-600 flex items-center">
           <span className="mr-1">⚠️</span>
           {error}
+        </p>
+      )}
+      {!error && helpText && (
+        <p className="text-sm text-gray-500">
+          {helpText}
         </p>
       )}
     </div>

@@ -390,11 +390,12 @@ const EditUser: React.FC = () => {
                   <InputField
                     label="重設密碼"
                     name="password"
-                    type="text"
+                    type="password"
                     value={formData.password}
                     onChange={(value) => handleInputChange('password', value)}
                     error={getFieldError(errors, 'password')}
-                    placeholder="輸入則表示更新密碼"
+                    placeholder="留空則不更改密碼"
+                    helpText="輸入新密碼以重設,留空則保持原密碼不變"
                   />
 
                   <InputField
