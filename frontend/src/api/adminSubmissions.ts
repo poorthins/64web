@@ -12,6 +12,10 @@ export interface Submission {
   created_at: string
   updated_at: string
   owner_id: string
+  status: 'submitted' | 'approved' | 'rejected'  // 新的三狀態系統
+  review_notes?: string  // 審核備註
+  reviewer_id?: string  // 審核者 ID
+  reviewed_at?: string  // 審核時間
   profiles: {
     id: string
     display_name: string
@@ -19,7 +23,7 @@ export interface Submission {
     company?: string
     job_title?: string
   } | null
-  review_history: ReviewStatus[]
+  review_history: ReviewStatus[]  // 舊系統，保留向後相容
 }
 
 export interface ReviewStatus {
@@ -135,6 +139,10 @@ export async function getUserSubmissions(userId: string): Promise<Submission[]> 
         created_at,
         updated_at,
         owner_id,
+        status,
+        review_notes,
+        reviewer_id,
+        reviewed_at,
         profiles:owner_id (
           id,
           display_name,

@@ -32,6 +32,30 @@ const LoginPage = () => {
     setLoading(true)
 
     try {
+      // 1. 先檢查是否已有 active session
+      console.log('🔍 Checking active session for:', email)
+      const { data: sessionCheck, error: checkError } = await supabase.rpc('check_active_session', {
+        check_email: email
+      })
+
+      console.log('📊 Session check result:', { sessionCheck, checkError })
+
+      if (checkError) {
+        console.error('❌ Session check failed:', checkError)
+        setError(`系統檢查失敗: ${checkError.message}`)
+        return
+      }
+
+      // 2. 如果有 active session,拒絕登入
+      if (sessionCheck?.has_active_session) {
+        console.log('🚫 Active session detected, blocking login')
+        setError('此帳號已在其他裝置登入中。如需登入,請先登出其他裝置。')
+        return
+      }
+
+      console.log('✅ No active session, proceeding with login')
+
+      // 3. 沒有 active session,允許登入
       const { data, error } = await supabase.auth.signInWithPassword({
         email,
         password

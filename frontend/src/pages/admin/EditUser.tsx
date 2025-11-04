@@ -4,15 +4,10 @@ import { energyCategories, scopeLabels } from './data/energyConfig'
 import { UserFormData } from './types/admin'
 import { InputField, SelectField, validateUserForm, hasErrors, getFieldError } from './components/FormUtils'
 import { EditUserSkeleton } from './components/EditUserSkeleton'
-import { PageHeader } from './components/PageHeader'
-import { ChangeSummary } from './components/ChangeIndicator'
 import { handleAPIError, showErrorToast, withRetry } from './utils/errorHandler'
 import { useUnsavedChanges } from './hooks/useUnsavedChanges'
 import { useKeyboardShortcuts, createCommonShortcuts } from './hooks/useKeyboardShortcuts'
 import { useUsers, useUser } from './hooks/useUsers'
-import { useSubmissions } from './hooks/useSubmissions'
-import { type UserUpdateData, getUserEnergyEntries } from '../../api/adminUsers'
-import { exportUserEntriesExcel } from './utils/exportUtils'
 import { apiUserToFormData, formDataToUpdateUserData } from './utils/userTransformers'
 
 const EditUser: React.FC = () => {
@@ -22,12 +17,10 @@ const EditUser: React.FC = () => {
   // API hooks
   const { updateExistingUser, toggleStatus } = useUsers()
   const { user, isLoading: userLoading, error: userError, reload } = useUser(userId || null)
-  const { reviewSubmission } = useSubmissions()
 
   // UI state
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [showSuccess, setShowSuccess] = useState(false)
-  const [isExporting, setIsExporting] = useState(false)
 
   // 組合載入狀態和錯誤
   const isLoading = userLoading
@@ -190,7 +183,7 @@ const EditUser: React.FC = () => {
 
       // 延遲導航，讓用戶看到成功訊息
       setTimeout(() => {
-        navigate('/app/admin')
+        navigate(`/app/admin/users/${userId}`)
       }, 2000)
 
     } catch (err: any) {
@@ -258,66 +251,16 @@ const EditUser: React.FC = () => {
   }
 
   const handleCancel = () => {
-    navigateWithConfirmation('/app/admin')
+    navigateWithConfirmation(`/app/admin/users/${userId}`)
   }
 
   const shortcuts = createCommonShortcuts({
     save: handleSave,
     cancel: handleCancel,
-    back: () => navigateWithConfirmation('/app/admin')
+    back: () => navigateWithConfirmation(`/app/admin/users/${userId}`)
   })
 
   useKeyboardShortcuts({ shortcuts })
-
-  // 匯出功能（ZIP：Excel + 佐證資料）
-  const [exportProgress, setExportProgress] = useState<{ status: string; current?: number; total?: number } | null>(null)
-
-  const handleExportUser = async () => {
-    if (!userId) return
-
-    setIsExporting(true)
-    setExportProgress({ status: '正在載入填報記錄...' })
-
-    try {
-      // 從 API 取得使用者的能源填報記錄
-      const entries = await getUserEnergyEntries(userId)
-
-      // 檢查是否有資料
-      if (!entries || entries.length === 0) {
-        alert('此使用者尚無填報資料')
-        setExportProgress(null)
-        return
-      }
-
-      // 使用完整匯出功能（Excel + 佐證資料）
-      const { exportUserEntriesWithFiles } = await import('./utils/exportUtils')
-      const result = await exportUserEntriesWithFiles(
-        userId,
-        formData.name || '未知用戶',
-        entries,
-        (status, current, total) => {
-          setExportProgress({ status, current, total })
-        }
-      )
-
-      setExportProgress(null)
-
-      if (result.failed === 0) {
-        alert(`✅ 下載完成！\n成功：${result.success} 個檔案`)
-      } else {
-        alert(`⚠️ 部分檔案失敗\n成功：${result.success}\n失敗：${result.failed}\n\n錯誤：\n${result.errors.join('\n')}`)
-      }
-    } catch (error) {
-      console.error('❌ 匯出失敗:', error)
-      const errorMessage = error instanceof Error ? error.message : '匯出失敗，請稍後再試'
-      alert(errorMessage)
-      setExportProgress(null)
-    } finally {
-      setIsExporting(false)
-    }
-  }
-
-  // 已刪除不需要的匯出功能
 
   if (isLoading) {
     return <EditUserSkeleton />
@@ -333,7 +276,7 @@ const EditUser: React.FC = () => {
             已成功更新 <strong>{formData.name}</strong> 的資料
           </p>
           <div className="text-sm text-gray-500">
-            正在返回主控台...
+            正在返回用戶詳情...
           </div>
         </div>
       </div>
@@ -341,34 +284,48 @@ const EditUser: React.FC = () => {
   }
 
   return (
-    <div className="min-h-screen bg-gray-50">
-      <div className="flex">
-        {/* 主要表單區域 */}
-        <div className="flex-1 p-6">
-          <div className="max-w-3xl">
-            <PageHeader
-              title="編輯用戶 ✏️"
-              subtitle="修改用戶帳戶資料和能源類別權限"
-              currentPage="edit"
-              userId={userId}
-              backPath="/app/admin"
-              showBackButton={true}
-            />
+    <div className="min-h-screen" style={{ backgroundColor: 'var(--apple-gray-4)' }}>
+      <div className="admin-container">
+        {/* 返回按鈕 */}
+        <div style={{ marginBottom: '24px' }}>
+          <button
+            onClick={handleCancel}
+            style={{
+              border: 'none',
+              background: 'none',
+              color: 'var(--apple-blue)',
+              fontSize: '16px',
+              cursor: 'pointer',
+              padding: '8px',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '4px'
+            }}
+          >
+            <span style={{ fontSize: '20px' }}>←</span> 返回
+          </button>
+        </div>
 
-            {/* 變更摘要 */}
-            {hasUnsavedChanges && (
-              <ChangeSummary changes={changes} className="mb-6" />
-            )}
+        {/* 頁面標題 */}
+        <div className="bg-[#2e7d32] rounded-3xl p-12 mb-8 shadow-2xl relative overflow-hidden">
+          {/* 裝飾圓圈 */}
+          <div className="absolute top-[-50%] right-[-10%] w-96 h-96 bg-white/10 rounded-full"></div>
+          <div className="absolute bottom-[-30%] left-[-5%] w-72 h-72 bg-white/5 rounded-full"></div>
 
-            <form id="edit-user-form" onSubmit={handleSubmit} className="bg-white rounded-xl shadow-lg p-6 space-y-6">
-              {/* 基本資料 */}
-              <div className="border-b border-gray-200 pb-6">
-                <h2 className="text-xl font-semibold text-gray-900 mb-4 flex items-center">
-                  <span className="mr-2">📋</span>
-                  基本資料
-                </h2>
+          {/* Header 內容 */}
+          <div className="relative z-10 text-center text-white">
+            <h1 className="text-5xl font-bold mb-2 tracking-tight">編輯用戶</h1>
+            <p className="text-lg opacity-90">修改用戶資訊與能源類別權限</p>
+          </div>
+        </div>
 
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        {/* 表單卡片 */}
+        <form id="edit-user-form" onSubmit={handleSubmit} className="form-card">
+          {/* 基本資料 */}
+          <div className="form-section">
+            <h3 className="form-section-title">基本資料</h3>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <InputField
                     label="姓名"
                     name="name"
@@ -395,6 +352,8 @@ const EditUser: React.FC = () => {
                     onChange={(value) => handleInputChange('email', value)}
                     error={getFieldError(errors, 'email')}
                     required
+                    disabled
+                    autoComplete="off"
                   />
 
                   <InputField
@@ -406,6 +365,7 @@ const EditUser: React.FC = () => {
                     error={getFieldError(errors, 'password')}
                     placeholder="留空則不更改密碼"
                     helpText="輸入新密碼以重設,留空則保持原密碼不變"
+                    autoComplete="new-password"
                   />
 
                   <InputField
@@ -419,15 +379,24 @@ const EditUser: React.FC = () => {
                     placeholder="請輸入目標年份 (例：2024)"
                     required
                   />
+
+                  <SelectField
+                    label="帳戶狀態"
+                    name="status"
+                    value={formData.isActive ? 'approved' : 'rejected'}
+                    onChange={(value) => handleInputChange('isActive', value === 'approved')}
+                    options={[
+                      { value: 'approved', label: '啟用' },
+                      { value: 'rejected', label: '停用' }
+                    ]}
+                    showPlaceholder={false}
+                  />
                 </div>
               </div>
 
-              {/* 能源類別選擇 */}
-              <div className="border-b border-gray-200 pb-6">
-                <h2 className="text-xl font-semibold text-gray-900 mb-4 flex items-center">
-                  <span className="mr-2">⚡</span>
-                  能源類別權限
-                </h2>
+          {/* 能源類別選擇 */}
+          <div className="form-section">
+            <h3 className="form-section-title">能源類別權限</h3>
 
                 {getFieldError(errors, 'energyCategories') && (
                   <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg">
@@ -466,13 +435,10 @@ const EditUser: React.FC = () => {
                 </div>
               </div>
 
-              {/* 柴油發電機版本選擇 */}
-              {formData.energyCategories.includes('diesel_generator') && (
-                <div className="border-b border-gray-200 pb-6">
-                  <h2 className="text-xl font-semibold text-gray-900 mb-4 flex items-center">
-                    <span className="mr-2">🔧</span>
-                    柴油發電機版本
-                  </h2>
+          {/* 柴油發電機版本選擇 */}
+          {formData.energyCategories.includes('diesel_generator') && (
+            <div className="form-section">
+              <h3 className="form-section-title">柴油發電機版本</h3>
 
                   <div className="space-y-3">
                     {(() => {
@@ -519,172 +485,29 @@ const EditUser: React.FC = () => {
                 </div>
               )}
 
-              {/* 提交按鈕 */}
-              <div className="flex items-center justify-between pt-6">
-                <div className="flex items-center space-x-3">
-                  <button
-                    type="button"
-                    onClick={handleCancel}
-                    className="px-6 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50 transition-colors"
-                    title="取消編輯 (Esc)"
-                  >
-                    取消
-                  </button>
-
-                  {hasUnsavedChanges && (
-                    <span className="text-sm text-orange-600 flex items-center">
-                      <span className="w-2 h-2 bg-orange-400 rounded-full mr-2 animate-pulse"></span>
-                      有未儲存的變更
-                    </span>
-                  )}
-                </div>
-
-                <button
-                  type="submit"
-                  disabled={isSubmitting || !hasUnsavedChanges}
-                  className="px-8 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-200 flex items-center"
-                  title="儲存變更 (Ctrl+S)"
-                >
-                  {isSubmitting ? (
-                    <>
-                      <div className="animate-spin rounded-full h-4 w-4 border-2 border-white border-t-transparent mr-2"></div>
-                      更新中...
-                    </>
-                  ) : (
-                    <>
-                      <span className="mr-2">💾</span>
-                      {hasUnsavedChanges ? '儲存變更' : '無變更'}
-                    </>
-                  )}
-                </button>
-              </div>
-            </form>
+          {/* 表單操作按鈕 */}
+          <div className="form-actions">
+            <button
+              type="button"
+              onClick={handleCancel}
+              className="admin-btn admin-btn-secondary"
+            >
+              取消
+            </button>
+            <button
+              type="submit"
+              disabled={isSubmitting || !hasUnsavedChanges}
+              className="admin-btn admin-btn-primary"
+              style={{
+                opacity: (isSubmitting || !hasUnsavedChanges) ? 0.5 : 1,
+                cursor: (isSubmitting || !hasUnsavedChanges) ? 'not-allowed' : 'pointer'
+              }}
+            >
+              {isSubmitting ? '更新中...' : '儲存變更'}
+            </button>
           </div>
-        </div>
-
-        {/* 側邊欄 */}
-        <div className="w-80 bg-white border-l border-gray-200 p-6">
-          <div className="space-y-6">
-            {/* 用戶狀態 */}
-            <div className="bg-gray-50 rounded-lg p-4">
-              <h3 className="font-semibold text-gray-900 mb-3 flex items-center">
-                <span className="mr-2">👤</span>
-                用戶狀態
-              </h3>
-
-              <div className="space-y-3">
-                <div className="flex items-center justify-between">
-                  <span className="text-sm text-gray-600">帳戶狀態</span>
-                  <button
-                    onClick={toggleUserStatus}
-                    className={`px-3 py-1 rounded-full text-xs font-medium ${
-                      formData.isActive
-                        ? 'bg-green-100 text-green-800'
-                        : 'bg-red-100 text-red-800'
-                    }`}
-                  >
-                    {formData.isActive ? '✅ 啟用' : '❌ 停用'}
-                  </button>
-                </div>
-
-                <div className="flex items-center justify-between">
-                  <span className="text-sm text-gray-600">最後登入</span>
-                  <span className="text-sm text-gray-900">2024-03-22</span>
-                </div>
-
-                <div className="flex items-center justify-between">
-                  <span className="text-sm text-gray-600">創建日期</span>
-                  <span className="text-sm text-gray-900">2024-01-15</span>
-                </div>
-              </div>
-            </div>
-
-            {/* 快速統計 */}
-            <div className="bg-gray-50 rounded-lg p-4">
-              <h3 className="font-semibold text-gray-900 mb-3 flex items-center">
-                <span className="mr-2">📊</span>
-                用戶統計
-              </h3>
-
-              <div className="space-y-3">
-                <div className="flex items-center justify-between">
-                  <span className="text-sm text-gray-600">總記錄數</span>
-                  <span className="text-sm font-medium text-gray-900">12</span>
-                </div>
-
-                <div className="flex items-center justify-between">
-                  <span className="text-sm text-gray-600">本月記錄</span>
-                  <span className="text-sm font-medium text-gray-900">3</span>
-                </div>
-
-                <div className="flex items-center justify-between">
-                  <span className="text-sm text-gray-600">已啟用類別</span>
-                  <span className="text-sm font-medium text-gray-900">
-                    {formData.energyCategories.length}
-                  </span>
-                </div>
-              </div>
-            </div>
-
-            {/* 資料匯出 */}
-            <div className="bg-gray-50 rounded-lg p-4">
-              <h3 className="font-semibold text-gray-900 mb-3 flex items-center">
-                <span className="mr-2">📥</span>
-                下載用戶資料
-              </h3>
-
-              <button
-                onClick={handleExportUser}
-                disabled={isExporting}
-                className="w-full px-4 py-3 text-left bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-between font-medium"
-              >
-                <div className="flex items-center">
-                  {isExporting ? (
-                    <>
-                      <div className="animate-spin rounded-full h-4 w-4 border-2 border-white border-t-transparent mr-3"></div>
-                      下載中...
-                    </>
-                  ) : (
-                    <>
-                      <span className="text-xl mr-3">📦</span>
-                      下載 ZIP（Excel + 佐證資料）
-                    </>
-                  )}
-                </div>
-              </button>
-
-              {exportProgress && (
-                <div className="mt-3 p-3 bg-blue-50 rounded-lg border border-blue-200">
-                  <div className="text-sm text-blue-800 mb-2">{exportProgress.status}</div>
-                  {exportProgress.total !== undefined && exportProgress.current !== undefined && (
-                    <div>
-                      <div className="flex justify-between text-xs text-blue-600 mb-1">
-                        <span>{exportProgress.current} / {exportProgress.total}</span>
-                        <span>{Math.round((exportProgress.current / exportProgress.total) * 100)}%</span>
-                      </div>
-                      <div className="w-full bg-blue-200 rounded-full h-2">
-                        <div
-                          className="bg-blue-600 h-2 rounded-full transition-all duration-300"
-                          style={{ width: `${(exportProgress.current / exportProgress.total) * 100}%` }}
-                        />
-                      </div>
-                    </div>
-                  )}
-                </div>
-              )}
-
-              <div className="mt-3 p-3 bg-gray-100 rounded text-xs text-gray-700">
-                <div className="font-semibold mb-1">📁 下載內容：</div>
-                <ul className="space-y-1">
-                  <li>• Excel 多工作表報表（所有能源類別）</li>
-                  <li>• 佐證資料檔案（自動重新命名）</li>
-                </ul>
-              </div>
-            </div>
-          </div>
-        </div>
+        </form>
       </div>
-
     </div>
   )
 }

@@ -6,6 +6,7 @@ import { useUserProfile } from '../hooks/useUserProfile'
 import Sidebar from '../components/Sidebar'
 import MainContent from '../components/MainContent'
 import { supabase } from '../lib/supabaseClient'
+import { LoginAttemptNotification } from '../components/LoginAttemptNotification'
 
 const ProtectedLayout = () => {
   const navigate = useNavigate()
@@ -52,8 +53,9 @@ const ProtectedLayout = () => {
 
   return (
     <div className="min-h-screen w-full h-screen bg-gray-50 flex overflow-hidden">
+      <LoginAttemptNotification />
       <Sidebar />
-      
+
       <div className="flex-1 flex flex-col overflow-hidden">
         <header className="bg-white shadow-sm border-b border-gray-200 px-6 py-4">
           <div className="flex items-center justify-between">

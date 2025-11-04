@@ -611,6 +611,19 @@ const AcetylenePage = () => {
       {/* 主要內容區域 - 簡化結構，移除多層嵌套 */}
       <div className="max-w-4xl mx-auto px-6 py-8 space-y-6">
 
+        {/* 返回按鈕（審核模式） */}
+        {isReviewMode && reviewUserId && (
+          <div className="mb-4">
+            <button
+              onClick={() => navigate(`/app/admin/users/${reviewUserId}`)}
+              className="flex items-center gap-2 text-blue-600 hover:text-blue-800 transition-colors"
+            >
+              <span className="text-xl">←</span>
+              <span className="font-medium">返回用戶詳情</span>
+            </button>
+          </div>
+        )}
+
         {/* 頁面標題 */}
         <div className="text-center mb-8">
           {/* 審核模式指示器 */}

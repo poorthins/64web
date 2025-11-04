@@ -23,7 +23,7 @@ export function apiUserToUIUser(apiUser: APIUser): User {
     id: apiUser.id,
     name: apiUser.display_name || '未知用戶',
     email: apiUser.email || '',
-    department: '未知部門', // API User 沒有 company/job_title
+    department: apiUser.company || apiUser.display_name || '未知部門',
     status,
     submissionDate: new Date().toISOString().split('T')[0],
     lastActivity: new Date().toISOString().split('T')[0],

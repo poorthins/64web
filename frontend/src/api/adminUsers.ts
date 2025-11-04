@@ -25,6 +25,11 @@ export interface User {
   role: string
   is_active: boolean
   entries_count: number
+  email?: string
+  company?: string
+  job_title?: string
+  phone?: string
+  filling_config?: any
 }
 
 export interface UserProfile {

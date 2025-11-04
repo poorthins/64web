@@ -58,7 +58,9 @@ const ReviewSection: React.FC<ReviewSectionProps> = ({
       await reviewEntry(entryId, 'approve', reviewComment || '審核通過')
 
       console.log('✅ 通過審核成功');
+      console.log('🔔 準備顯示 alert...');
       alert('✅ 審核通過！')
+      console.log('🔔 alert 已執行');
 
       // 回調外部處理函數
       onApprove?.()
@@ -66,9 +68,11 @@ const ReviewSection: React.FC<ReviewSectionProps> = ({
       // 清空評論
       setReviewComment('')
 
-      // 短暫延遲讓用戶看到訊息，然後返回主儀表板
+      // 短暫延遲讓用戶看到訊息，然後返回用戶詳情頁
+      console.log('⏱️ 設定 1 秒後跳轉...');
       setTimeout(() => {
-        navigate('/app/admin')
+        console.log('🔄 開始跳轉到:', `/app/admin/users/${userId}`);
+        navigate(`/app/admin/users/${userId}`)
       }, 1000) // 1秒延遲
 
     } catch (error) {
@@ -104,9 +108,9 @@ const ReviewSection: React.FC<ReviewSectionProps> = ({
       // 清空評論
       setReviewComment('')
 
-      // 短暫延遲讓用戶看到訊息，然後返回主儀表板
+      // 短暫延遲讓用戶看到訊息，然後返回用戶詳情頁
       setTimeout(() => {
-        navigate('/app/admin')
+        navigate(`/app/admin/users/${userId}`)
       }, 1000) // 1秒延遲
 
     } catch (error) {
@@ -206,7 +210,7 @@ const ReviewSection: React.FC<ReviewSectionProps> = ({
             ) : (
               <>
                 <span className="mr-2">💾</span>
-                儲存修改
+                儲存編輯
               </>
             )}
           </button>

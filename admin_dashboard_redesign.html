@@ -1,0 +1,520 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>管理員控制台 - 重新設計</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang TC', 'Microsoft JhengHei', sans-serif;
+      background: #f5f5f7;
+      min-height: 100vh;
+      padding: 24px;
+    }
+
+    .dashboard-container {
+      max-width: 1400px;
+      margin: 0 auto;
+    }
+
+    /* Header */
+    .dashboard-header {
+      background: #2e7d32;
+      border-radius: 20px;
+      padding: 48px 48px;
+      margin-bottom: 32px;
+      box-shadow: 0 8px 24px rgba(46, 125, 50, 0.2);
+      color: white;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .dashboard-header::before {
+      content: '';
+      position: absolute;
+      top: -50%;
+      right: -10%;
+      width: 400px;
+      height: 400px;
+      background: rgba(255, 255, 255, 0.1);
+      border-radius: 50%;
+    }
+
+    .dashboard-header::after {
+      content: '';
+      position: absolute;
+      bottom: -30%;
+      left: -5%;
+      width: 300px;
+      height: 300px;
+      background: rgba(255, 255, 255, 0.05);
+      border-radius: 50%;
+    }
+
+    .header-content {
+      position: relative;
+      z-index: 1;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 32px;
+    }
+
+    .header-logo {
+      flex-shrink: 0;
+    }
+
+    .header-logo img {
+      width: 120px;
+      height: 120px;
+      object-fit: contain;
+      background: white;
+      border-radius: 50%;
+      padding: 8px;
+      box-shadow: 0 4px 16px rgba(0, 0, 0, 0.2);
+    }
+
+    .header-title-section {
+      text-align: left;
+    }
+
+    .header-title-section h1 {
+      font-size: 48px;
+      font-weight: 700;
+      margin-bottom: 8px;
+      letter-spacing: -0.5px;
+    }
+
+    .header-title-section .subtitle {
+      font-size: 16px;
+      opacity: 0.85;
+      font-weight: 400;
+      letter-spacing: 0.5px;
+    }
+
+    .header-title-section p {
+      font-size: 18px;
+      opacity: 0.9;
+      font-weight: 400;
+      margin-top: 4px;
+    }
+
+    /* Logout button - top right corner */
+    .logout-button {
+      position: absolute;
+      top: 24px;
+      right: 32px;
+      padding: 10px 24px;
+      background: rgba(255, 255, 255, 0.15);
+      border: 2px solid rgba(255, 255, 255, 0.4);
+      color: white;
+      border-radius: 8px;
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.3s ease;
+      backdrop-filter: blur(10px);
+      z-index: 10;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .logout-button:hover {
+      background: rgba(255, 255, 255, 0.25);
+      border-color: rgba(255, 255, 255, 0.6);
+      transform: translateY(-2px);
+    }
+
+    .logout-button:active {
+      transform: translateY(0);
+    }
+
+    .logout-icon {
+      font-size: 16px;
+    }
+
+    /* Stats cards with green accent */
+    .stats-grid {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 20px;
+      margin-bottom: 32px;
+    }
+
+    .stat-card {
+      background: white;
+      border-radius: 16px;
+      padding: 28px;
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+      transition: all 0.3s ease;
+      border-left: 4px solid transparent;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .stat-card::before {
+      content: '';
+      position: absolute;
+      top: 0;
+      right: 0;
+      width: 100px;
+      height: 100px;
+      border-radius: 50%;
+      opacity: 0.1;
+      transition: all 0.3s ease;
+    }
+
+    .stat-card:hover {
+      transform: translateY(-4px);
+      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
+    }
+
+    .stat-card.total {
+      border-left-color: #2e7d32;
+    }
+
+    .stat-card.total::before {
+      background: #2e7d32;
+    }
+
+    .stat-card.pending {
+      border-left-color: #ff9800;
+    }
+
+    .stat-card.pending::before {
+      background: #ff9800;
+    }
+
+    .stat-card.approved {
+      border-left-color: #66bb6a;
+    }
+
+    .stat-card.approved::before {
+      background: #66bb6a;
+    }
+
+    .stat-card.rejected {
+      border-left-color: #ef5350;
+    }
+
+    .stat-card.rejected::before {
+      background: #ef5350;
+    }
+
+    .stat-icon {
+      width: 48px;
+      height: 48px;
+      border-radius: 12px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 24px;
+      margin-bottom: 16px;
+      position: relative;
+      z-index: 1;
+    }
+
+    .stat-card.total .stat-icon {
+      background: rgba(46, 125, 50, 0.1);
+      color: #2e7d32;
+    }
+
+    .stat-card.pending .stat-icon {
+      background: rgba(255, 152, 0, 0.1);
+      color: #ff9800;
+    }
+
+    .stat-card.approved .stat-icon {
+      background: rgba(102, 187, 106, 0.1);
+      color: #66bb6a;
+    }
+
+    .stat-card.rejected .stat-icon {
+      background: rgba(239, 83, 80, 0.1);
+      color: #ef5350;
+    }
+
+    .stat-number {
+      font-size: 36px;
+      font-weight: 700;
+      margin-bottom: 6px;
+      color: #1d1d1f;
+      position: relative;
+      z-index: 1;
+    }
+
+    .stat-label {
+      font-size: 14px;
+      color: #86868b;
+      font-weight: 500;
+      position: relative;
+      z-index: 1;
+    }
+
+    /* User management section */
+    .management-section {
+      background: white;
+      border-radius: 16px;
+      padding: 32px;
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+    }
+
+    .section-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 32px;
+      padding-bottom: 20px;
+      border-bottom: 2px solid #f5f5f7;
+    }
+
+    .section-title {
+      font-size: 28px;
+      font-weight: 700;
+      color: #1d1d1f;
+      letter-spacing: -0.5px;
+    }
+
+    .add-user-btn {
+      padding: 14px 32px;
+      background: #2e7d32;
+      color: white;
+      border: none;
+      border-radius: 12px;
+      font-size: 16px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.3s ease;
+      box-shadow: 0 4px 12px rgba(46, 125, 50, 0.25);
+    }
+
+    .add-user-btn:hover {
+      background: #1b5e20;
+      transform: translateY(-3px);
+      box-shadow: 0 8px 20px rgba(46, 125, 50, 0.35);
+    }
+
+    .add-user-btn:active {
+      transform: translateY(-1px);
+    }
+
+    .user-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 20px;
+    }
+
+    .user-card {
+      background: white;
+      border: 2px solid #e8e8ed;
+      border-radius: 16px;
+      padding: 40px 32px;
+      text-align: center;
+      cursor: pointer;
+      transition: all 0.3s ease;
+      min-height: 160px;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+    }
+
+    .user-card:hover {
+      background: #e8f5e9;
+      border-color: #2e7d32;
+      box-shadow: 0 8px 24px rgba(46, 125, 50, 0.15);
+      transform: translateY(-4px);
+    }
+
+    .user-company {
+      font-size: 24px;
+      font-weight: 700;
+      color: #1d1d1f;
+      margin-bottom: 12px;
+      line-height: 1.3;
+      letter-spacing: -0.3px;
+    }
+
+    .user-name {
+      font-size: 15px;
+      color: #86868b;
+      font-weight: 500;
+    }
+
+
+    /* Empty state */
+    .empty-state {
+      text-align: center;
+      padding: 80px 40px;
+      color: #86868b;
+    }
+
+    .empty-state-icon {
+      font-size: 80px;
+      margin-bottom: 24px;
+      opacity: 0.5;
+    }
+
+    .empty-state h3 {
+      font-size: 24px;
+      font-weight: 600;
+      color: #1d1d1f;
+      margin-bottom: 12px;
+    }
+
+    .empty-state p {
+      font-size: 16px;
+      color: #86868b;
+    }
+
+    /* Responsive */
+    @media (max-width: 1024px) {
+      .stats-grid {
+        grid-template-columns: repeat(2, 1fr);
+      }
+
+      .user-grid {
+        grid-template-columns: repeat(2, 1fr);
+      }
+    }
+
+    @media (max-width: 640px) {
+      .stats-grid,
+      .user-grid {
+        grid-template-columns: 1fr;
+      }
+
+      .section-header {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 16px;
+      }
+
+      .add-user-btn {
+        width: 100%;
+      }
+
+      .header-content {
+        flex-direction: column;
+        text-align: center;
+        gap: 20px;
+      }
+
+      .header-title-section {
+        text-align: center;
+      }
+
+      .header-title-section h1 {
+        font-size: 36px;
+      }
+
+      .header-logo img {
+        width: 100px;
+        height: 100px;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="dashboard-container">
+    <!-- Header with green gradient -->
+    <div class="dashboard-header">
+      <button class="logout-button" onclick="handleLogout()">
+        <span class="logout-icon">→</span>
+        <span>登出</span>
+      </button>
+
+      <div class="header-content">
+        <div class="header-logo">
+          <img src="formosanus-logo.png" alt="山椒魚永續工程 Logo">
+        </div>
+        <div class="header-title-section">
+          <div class="subtitle">山椒魚永續工程股份有限公司</div>
+          <h1>碳足跡管理系統</h1>
+          <p>企業用戶填報管理與統計分析</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- Stats cards -->
+    <div class="stats-grid">
+      <div class="stat-card total">
+        <div class="stat-icon">👥</div>
+        <div class="stat-number">142</div>
+        <div class="stat-label">總用戶數</div>
+      </div>
+
+      <div class="stat-card pending">
+        <div class="stat-icon">⏳</div>
+        <div class="stat-number">23</div>
+        <div class="stat-label">待審核</div>
+      </div>
+
+      <div class="stat-card approved">
+        <div class="stat-icon">✓</div>
+        <div class="stat-number">104</div>
+        <div class="stat-label">已通過</div>
+      </div>
+
+      <div class="stat-card rejected">
+        <div class="stat-icon">↺</div>
+        <div class="stat-number">15</div>
+        <div class="stat-label">已退回</div>
+      </div>
+    </div>
+
+    <!-- User management -->
+    <div class="management-section">
+      <div class="section-header">
+        <h2 class="section-title">用戶管理</h2>
+        <button class="add-user-btn">+ 新增用戶</button>
+      </div>
+
+      <div class="user-grid">
+        <div class="user-card">
+          <div class="user-company">台灣積體電路製造股份有限公司</div>
+          <div class="user-name">張經理 (manager@tsmc.com)</div>
+        </div>
+        <div class="user-card">
+          <div class="user-company">鴻海精密工業股份有限公司</div>
+          <div class="user-name">李主任 (director@foxconn.com)</div>
+        </div>
+        <div class="user-card">
+          <div class="user-company">聯發科技股份有限公司</div>
+          <div class="user-name">王副理 (wang@mediatek.com)</div>
+        </div>
+        <div class="user-card">
+          <div class="user-company">台達電子工業股份有限公司</div>
+          <div class="user-name">陳經理 (chen@delta.com)</div>
+        </div>
+        <div class="user-card">
+          <div class="user-company">友達光電股份有限公司</div>
+          <div class="user-name">林主管 (lin@auo.com)</div>
+        </div>
+        <div class="user-card">
+          <div class="user-company">日月光半導體製造股份有限公司</div>
+          <div class="user-name">黃經理 (huang@ase.com)</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    function handleLogout() {
+      if (confirm('確定要登出嗎？')) {
+        // 這裡會整合 Supabase 登出邏輯
+        console.log('登出功能觸發');
+        // 實際應用時會呼叫: await supabase.auth.signOut()
+        // 然後導向: window.location.href = '/login'
+        alert('登出功能 (開發中)');
+      }
+    }
+  </script>
+</body>
+</html>

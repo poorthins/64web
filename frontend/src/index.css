@@ -1,3 +1,6 @@
+/* Admin Theme */
+@import './styles/admin-theme.css';
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;

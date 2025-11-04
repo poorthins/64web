@@ -83,7 +83,9 @@ export const InputField: React.FC<{
   placeholder?: string
   required?: boolean
   helpText?: string
-}> = ({ label, name, type = 'text', value, onChange, onBlur, error, placeholder, required = false, helpText }) => {
+  autoComplete?: string
+  disabled?: boolean
+}> = ({ label, name, type = 'text', value, onChange, onBlur, error, placeholder, required = false, helpText, autoComplete, disabled = false }) => {
   return (
     <div className="space-y-1">
       <label htmlFor={name} className="block text-sm font-medium text-gray-700">
@@ -98,9 +100,11 @@ export const InputField: React.FC<{
         onChange={(e) => onChange(e.target.value)}
         onBlur={onBlur}
         placeholder={placeholder}
-        className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all duration-200 ${
+        autoComplete={autoComplete}
+        disabled={disabled}
+        className={`w-full h-[42px] px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all duration-200 ${
           error ? 'border-red-300 bg-red-50' : 'border-gray-300'
-        }`}
+        } ${disabled ? 'bg-gray-100 cursor-not-allowed' : ''}`}
       />
       {error && (
         <p className="text-sm text-red-600 flex items-center">
@@ -125,7 +129,8 @@ export const SelectField: React.FC<{
   options: { value: string | number; label: string }[]
   error?: string
   required?: boolean
-}> = ({ label, name, value, onChange, options, error, required = false }) => {
+  showPlaceholder?: boolean
+}> = ({ label, name, value, onChange, options, error, required = false, showPlaceholder = true }) => {
   return (
     <div className="space-y-1">
       <label htmlFor={name} className="block text-sm font-medium text-gray-700">
@@ -137,11 +142,11 @@ export const SelectField: React.FC<{
         name={name}
         value={value}
         onChange={(e) => onChange(e.target.value)}
-        className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all duration-200 ${
+        className={`w-full h-[42px] px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all duration-200 ${
           error ? 'border-red-300 bg-red-50' : 'border-gray-300'
         }`}
       >
-        <option value="">請選擇...</option>
+        {showPlaceholder && <option value="">請選擇...</option>}
         {options.map((option) => (
           <option key={option.value} value={option.value}>
             {option.label}

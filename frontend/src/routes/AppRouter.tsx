@@ -3,6 +3,7 @@ import { AuthProvider } from '../contexts/AuthContext'
 import { NavigationProvider } from '../contexts/NavigationContext'
 import LoginSimple from '../pages/LoginSimple'
 import ProtectedLayout from '../layouts/ProtectedLayout'
+import AdminLayout from '../layouts/AdminLayout'
 import DashboardPage from '../pages/Dashboard'
 import MyEntriesPage from '../pages/MyEntriesPage'
 import HelpPage from '../pages/HelpPage'
@@ -26,7 +27,7 @@ import ElectricityBillPage from '../pages/Category2/ElectricityBillPage'
 import CommutePage from '../pages/Category3/CommuteePage'
 import PingPage from '../pages/PingPage'
 import AdminPage from '../pages/AdminPage'
-import UserDetailPage from '../pages/admin/UserDetailPage'
+import UserDetail from '../pages/admin/UserDetail'
 import AdminDashboard from '../pages/admin/AdminDashboard'
 import CreateUser from '../pages/admin/CreateUser'
 import EditUser from '../pages/admin/EditUser'
@@ -45,31 +46,17 @@ function AppRouter() {
             <Route path="/" element={<LoginSimple />} />
             <Route path="/login" element={<LoginSimple />} />
             
+            {/* 管理員專用頁面 - 使用獨立的 AdminLayout（無側邊欄） */}
+            <Route path="/app/admin" element={<AdminLayout />}>
+              <Route index element={<AdminDashboard />} />
+              <Route path="users/:userId" element={<UserDetail />} />
+              <Route path="create" element={<CreateUser />} />
+              <Route path="edit/:userId" element={<EditUser />} />
+            </Route>
+
             <Route path="/app" element={<ProtectedLayout />}>
               {/* 根據用戶角色決定首頁內容 - 修復死循環問題 */}
               <Route index element={<RoleBasedHomePage />} />
-              
-              {/* 管理員專用頁面 */}
-              <Route path="admin" element={
-                <AdminRoute fallback={<DashboardPage />}>
-                  <AdminDashboard />
-                </AdminRoute>
-              } />
-              <Route path="admin/users/:userId" element={
-                <AdminRoute fallback={<DashboardPage />}>
-                  <UserDetailPage />
-                </AdminRoute>
-              } />
-              <Route path="admin/create" element={
-                <AdminRoute fallback={<DashboardPage />}>
-                  <CreateUser />
-                </AdminRoute>
-              } />
-              <Route path="admin/edit/:userId" element={
-                <AdminRoute fallback={<DashboardPage />}>
-                  <EditUser />
-                </AdminRoute>
-              } />
 
               {/* 只有一般用戶可以訪問的頁面 */}
               <Route path="my/entries" element={

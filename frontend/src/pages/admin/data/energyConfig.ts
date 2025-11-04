@@ -84,6 +84,21 @@ export function getPageRoute(pageKey: string): string | null {
 }
 
 /**
+ * 根據顯示名稱取得路由路徑（用於從資料庫 category 欄位取得路由）
+ */
+export function getPageRouteByName(categoryName: string): string | null {
+  // 先嘗試用 id 查找（如果傳入的是 page_key）
+  let category = ENERGY_CONFIG.find(c => c.id === categoryName)
+
+  // 如果找不到，再嘗試用顯示名稱查找
+  if (!category) {
+    category = ENERGY_CONFIG.find(c => c.name === categoryName)
+  }
+
+  return category?.route ?? null
+}
+
+/**
  * 根據 page_key 取得完整類別資訊
  */
 export function getCategoryById(pageKey: string): EnergyCategory | null {
