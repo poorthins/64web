@@ -1,16 +1,27 @@
 import React from 'react'
 
-interface HeroSectionProps {
-  onChecklistClick?: () => void
-}
-
-const HeroSection: React.FC<HeroSectionProps> = ({ onChecklistClick }) => {
+const HeroSection: React.FC = () => {
   return (
-    <section className="relative bg-black py-24 px-6">
-      {/* 未來可以替換為背景圖片 */}
-      <div className="max-w-7xl mx-auto text-center">
+    <section
+      className="relative w-full flex justify-center"
+      style={{
+        backgroundImage: 'url(/hero-bg.jpg)',
+        backgroundSize: 'cover',
+        backgroundPosition: 'center',
+        backgroundRepeat: 'no-repeat',
+        paddingTop: '86px'
+      }}
+    >
+      <div
+        className="relative flex flex-col items-center justify-center"
+        style={{
+          width: '1920px',
+          height: '528px',
+          flexShrink: 0
+        }}
+      >
         <h1
-          className="text-white font-bold mb-8"
+          className="text-white font-bold text-center"
           style={{
             fontSize: '90px',
             fontFamily: 'Inter, sans-serif',
@@ -18,16 +29,9 @@ const HeroSection: React.FC<HeroSectionProps> = ({ onChecklistClick }) => {
             textShadow: '2px 2px 4px rgba(0, 0, 0, 0.3)'
           }}
         >
-          Your Action Today<br />
-          Shapes Our Sustainable Future.
+          Your Action Today Shapes<br />
+          Our Sustainable Future.
         </h1>
-
-        <button
-          onClick={onChecklistClick}
-          className="bg-figma-accent hover:bg-opacity-90 text-white font-semibold px-8 py-3 rounded-full transition-all text-lg"
-        >
-          盤查清單/佐證範例
-        </button>
       </div>
     </section>
   )

@@ -47,17 +47,49 @@ describe('StatusCard', () => {
     expect(screen.getByText('0')).toBeInTheDocument()
   })
 
-  it('待填寫卡片應該有灰色背景', () => {
+  it('待填寫卡片應該有半透明白色背景', () => {
     render(<StatusCard type="pending" count={5} />)
 
     const card = screen.getByText('待填寫').closest('button')
-    expect(card).toHaveClass('bg-gray-100')
+    expect(card).toHaveStyle({ backgroundColor: 'rgba(255, 255, 255, 0.70)' })
   })
 
-  it('已提交卡片應該有深綠色背景', () => {
+  it('已提交卡片應該有深藍綠色背景', () => {
     render(<StatusCard type="submitted" count={3} />)
 
     const card = screen.getByText('已提交').closest('button')
-    expect(card).toHaveClass('bg-figma-darkGreen')
+    expect(card).toHaveStyle({ backgroundColor: 'rgba(7, 85, 108, 0.85)' })
+  })
+
+  it('已通過卡片應該有淺藍綠色背景', () => {
+    render(<StatusCard type="approved" count={2} />)
+
+    const card = screen.getByText('已通過').closest('button')
+    expect(card).toHaveStyle({ backgroundColor: 'rgba(161, 194, 201, 0.85)' })
+  })
+
+  it('已退回卡片應該有黃綠色背景', () => {
+    render(<StatusCard type="rejected" count={1} />)
+
+    const card = screen.getByText('已退回').closest('button')
+    expect(card).toHaveStyle({ backgroundColor: 'rgba(217, 248, 58, 0.70)' })
+  })
+
+  it('數字應該有 text-shadow', () => {
+    const { container } = render(<StatusCard type="pending" count={5} />)
+
+    const count = screen.getByText('5')
+    expect(count).toHaveStyle({ textShadow: '0px 4px 4px rgba(0, 0, 0, 0.25)' })
+  })
+
+  it('卡片應該有固定寬度和高度', () => {
+    render(<StatusCard type="pending" count={5} />)
+
+    const card = screen.getByText('待填寫').closest('button')
+    expect(card).toHaveStyle({
+      width: '480px',
+      height: '306px',
+      flexShrink: 0
+    })
   })
 })

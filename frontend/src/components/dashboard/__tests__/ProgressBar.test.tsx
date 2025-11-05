@@ -44,22 +44,53 @@ describe('ProgressBar', () => {
     expect(screen.getByText('0%')).toBeInTheDocument()
   })
 
-  it('應該顯示完成進度標題', () => {
+  it('應該顯示完成度標題', () => {
     render(<ProgressBar completed={2} total={14} />)
 
-    expect(screen.getByText('完成進度')).toBeInTheDocument()
-  })
-
-  it('應該顯示詳細說明文字', () => {
-    render(<ProgressBar completed={2} total={14} />)
-
-    expect(screen.getByText('已完成 2 項，共 14 項能源類別')).toBeInTheDocument()
+    expect(screen.getByText('完成度')).toBeInTheDocument()
   })
 
   it('進度條寬度應該正確設置', () => {
     const { container } = render(<ProgressBar completed={7} total={14} />)
 
-    const progressBar = container.querySelector('.bg-figma-accent')
-    expect(progressBar).toHaveStyle({ width: '50%' })
+    // 找到進度條填充元素（有 backgroundColor: #01e083 的 div）
+    const progressFill = container.querySelector('div[style*="background-color: rgb(1, 224, 131)"]')
+    expect(progressFill).toHaveStyle({ width: '50%' })
+  })
+
+  it('進度條容器應該有正確的尺寸', () => {
+    const { container } = render(<ProgressBar completed={2} total={14} />)
+
+    // 找到進度條容器（有 backgroundColor: #FFF 的 div）
+    const progressContainer = container.querySelector('div[style*="background-color: rgb(255, 255, 255)"]')
+    expect(progressContainer).toHaveStyle({
+      width: '1268px',
+      height: '24px'
+    })
+  })
+
+  it('分數應該是綠色', () => {
+    const { container } = render(<ProgressBar completed={2} total={14} />)
+
+    const fraction = screen.getByText('2/14')
+    expect(fraction).toHaveStyle({ color: '#01e083' })
+  })
+
+  it('百分比應該是黑色', () => {
+    const { container } = render(<ProgressBar completed={2} total={14} />)
+
+    const percentage = screen.getByText('14%')
+    expect(percentage).toHaveStyle({ color: '#000' })
+  })
+
+  it('應該有水平佈局', () => {
+    const { container } = render(<ProgressBar completed={2} total={14} />)
+
+    // 主容器應該是相對定位
+    const mainContainer = container.firstChild as HTMLElement
+    expect(mainContainer).toHaveStyle({
+      width: '1920px',
+      height: '182px'
+    })
   })
 })

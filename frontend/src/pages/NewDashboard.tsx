@@ -36,10 +36,25 @@ const NewDashboard = () => {
 
   // UI 狀態
   const [modalStatus, setModalStatus] = useState<StatusType | null>(null)
+  const [scale, setScale] = useState(1)
 
   // 載入資料
   useEffect(() => {
     loadDashboardData()
+  }, [])
+
+  // 響應式縮放
+  useEffect(() => {
+    const updateScale = () => {
+      const viewportWidth = window.innerWidth
+      const designWidth = 1920
+      const newScale = viewportWidth < designWidth ? viewportWidth / designWidth : 1
+      setScale(newScale)
+    }
+
+    updateScale()
+    window.addEventListener('resize', updateScale)
+    return () => window.removeEventListener('resize', updateScale)
   }, [])
 
   const loadDashboardData = async () => {
@@ -131,8 +146,7 @@ const NewDashboard = () => {
 
   // 處理盤查清單按鈕點擊
   const handleChecklistClick = () => {
-    // TODO: 導航到盤查清單頁面或打開範例
-    console.log('盤查清單/佐證範例按鈕被點擊')
+    navigate('/app/inventory-checklist')
   }
 
   if (loading || isPermissionsLoading) {
@@ -164,64 +178,92 @@ const NewDashboard = () => {
   }
 
   return (
-    <div className="fixed inset-0 bg-figma-gray overflow-y-auto z-40">
-      {/* 頂部導航 - 固定在頂部 */}
-      <div className="sticky top-0 z-50 bg-white shadow-sm">
-        <NavigationBar />
-      </div>
+    <div className="fixed inset-0 overflow-x-hidden overflow-y-auto z-40 bg-white flex justify-center">
+      <div style={{
+        width: '1920px',
+        minHeight: '1689px',
+        position: 'relative',
+        transform: `scale(${scale})`,
+        transformOrigin: 'top center'
+      }}>
+        {/* 頂部導航 - 絕對定位在最上層 */}
+        <div style={{ position: 'absolute', top: 0, left: 0, right: 0, zIndex: 50 }}>
+          <NavigationBar onChecklistClick={handleChecklistClick} />
+        </div>
 
-      {/* 主要內容 */}
-      <div>
-        {/* Hero Section */}
-        <HeroSection onChecklistClick={handleChecklistClick} />
+        {/* 主要內容 */}
+        <div>
+          {/* Hero Section - 從頁面頂部開始 */}
+          <HeroSection />
 
-        {/* 狀態卡片區塊 */}
-        <section className="py-12 px-6">
-          <div className="max-w-7xl mx-auto">
-            <div className="flex justify-center items-stretch gap-5 w-full max-w-[1920px] mx-auto">
-              <StatusCard
-                type="pending"
-                count={stats.statusCounts.pending}
-                onClick={() => setModalStatus('pending')}
-              />
-              <StatusCard
-                type="submitted"
-                count={stats.statusCounts.submitted}
-                onClick={() => setModalStatus('submitted')}
-              />
-              <StatusCard
-                type="approved"
-                count={stats.statusCounts.approved}
-                onClick={() => setModalStatus('approved')}
-              />
-              <StatusCard
-                type="rejected"
-                count={stats.statusCounts.rejected}
-                onClick={() => setModalStatus('rejected')}
-              />
+          {/* 狀態卡片 + 進度條區塊 (帶背景圖 1920x488px) */}
+          <section
+            className="w-full flex justify-center"
+            style={{
+              backgroundImage: 'url(/bottom-bg.jpg)',
+              backgroundSize: 'cover',
+              backgroundPosition: 'center',
+              backgroundRepeat: 'no-repeat',
+              height: '488px'
+            }}
+          >
+            <div style={{ width: '1920px', height: '100%' }}>
+              {/* StatusCard 區塊 - 緊密連在一起 */}
+              <div className="flex justify-center items-stretch" style={{ gap: 0 }}>
+                <StatusCard
+                  type="pending"
+                  count={stats.statusCounts.pending}
+                  onClick={() => setModalStatus('pending')}
+                />
+                <StatusCard
+                  type="submitted"
+                  count={stats.statusCounts.submitted}
+                  onClick={() => setModalStatus('submitted')}
+                />
+                <StatusCard
+                  type="approved"
+                  count={stats.statusCounts.approved}
+                  onClick={() => setModalStatus('approved')}
+                />
+                <StatusCard
+                  type="rejected"
+                  count={stats.statusCounts.rejected}
+                  onClick={() => setModalStatus('rejected')}
+                />
+              </div>
+
+              {/* 灰色半透明矩形 - 包含進度條 */}
+              <div
+                className="w-full flex justify-center"
+                style={{
+                  background: 'rgba(235, 237, 240, 0.90)',
+                  height: '182px'
+                }}
+              >
+                <div style={{ width: '1920px', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                  <ProgressBar
+                    completed={stats.completedCount}
+                    total={stats.totalCategories}
+                  />
+                </div>
+              </div>
             </div>
-          </div>
-        </section>
+          </section>
 
-        {/* 進度條 */}
-        <ProgressBar
-          completed={stats.completedCount}
-          total={stats.totalCategories}
-        />
+          {/* 關於我們 */}
+          <AboutUsSection />
 
-        {/* 關於我們 */}
-        <AboutUsSection />
-
-        {/* 狀態 Modal */}
-        {modalStatus && (
-          <StatusModal
-            isOpen={true}
-            onClose={() => setModalStatus(null)}
-            type={modalStatus}
-            items={getModalItems(modalStatus)}
-            onItemClick={handleNavigateToPage}
-          />
-        )}
+          {/* 狀態 Modal */}
+          {modalStatus && (
+            <StatusModal
+              isOpen={true}
+              onClose={() => setModalStatus(null)}
+              type={modalStatus}
+              items={getModalItems(modalStatus)}
+              onItemClick={handleNavigateToPage}
+            />
+          )}
+        </div>
       </div>
     </div>
   )

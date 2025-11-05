@@ -4,6 +4,7 @@ import { BrowserRouter } from 'react-router-dom'
 import NavigationBar from '../NavigationBar'
 
 const mockNavigate = vi.fn()
+const mockSignOut = vi.fn()
 
 vi.mock('react-router-dom', async () => {
   const actual = await vi.importActual('react-router-dom')
@@ -13,6 +14,14 @@ vi.mock('react-router-dom', async () => {
   }
 })
 
+vi.mock('../../../lib/supabaseClient', () => ({
+  supabase: {
+    auth: {
+      signOut: () => mockSignOut()
+    }
+  }
+}))
+
 const renderWithRouter = (component: React.ReactElement) => {
   return render(<BrowserRouter>{component}</BrowserRouter>)
 }
@@ -20,6 +29,7 @@ const renderWithRouter = (component: React.ReactElement) => {
 describe('NavigationBar', () => {
   beforeEach(() => {
     mockNavigate.mockClear()
+    mockSignOut.mockClear()
   })
 
   it('應該顯示 Logo 和品牌名稱', () => {
@@ -27,25 +37,9 @@ describe('NavigationBar', () => {
 
     const logo = screen.getByAltText('山椒魚 Logo')
     expect(logo).toBeInTheDocument()
-    expect(logo).toHaveAttribute('src', '/formosanus-logo.jpg')
+    expect(logo).toHaveAttribute('src', '/formosanus-logo.png')
 
     expect(screen.getByText('山椒魚FESS')).toBeInTheDocument()
-  })
-
-  it('應該顯示首頁按鈕', () => {
-    renderWithRouter(<NavigationBar />)
-
-    const homeButton = screen.getByText('首頁')
-    expect(homeButton).toBeInTheDocument()
-  })
-
-  it('點擊首頁按鈕應該導航到 /app', () => {
-    renderWithRouter(<NavigationBar />)
-
-    const homeButton = screen.getByText('首頁')
-    fireEvent.click(homeButton)
-
-    expect(mockNavigate).toHaveBeenCalledWith('/app')
   })
 
   it('應該顯示有項目的分類（類別一、二、三）', () => {
@@ -133,6 +127,25 @@ describe('NavigationBar', () => {
       expect(screen.getByText('液化石油氣')).toBeInTheDocument()
       expect(screen.getByText('滅火器')).toBeInTheDocument()
       expect(screen.getByText('焊條')).toBeInTheDocument()
+    })
+  })
+
+  it('應該顯示 Log out 按鈕', () => {
+    renderWithRouter(<NavigationBar />)
+
+    const logoutButton = screen.getByText('Log out')
+    expect(logoutButton).toBeInTheDocument()
+  })
+
+  it('點擊 Log out 按鈕應該登出並導航到登入頁', async () => {
+    renderWithRouter(<NavigationBar />)
+
+    const logoutButton = screen.getByText('Log out')
+    fireEvent.click(logoutButton)
+
+    await waitFor(() => {
+      expect(mockSignOut).toHaveBeenCalled()
+      expect(mockNavigate).toHaveBeenCalledWith('/login')
     })
   })
 })

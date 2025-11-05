@@ -71,7 +71,7 @@ const StatusModal: React.FC<StatusModalProps> = ({
       <div className="fixed inset-0 flex items-center justify-center z-50 p-4">
         <div className={`${config.bgColor} rounded-lg shadow-2xl max-w-2xl w-full max-h-[80vh] overflow-hidden`}>
           {/* Header */}
-          <div className="flex items-center justify-between p-6 border-b border-white/20">
+          <div className={`flex items-center justify-between p-6 border-b ${type === 'pending' ? 'border-black/20' : 'border-white/20'}`}>
             <h2 className={`text-2xl font-bold ${type === 'pending' ? 'text-black' : 'text-white'}`}>
               {config.title}
             </h2>
