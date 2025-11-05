@@ -307,14 +307,22 @@ def update_user(user_id):
 
 @app.route('/api/admin/create-user', methods=['POST'])
 def create_user():
+    print("=== [create_user] 收到請求 ===")
     try:
         # 驗證管理員權限
         auth_header = request.headers.get('Authorization')
+        print(f"[create_user] Authorization header: {auth_header[:50] if auth_header else 'None'}...")
+
         user = get_user_from_token(auth_header)
+        print(f"[create_user] 認證用戶: {user}")
+
         if not user or user.get('role') != 'admin':
+            print(f"[create_user] ❌ 權限不足: user={user}, role={user.get('role') if user else 'None'}")
             return jsonify({"error": "Unauthorized"}), 403
 
         data = request.get_json()
+        print(f"[create_user] 請求資料: {data}")
+
         email = data.get('email')
         display_name = data.get('displayName')
         password = data.get('password', 'TempPassword123!')
@@ -330,9 +338,13 @@ def create_user():
         target_year = data.get('target_year', datetime.now().year)
         diesel_generator_version = data.get('diesel_generator_version', 'refuel')
 
+        print(f"[create_user] 解析後: email={email}, display_name={display_name}, company={company}")
+
         if not email or not display_name:
+            print(f"[create_user] ❌ 缺少必要欄位")
             return jsonify({"error": "email and displayName are required"}), 400
 
+        print(f"[create_user] 開始建立 auth user...")
         supabase = get_supabase_admin()
 
         # 建立新用戶（使用 admin API）
@@ -342,9 +354,12 @@ def create_user():
             "email_confirm": True
         })
 
+        print(f"[create_user] Auth user 建立結果: {auth_result.user.id if auth_result.user else 'Failed'}")
+
         if auth_result.user:
             # ⭐ 建立 profile 記錄（包含所有欄位）
-            profile_result = supabase.table('profiles').insert({
+            print(f"[create_user] 開始建立 profile...")
+            profile_data = {
                 'id': auth_result.user.id,
                 'display_name': display_name,
                 'email': email,
@@ -358,7 +373,11 @@ def create_user():
                     'target_year': target_year,
                     'diesel_generator_mode': diesel_generator_version
                 }
-            }).execute()
+            }
+            print(f"[create_user] Profile data: {profile_data}")
+
+            profile_result = supabase.table('profiles').insert(profile_data).execute()
+            print(f"[create_user] ✅ Profile 建立成功")
 
             # ⭐ 回傳完整 profile 資料
             return jsonify({
@@ -366,10 +385,45 @@ def create_user():
                 "user": profile_result.data[0]
             })
         else:
+            print(f"[create_user] ❌ Auth user 建立失敗")
             return jsonify({"error": "Failed to create user"}), 500
 
     except Exception as e:
-        print(f"Error in create_user: {str(e)}")  # Debug log
+        print(f"[create_user] ❌ Exception: {type(e).__name__}: {str(e)}")
+        import traceback
+        print(traceback.format_exc())
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/admin/users/<user_id>/sessions', methods=['DELETE'])
+def force_logout_user(user_id):
+    """管理員強制登出指定用戶（清除所有 sessions）"""
+    try:
+        # 驗證管理員權限
+        auth_header = request.headers.get('Authorization')
+        user = get_user_from_token(auth_header)
+        if not user or user.get('role') != 'admin':
+            return jsonify({"error": "Unauthorized"}), 403
+
+        supabase = get_supabase_admin()
+
+        # 調用 Supabase function 清除 sessions
+        result = supabase.rpc('admin_clear_user_sessions_by_id', {
+            'target_user_id': user_id
+        }).execute()
+
+        if result.data and result.data.get('success'):
+            return jsonify({
+                "success": True,
+                "message": "User sessions cleared successfully",
+                "deleted_sessions": result.data.get('deleted_sessions', 0)
+            })
+        else:
+            return jsonify({
+                "error": result.data.get('message', 'Failed to clear sessions')
+            }), 500
+
+    except Exception as e:
+        print(f"Error in force_logout_user: {str(e)}")
         return jsonify({"error": str(e)}), 500
 
 if __name__ == '__main__':

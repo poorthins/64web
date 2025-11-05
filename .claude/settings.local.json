@@ -45,7 +45,11 @@
       "Bash(test:*)",
       "Bash(npm install:*)",
       "Bash(dir \"c:\\Users\\Tim\\Desktop\\python\\64web\\backend\")",
-      "Bash(Stop-Process -Id 32568 -Force)"
+      "Bash(Stop-Process -Id 32568 -Force)",
+      "Bash(npx vitest:*)",
+      "Bash(dir \"C:\\Users\\Tim\\Desktop\\python\\64web\\frontend\\public\\佐證\" /B)",
+      "WebSearch",
+      "Bash(dir \"C:\\Users\\Tim\\Desktop\\python\\64web\\frontend\\public\" /B)"
     ],
     "deny": [],
     "ask": []

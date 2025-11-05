@@ -616,3 +616,37 @@ export async function getUserEnergyEntries(userId: string): Promise<EnergyEntry[
     throw new Error('取得使用者填報記錄時發生未知錯誤')
   }
 }
+
+/**
+ * 管理員強制登出指定用戶（清除所有 sessions）
+ * @param userId - 用戶 ID
+ */
+export async function forceLogoutUser(userId: string): Promise<void> {
+  try {
+    const authResult = await validateAuth()
+    if (authResult.error) throw authResult.error
+
+    const response = await fetch(`${API_BASE_URL}/api/admin/users/${userId}/sessions`, {
+      method: 'DELETE',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${authResult.session?.access_token}`
+      }
+    })
+
+    const result = await response.json()
+
+    if (!response.ok) {
+      console.error('Error force logging out user:', result)
+      throw new Error(result.error || '強制登出用戶失敗')
+    }
+
+    console.log(`✅ 成功清除用戶 ${userId} 的 ${result.deleted_sessions} 個 sessions`)
+  } catch (error) {
+    console.error('Error in forceLogoutUser:', error)
+    if (error instanceof Error) {
+      throw error
+    }
+    throw new Error('強制登出用戶時發生未知錯誤')
+  }
+}

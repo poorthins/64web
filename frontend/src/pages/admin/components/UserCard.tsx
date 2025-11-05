@@ -4,9 +4,10 @@ import { User } from '../types/admin'
 interface UserCardProps {
   user: User
   onClick?: (user: User) => void
+  onQuickExport?: (user: User) => void
 }
 
-const UserCard: React.FC<UserCardProps> = ({ user, onClick }) => {
+const UserCard: React.FC<UserCardProps> = ({ user, onClick, onQuickExport }) => {
   return (
     <div
       onClick={() => onClick?.(user)}

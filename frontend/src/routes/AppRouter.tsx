@@ -4,7 +4,7 @@ import { NavigationProvider } from '../contexts/NavigationContext'
 import LoginSimple from '../pages/LoginSimple'
 import ProtectedLayout from '../layouts/ProtectedLayout'
 import AdminLayout from '../layouts/AdminLayout'
-import DashboardPage from '../pages/Dashboard'
+import FullScreenLayout from '../layouts/FullScreenLayout'
 import MyEntriesPage from '../pages/MyEntriesPage'
 import HelpPage from '../pages/HelpPage'
 import HomePage from '../pages/HomePage'
@@ -35,6 +35,7 @@ import AdminRoute from '../components/AdminRoute'
 import UserRoute from '../components/UserRoute'
 import FixUserRoles from '../pages/FixUserRoles'
 import RoleBasedHomePage from '../components/RoleBasedHomePage'
+import InventoryChecklistPage from '../pages/InventoryChecklistPage'
 import '../utils/roleDebug' // 載入診斷工具
 
 function AppRouter() {
@@ -55,9 +56,6 @@ function AppRouter() {
             </Route>
 
             <Route path="/app" element={<ProtectedLayout />}>
-              {/* 根據用戶角色決定首頁內容 - 修復死循環問題 */}
-              <Route index element={<RoleBasedHomePage />} />
-
               {/* 只有一般用戶可以訪問的頁面 */}
               <Route path="my/entries" element={
                 <UserRoute>
@@ -159,6 +157,18 @@ function AppRouter() {
               } />
               <Route path="ping" element={<PingPage />} />
               <Route path="fix-user-roles" element={<FixUserRoles />} />
+            </Route>
+
+            {/* 全螢幕頁面（無側邊欄、無導航） */}
+            <Route path="/app" element={<FullScreenLayout />}>
+              {/* 首頁 - 根據用戶角色決定內容 */}
+              <Route index element={<RoleBasedHomePage />} />
+
+              <Route path="inventory-checklist" element={
+                <UserRoute>
+                  <InventoryChecklistPage />
+                </UserRoute>
+              } />
             </Route>
           </Routes>
         </NavigationProvider>

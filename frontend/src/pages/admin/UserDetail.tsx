@@ -1,8 +1,9 @@
 import { useState, useEffect } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import { getUserDetails, UserProfile, getUserEnergyEntries } from '../../api/adminUsers'
+import { getUserDetails, UserProfile, getUserEnergyEntries, forceLogoutUser } from '../../api/adminUsers'
 import { getUserSubmissions, Submission } from '../../api/adminSubmissions'
 import { getPageRouteByName } from './data/energyConfig'
+import { toast } from 'react-hot-toast'
 
 const UserDetail = () => {
   const { userId } = useParams<{ userId: string }>()
@@ -124,6 +125,22 @@ const UserDetail = () => {
       setExportProgress(null)
     } finally {
       setIsExporting(false)
+    }
+  }
+
+  const handleForceLogout = async () => {
+    if (!userId || !user) return
+
+    if (!confirm(`確定要強制登出 ${user.display_name} (${user.email}) 嗎？\n\n這將清除該用戶的所有登入狀態。`)) {
+      return
+    }
+
+    try {
+      await forceLogoutUser(userId)
+      toast.success(`已成功登出 ${user.display_name}`)
+    } catch (error) {
+      console.error('強制登出失敗:', error)
+      toast.error(error instanceof Error ? error.message : '強制登出失敗')
     }
   }
 
@@ -296,6 +313,34 @@ const UserDetail = () => {
                     下載用戶資料
                   </>
                 )}
+              </button>
+              <button
+                onClick={handleForceLogout}
+                style={{
+                  width: '100%',
+                  justifyContent: 'center',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '8px',
+                  padding: '12px',
+                  backgroundColor: '#fee2e2',
+                  color: '#991b1b',
+                  border: '1px solid #fecaca',
+                  borderRadius: '8px',
+                  fontSize: '15px',
+                  fontWeight: 500,
+                  cursor: 'pointer',
+                  transition: 'all 0.2s'
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.backgroundColor = '#fecaca'
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.backgroundColor = '#fee2e2'
+                }}
+              >
+                <span style={{ fontSize: '18px' }}>🚪</span>
+                強制登出用戶
               </button>
             </div>
 

@@ -1,13 +1,22 @@
-import React from 'react'
+import React, { useEffect } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { useRole } from '../hooks/useRole'
-import AdminDashboard from '../pages/admin/AdminDashboard'
-import DashboardPage from '../pages/Dashboard'
+import NewDashboardPage from '../pages/NewDashboard'
 import { AlertCircle } from 'lucide-react'
 
 const RoleBasedHomePage: React.FC = () => {
+  const navigate = useNavigate()
   const { role, loadingRole, error, refetchRole } = useRole()
 
   console.log('🔍 RoleBasedHomePage Debug:', { role, loadingRole, error })
+
+  // 當角色是 admin 時，重定向到 /app/admin（使用 AdminLayout，無側邊欄）
+  useEffect(() => {
+    if (!loadingRole && role === 'admin') {
+      console.log('✅ Admin detected, redirecting to /app/admin')
+      navigate('/app/admin', { replace: true })
+    }
+  }, [role, loadingRole, navigate])
 
   if (loadingRole) {
     return (
@@ -55,11 +64,8 @@ const RoleBasedHomePage: React.FC = () => {
 
   console.log('✅ Role determined:', role)
 
-  if (role === 'admin') {
-    return <AdminDashboard />
-  }
-
-  return <DashboardPage />
+  // 一般用戶顯示 NewDashboard
+  return <NewDashboardPage />
 }
 
 export default RoleBasedHomePage

@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Users, FileText, CheckCircle, XCircle, Plus } from 'lucide-react'
+import { Users, FileText, CheckCircle, XCircle, Plus, LogOut } from 'lucide-react'
 import { apiUserToUIUser } from './utils/userTransformers'
 import StatsCard from './components/StatsCard'
 import UserCard from './components/UserCard'
@@ -99,6 +99,16 @@ const AdminDashboard: React.FC = () => {
     navigate('/app/admin/create')
   }
 
+  const handleLogout = async () => {
+    try {
+      await supabase.auth.signOut()
+      navigate('/login')
+    } catch (error) {
+      console.error('登出失敗:', error)
+      toast.error('登出失敗')
+    }
+  }
+
   // 用戶管理面板組件
   const UserManagementPanel = () => (
     <div className="p-6">
@@ -175,19 +185,30 @@ const AdminDashboard: React.FC = () => {
           <div className="absolute bottom-[-30%] left-[-5%] w-72 h-72 bg-white/5 rounded-full"></div>
 
           {/* Header 內容 */}
-          <div className="relative z-10 flex items-center justify-center gap-8">
-            <div className="flex-shrink-0">
-              <img
-                src="/formosanus-logo.png"
-                alt="山椒魚永續工程 Logo"
-                className="w-32 h-32 object-contain bg-white rounded-full p-2 shadow-xl"
-              />
+          <div className="relative z-10 flex items-center justify-between">
+            <div className="flex items-center gap-8">
+              <div className="flex-shrink-0">
+                <img
+                  src="/formosanus-logo.png"
+                  alt="山椒魚永續工程 Logo"
+                  className="w-32 h-32 object-contain bg-white rounded-full p-2 shadow-xl"
+                />
+              </div>
+              <div className="text-left text-white">
+                <div className="text-sm opacity-85 mb-2 tracking-wide">山椒魚永續工程股份有限公司</div>
+                <h1 className="text-5xl font-bold mb-2 tracking-tight">碳足跡管理系統</h1>
+                <p className="text-lg opacity-90">企業用戶填報管理與統計分析</p>
+              </div>
             </div>
-            <div className="text-left text-white">
-              <div className="text-sm opacity-85 mb-2 tracking-wide">山椒魚永續工程股份有限公司</div>
-              <h1 className="text-5xl font-bold mb-2 tracking-tight">碳足跡管理系統</h1>
-              <p className="text-lg opacity-90">企業用戶填報管理與統計分析</p>
-            </div>
+
+            {/* 登出按鈕 */}
+            <button
+              onClick={handleLogout}
+              className="flex items-center gap-2 px-6 py-3 bg-white/20 hover:bg-white/30 text-white rounded-xl transition-colors backdrop-blur-sm"
+            >
+              <LogOut className="w-5 h-5" />
+              <span className="font-medium">登出</span>
+            </button>
           </div>
         </div>
 

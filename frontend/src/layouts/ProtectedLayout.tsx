@@ -7,6 +7,7 @@ import Sidebar from '../components/Sidebar'
 import MainContent from '../components/MainContent'
 import { supabase } from '../lib/supabaseClient'
 import { LoginAttemptNotification } from '../components/LoginAttemptNotification'
+import LogoutButton from '../components/common/LogoutButton'
 
 const ProtectedLayout = () => {
   const navigate = useNavigate()
@@ -81,14 +82,12 @@ const ProtectedLayout = () => {
                 )}
               </div>
               
-              <button
+              <LogoutButton
                 onClick={handleSignOut}
                 disabled={isSigningOut}
+                isLoading={isSigningOut}
                 data-testid="nav-logout"
-                className="bg-red-600 hover:bg-red-700 disabled:bg-red-400 text-white px-3 py-1 rounded text-sm transition duration-200"
-              >
-                {isSigningOut ? '登出中...' : '登出'}
-              </button>
+              />
             </div>
           </div>
         </header>
