@@ -2,7 +2,7 @@ import React, { useState } from 'react'
 import { inventoryItems } from '../data/inventoryData'
 import { InventoryCard } from '../components/inventory/InventoryCard'
 import { ImageLightbox } from '../components/inventory/ImageLightbox'
-import InventoryNavBar from '../components/inventory/InventoryNavBar'
+import SharedPageLayout from '../layouts/SharedPageLayout'
 
 interface LightboxState {
   images: string[]
@@ -17,12 +17,7 @@ export const InventoryChecklistPage: React.FC = () => {
   }
 
   return (
-    <div className="min-h-screen bg-gray-50">
-      {/* 頂部導航欄 */}
-      <div className="w-full h-[96px] flex items-center justify-center" style={{ background: '#EBEDF0' }}>
-        <InventoryNavBar />
-      </div>
-
+    <SharedPageLayout showActionButton={false}>
       {/* Hero Section */}
       <div
         className="relative h-[493px] flex flex-col items-center justify-center text-center px-4"
@@ -62,7 +57,7 @@ export const InventoryChecklistPage: React.FC = () => {
       {/* 排放源方格 Grid */}
       <div className="mx-auto px-[248px]" style={{ maxWidth: '1920px', paddingTop: '61px', paddingBottom: '48px' }}>
         <div className="grid grid-cols-3 gap-[30px]">
-          {inventoryItems.map(item => (
+          {inventoryItems.map((item) => (
             <InventoryCard
               key={item.id}
               item={item}
@@ -80,7 +75,7 @@ export const InventoryChecklistPage: React.FC = () => {
           onClose={() => setLightbox(null)}
         />
       )}
-    </div>
+    </SharedPageLayout>
   )
 }
 

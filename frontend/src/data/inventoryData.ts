@@ -78,6 +78,17 @@ export const inventoryItems: InventoryItem[] = [
     exampleImages: ['/佐證/汽油.jpg']
   },
   {
+    id: 'other_fuel',
+    name: '其他使用能源重油 / 燃料油 / 煤',
+    description: '鍋爐、窯爐或發電設備常用燃料，燃燒過程會產生二氧化碳等溫室氣體排放。',
+    requiredDocuments: [
+      '加油單據 *需有年月日'
+    ],
+    scope: 1,
+    route: '/app/other_fuel',
+    exampleImages: ['/佐證/柴油(移動源)1.png']
+  },
+  {
     id: 'urea',
     name: '尿素',
     description: '柴油車輛排氣處理系統使用，減少氮氧化物排放。*若由中油加注，則免填',

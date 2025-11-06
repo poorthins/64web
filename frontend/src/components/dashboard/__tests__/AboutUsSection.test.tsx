@@ -26,11 +26,11 @@ describe('AboutUsSection', () => {
   it('應該顯示 QR Code', () => {
     const { container } = render(<AboutUsSection />)
 
-    // QR Code 現在是使用 background 的 div，位置在 top: 505px, left: 1476px, size: 100x100px
+    // QR Code 現在是使用 background 的 div，位置在 top: 645px, left: 1476px, size: 100x100px
     const allDivs = container.querySelectorAll('div')
     const qrCode = Array.from(allDivs).find(div => {
       const computedStyle = window.getComputedStyle(div)
-      return computedStyle.top === '505px' && computedStyle.left === '1476px' && computedStyle.width === '100px'
+      return computedStyle.top === '645px' && computedStyle.left === '1476px' && computedStyle.width === '100px'
     })
 
     expect(qrCode).toBeTruthy()

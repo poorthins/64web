@@ -75,11 +75,11 @@ const AboutUsSection: React.FC<AboutUsSectionProps> = ({ scale = 1 }) => {
         </p>
       </div>
 
-      {/* QR Code - top: 505px, left: 1476px */}
+      {/* QR Code - top: 555px, left: 1476px */}
       <div
         className="absolute"
         style={{
-          top: '505px',
+          top: '645px',
           left: '1476px',
           width: '100px',
           height: '100px',
@@ -89,12 +89,12 @@ const AboutUsSection: React.FC<AboutUsSectionProps> = ({ scale = 1 }) => {
         }}
       />
 
-      {/* 版權文字 - top: 586px, left: 960px */}
+      {/* 版權文字 - top: 636px, left: 960px */}
       <p
         className="text-black font-extralight absolute"
         style={{
           left: '960px',
-          top: '586px',
+          top: '726px',
           fontSize: '15px',
           lineHeight: 'normal',
           whiteSpace: 'nowrap'

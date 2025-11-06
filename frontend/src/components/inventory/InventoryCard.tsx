@@ -25,7 +25,7 @@ export const InventoryCard: React.FC<InventoryCardProps> = ({
       onClick={handleImageAreaClick}
       className="flex gap-[9px] cursor-pointer"
       style={{
-        height: '239px'
+        height: item.id === 'fire_extinguisher' ? '233px' : '239px'
       }}
     >
       {/* 左側：綠色圖片區域 */}
@@ -33,7 +33,7 @@ export const InventoryCard: React.FC<InventoryCardProps> = ({
         className="relative overflow-hidden"
         style={{
           width: '223px',
-          height: '239px',
+          height: item.id === 'fire_extinguisher' ? '233px' : '239px',
           flexShrink: 0,
           borderRadius: '20px',
           background: '#01E083'
@@ -88,14 +88,13 @@ export const InventoryCard: React.FC<InventoryCardProps> = ({
       <div className="flex flex-col gap-[10px]">
         {/* 右上：灰色資訊區域 */}
         <div
-          className="overflow-hidden"
+          className="overflow-hidden relative"
           style={{
             width: '222px',
-            height: '143px',
+            height: item.id === 'fire_extinguisher' ? '102px' : '143px',
             flexShrink: 0,
             borderRadius: '20px',
-            background: '#EBEDF0',
-            padding: '20px'
+            background: '#EBEDF0'
           }}
         >
           <h3
@@ -104,15 +103,29 @@ export const InventoryCard: React.FC<InventoryCardProps> = ({
               fontFamily: 'Inter',
               fontSize: '20px',
               fontStyle: 'normal',
-              fontWeight: 400,
-              lineHeight: 'normal',
+              fontWeight: 600,
+              lineHeight: item.id === 'other_fuel' ? '1.2' : 'normal',
+              position: 'absolute',
+              left: '20px',
+              top: '20px',
               width: '194px',
               height: '52px',
-              flexShrink: 0,
-              marginBottom: '8px'
+              flexShrink: 0
             }}
           >
-            {item.name}
+            {item.id === 'other_fuel' ? (
+              <>
+                其他使用能源
+                <br />
+                <span style={{
+                  fontSize: '16px'
+                }}>
+                  重油 / 燃料油 / 煤
+                </span>
+              </>
+            ) : (
+              item.name
+            )}
           </h3>
           <p
             style={{
@@ -120,11 +133,15 @@ export const InventoryCard: React.FC<InventoryCardProps> = ({
               fontFamily: 'Inter',
               fontSize: '15px',
               fontStyle: 'normal',
-              fontWeight: 200,
-              lineHeight: 'normal',
-              display: 'flex',
-              width: '194px',
+              fontWeight: 400,
+              lineHeight: '120%',
+              position: 'absolute',
+              left: '17px',
+              right: '10px',
+              bottom: '10px',
+              width: '195px',
               height: '55px',
+              display: 'flex',
               flexDirection: 'column',
               justifyContent: 'flex-end',
               flexShrink: 0
@@ -139,11 +156,13 @@ export const InventoryCard: React.FC<InventoryCardProps> = ({
           className="overflow-hidden"
           style={{
             width: '222px',
-            height: '86px',
+            height: item.id === 'fire_extinguisher' ? '121px' : '86px',
             flexShrink: 0,
             borderRadius: '20px',
             background: '#000',
-            padding: '11px 14px'
+            display: 'flex',
+            alignItems: 'center',
+            paddingLeft: '14px'
           }}
         >
           <ul
@@ -154,11 +173,10 @@ export const InventoryCard: React.FC<InventoryCardProps> = ({
               fontStyle: 'normal',
               fontWeight: 400,
               lineHeight: 'normal',
-              width: '194px',
-              flexShrink: 0,
               listStyle: 'none',
               padding: 0,
-              margin: 0
+              margin: 0,
+              textAlign: 'left'
             }}
           >
             {item.requiredDocuments.map((doc, index) => (

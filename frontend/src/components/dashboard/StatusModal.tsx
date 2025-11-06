@@ -1,4 +1,5 @@
 import React from 'react'
+import { createPortal } from 'react-dom'
 import { X } from 'lucide-react'
 import { StatusType } from './StatusCard'
 
@@ -39,7 +40,7 @@ const MODAL_CONFIG = {
     title: '已退回項目',
     bgColor: 'bg-figma-yellowGreen',
     buttonBg: 'bg-white/20 hover:bg-white/30',
-    buttonText: 'text-white'
+    buttonText: 'text-black'
   }
 }
 
@@ -59,25 +60,24 @@ const StatusModal: React.FC<StatusModalProps> = ({
     onClose()
   }
 
-  return (
-    <>
-      {/* Backdrop */}
+  return createPortal(
+    <div
+      className="fixed inset-0 bg-black/50 flex items-center justify-center p-4"
+      style={{ zIndex: 20000 }}
+      onClick={onClose}
+    >
       <div
-        className="fixed inset-0 bg-black bg-opacity-50 z-40"
-        onClick={onClose}
-      />
-
-      {/* Modal */}
-      <div className="fixed inset-0 flex items-center justify-center z-50 p-4">
-        <div className={`${config.bgColor} rounded-lg shadow-2xl max-w-2xl w-full max-h-[80vh] overflow-hidden`}>
+        className={`${config.bgColor} rounded-lg shadow-2xl max-w-2xl w-full max-h-[80vh] overflow-hidden`}
+        onClick={(e) => e.stopPropagation()}
+      >
           {/* Header */}
-          <div className={`flex items-center justify-between p-6 border-b ${type === 'pending' ? 'border-black/20' : 'border-white/20'}`}>
-            <h2 className={`text-2xl font-bold ${type === 'pending' ? 'text-black' : 'text-white'}`}>
+          <div className={`flex items-center justify-between p-6 border-b ${type === 'pending' || type === 'rejected' ? 'border-black/20' : 'border-white/20'}`}>
+            <h2 className={`text-2xl font-bold ${type === 'pending' || type === 'rejected' ? 'text-black' : 'text-white'}`}>
               {config.title}
             </h2>
             <button
               onClick={onClose}
-              className={`${type === 'pending' ? 'text-black hover:bg-gray-200' : 'text-white hover:bg-white/20'} rounded-full p-2 transition-colors`}
+              className={`${type === 'pending' || type === 'rejected' ? 'text-black hover:bg-gray-200' : 'text-white hover:bg-white/20'} rounded-full p-2 transition-colors`}
             >
               <X size={24} />
             </button>
@@ -86,7 +86,7 @@ const StatusModal: React.FC<StatusModalProps> = ({
           {/* Content */}
           <div className="p-6 overflow-y-auto max-h-[60vh]">
             {items.length === 0 ? (
-              <p className={`text-center py-8 ${type === 'pending' ? 'text-gray-500' : 'text-white/80'}`}>
+              <p className={`text-center py-8 ${type === 'pending' || type === 'rejected' ? 'text-gray-500' : 'text-white/80'}`}>
                 目前沒有{config.title.replace('項目', '')}的項目
               </p>
             ) : (
@@ -110,8 +110,8 @@ const StatusModal: React.FC<StatusModalProps> = ({
             )}
           </div>
         </div>
-      </div>
-    </>
+      </div>,
+    document.body
   )
 }
 

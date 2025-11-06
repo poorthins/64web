@@ -1,4 +1,5 @@
 import React from 'react'
+import { createPortal } from 'react-dom'
 
 interface ImageLightboxProps {
   images: string[]
@@ -21,9 +22,21 @@ export const ImageLightbox: React.FC<ImageLightboxProps> = ({
     setCurrentIndex(prev => (prev < images.length - 1 ? prev + 1 : 0))
   }
 
-  return (
+  // 某些图片需要显示得更小
+  const smallerImages = [
+    '/佐證/柴油(移動源)1.png',
+    '/佐證/尿素添加紀錄表.png',
+    '/佐證/氣體斷路器銘牌.png',
+    '/佐證/SF6填充量、洩漏佐證.png'
+  ]
+
+  const currentImage = images[currentIndex]
+  const isSmaller = smallerImages.includes(currentImage)
+
+  return createPortal(
     <div
-      className="fixed inset-0 bg-black/90 z-50 flex items-center justify-center"
+      className="fixed inset-0 bg-black/90 flex items-center justify-center"
+      style={{ zIndex: 20000 }}
       onClick={onClose}
     >
       <button
@@ -33,41 +46,48 @@ export const ImageLightbox: React.FC<ImageLightboxProps> = ({
         ✕
       </button>
 
-      {images.length > 1 && (
-        <>
+      {/* 圖片和箭頭容器 */}
+      <div className="relative flex items-center">
+        {images.length > 1 && (
           <button
             onClick={(e) => {
               e.stopPropagation()
               handlePrevious()
             }}
-            className="absolute left-4 text-white text-4xl hover:text-gray-300"
+            className="absolute left-[-60px] text-white text-7xl hover:text-gray-300"
+            style={{ top: '50%', transform: 'translateY(-50%)' }}
           >
             ‹
           </button>
+        )}
+
+        <img
+          src={images[currentIndex]}
+          alt={`Image ${currentIndex + 1}`}
+          className={isSmaller ? "max-w-[60vw] max-h-[60vh] object-contain" : "max-w-[90vw] max-h-[90vh] object-contain"}
+          onClick={(e) => e.stopPropagation()}
+        />
+
+        {images.length > 1 && (
           <button
             onClick={(e) => {
               e.stopPropagation()
               handleNext()
             }}
-            className="absolute right-4 text-white text-4xl hover:text-gray-300"
+            className="absolute right-[-60px] text-white text-7xl hover:text-gray-300"
+            style={{ top: '50%', transform: 'translateY(-50%)' }}
           >
             ›
           </button>
-        </>
-      )}
-
-      <img
-        src={images[currentIndex]}
-        alt={`Image ${currentIndex + 1}`}
-        className="max-w-[90vw] max-h-[90vh] object-contain"
-        onClick={(e) => e.stopPropagation()}
-      />
+        )}
+      </div>
 
       {images.length > 1 && (
         <div className="absolute bottom-4 left-1/2 transform -translate-x-1/2 text-white">
           {currentIndex + 1} / {images.length}
         </div>
       )}
-    </div>
+    </div>,
+    document.body
   )
 }

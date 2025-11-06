@@ -49,7 +49,8 @@
       "Bash(npx vitest:*)",
       "Bash(dir \"C:\\Users\\Tim\\Desktop\\python\\64web\\frontend\\public\\佐證\" /B)",
       "WebSearch",
-      "Bash(dir \"C:\\Users\\Tim\\Desktop\\python\\64web\\frontend\\public\" /B)"
+      "Bash(dir \"C:\\Users\\Tim\\Desktop\\python\\64web\\frontend\\public\" /B)",
+      "Bash(nul)"
     ],
     "deny": [],
     "ask": []
