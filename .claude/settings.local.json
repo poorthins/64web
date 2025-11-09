@@ -50,7 +50,10 @@
       "Bash(dir \"C:\\Users\\Tim\\Desktop\\python\\64web\\frontend\\public\\佐證\" /B)",
       "WebSearch",
       "Bash(dir \"C:\\Users\\Tim\\Desktop\\python\\64web\\frontend\\public\" /B)",
-      "Bash(nul)"
+      "Bash(nul)",
+      "Bash(copy DieselPage.tsx +,,)",
+      "mcp__figma-remote-mcp__get_screenshot",
+      "mcp__figma-remote-mcp__get_design_context"
     ],
     "deny": [],
     "ask": []

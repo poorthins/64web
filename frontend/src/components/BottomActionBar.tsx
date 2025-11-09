@@ -1,35 +1,20 @@
-import React from 'react'
-import { Upload, Loader2, Trash2, CheckCircle, Save } from 'lucide-react'
-import StatusIndicator from './StatusIndicator'
+import { Loader2 } from 'lucide-react'
 import { EntryStatus } from './StatusSwitcher'
-import { StatusBannerConfig } from '../hooks/useStatusBanner'
 
 interface BottomActionBarProps {
-  // 狀態管理
+  // 狀態管理（用於判斷是否鎖定）
   currentStatus: EntryStatus
-  currentEntryId: string | null
-  isUpdating: boolean
-  hasSubmittedBefore?: boolean
-  hasAnyData?: boolean  // 新增：是否有填寫資料
-  banner?: StatusBannerConfig | null  // 新增：統一的狀態橫幅配置
-
-  // 操作權限
-  editPermissions: {
-    canEdit: boolean
-    canUploadFiles: boolean
-  }
 
   // 操作狀態
   submitting: boolean
-  saving?: boolean  // 儲存中狀態
 
   // 事件處理
   onSubmit: () => void
-  onSave?: () => void  // 儲存處理函數
+  onSave?: () => void
   onClear: () => void
 
-  // 樣式配置
-  designTokens: any
+  // 容器模式：true 時由父容器控制定位，false 時使用 fixed 定位（預設）
+  containerMode?: boolean
 }
 
 /**
@@ -43,186 +28,99 @@ interface BottomActionBarProps {
  */
 export default function BottomActionBar({
   currentStatus,
-  currentEntryId,
-  isUpdating,
-  hasSubmittedBefore = false,
-  hasAnyData = false,
-  banner,
-  editPermissions,
   submitting,
-  saving = false,
   onSubmit,
   onSave,
   onClear,
-  designTokens
+  containerMode = false
 }: BottomActionBarProps) {
-  
+
   // 權限判斷
   const isReadOnly = currentStatus === 'approved'
   const canEdit = !isReadOnly
-  const canSubmit = !isReadOnly && (!hasSubmittedBefore || !isReadOnly)
+  const canSubmit = !isReadOnly
   
   return (
-    <div className="fixed bottom-0 left-64 xl:left-64 lg:left-56 md:left-48 sm:left-44 right-4 z-40">
-      <div 
-        className="border-t"
-        style={{ 
-          backgroundColor: designTokens.colors.cardBg,
-          borderColor: designTokens.colors.border,
-          boxShadow: designTokens.shadows.lg
+    <div
+      className={containerMode ? "flex justify-center" : "fixed bottom-0 left-0 z-40 flex justify-center"}
+      style={{
+        width: containerMode ? '1920px' : '100vw'
+      }}
+    >
+      <div
+        className="relative"
+        style={{
+          width: '1920px',
+          height: '83px',
+          flexShrink: 0,
+          background: '#3996FE'
         }}
       >
-        <div className="max-w-4xl mx-auto px-6 py-4">
-          <div className="flex items-center justify-between">
-            {/* 左側: 狀態顯示區域 */}
-            <div className="flex items-center gap-2">
-              {/* 狀態指示器 - 優先使用 banner.type，確保圓點顏色與文字同步 */}
-              {banner ? (
-                // 使用 banner 時：自己畫圓點（顏色根據 banner.type 決定）
-                <div
-                  className="w-2 h-2 rounded-full flex-shrink-0"
+            {/* 操作按鈕組 - 按照 Figma 精確定位 */}
+            <div
+              className="absolute flex items-center"
+              style={{
+                left: '1511px',
+                top: '50%',
+                transform: 'translateY(-50%)',
+                gap: '13.71px'
+              }}
+            >
+              {/* 儲存按鈕 - Figma 設計：白色背景 + 黑色文字 */}
+              {canEdit && onSave && (
+                <button
+                  onClick={onSave}
+                  disabled={submitting || !canEdit}
+                  className="flex items-center justify-center font-medium transition-all disabled:opacity-50 disabled:cursor-not-allowed"
                   style={{
-                    backgroundColor:
-                      banner.type === 'approved' ? '#10b981' :
-                      banner.type === 'rejected' ? '#ef4444' :
-                      '#3b82f6'
+                    width: '101.593px',
+                    height: '49px',
+                    background: submitting || !canEdit ? '#E3E3E3' : '#FFFFFF',
+                    color: '#000000',
+                    border: '1px solid #000000',
+                    borderRadius: '8px'
                   }}
-                />
-              ) : hasSubmittedBefore && currentStatus ? (
-                // 沒有 banner：使用原 StatusIndicator
-                <StatusIndicator status={currentStatus} />
-              ) : !hasSubmittedBefore && hasAnyData ? (
-                <div className="w-2 h-2 rounded-full bg-yellow-400 animate-pulse" />
-              ) : !hasSubmittedBefore ? (
-                <div className="w-2 h-2 rounded-full bg-gray-400" />
-              ) : null}
-              
-              {/* 狀態文字 - 優先使用 banner，否則使用原邏輯 */}
-              <span className="text-sm text-gray-600">
-                {banner ? (
-                  // 使用統一的 statusText
-                  <span className={`font-medium ${
-                    banner.type === 'approved' ? 'text-green-600' :
-                    banner.type === 'rejected' ? 'text-red-600' :
-                    banner.type === 'pending' ? 'text-blue-600' :
-                    'text-gray-600'
-                  }`}>
-                    {banner.statusText}
-                  </span>
-                ) : (
-                  // 向後相容：舊邏輯
-                  !hasSubmittedBefore ? (
-                    hasAnyData ? "請完成填寫並提交" : "請開始填寫資料"
-                  ) : (
-                    <>
-                      {currentStatus === 'submitted' && "已提交待審"}
-                      {currentStatus === 'approved' &&
-                        <span className="text-green-600 font-medium">審核通過（已鎖定）</span>
-                      }
-                      {currentStatus === 'rejected' && (
-                        <span className="text-red-600 font-medium">
-                          已退回
-                        </span>
-                      )}
-                    </>
-                  )
-                )}
-              </span>
-
-              {/* 更新中指示器 */}
-              {isUpdating && (
-                <Loader2 className="w-4 h-4 animate-spin text-blue-600 ml-2" />
+                >
+                  <span>儲存</span>
+                </button>
               )}
-            </div>
-            
-            {/* 右側: 操作按鈕 */}
-            <div className="flex items-center space-x-3">
-              {/* 清除按鈕 - 審核通過後隱藏 */}
+
+              {/* 清除按鈕 - 白色背景 + 黑色文字，disabled 時變灰 */}
               {canEdit && (
                 <button
                   onClick={onClear}
-                  disabled={submitting || saving || !canEdit}
-                  className="px-4 py-2 border rounded-lg disabled:cursor-not-allowed transition-colors flex items-center space-x-2 font-medium disabled:opacity-50"
+                  disabled={submitting || !canEdit}
+                  className="flex items-center justify-center font-medium transition-all disabled:opacity-50 disabled:cursor-not-allowed"
                   style={{
-                    borderColor: designTokens.colors.border,
-                    color: designTokens.colors.textSecondary
-                  }}
-                  onMouseEnter={(e) => {
-                    if (!submitting && !saving && canEdit) {
-                      (e.target as HTMLButtonElement).style.backgroundColor = '#f3f4f6';
-                    }
-                  }}
-                  onMouseLeave={(e) => {
-                    if (!submitting && !saving && canEdit) {
-                      (e.target as HTMLButtonElement).style.backgroundColor = 'transparent';
-                    }
+                    width: '101.593px',
+                    height: '49px',
+                    background: submitting || !canEdit ? '#E3E3E3' : '#FFFFFF',
+                    color: '#000000',
+                    border: '1px solid #000000',
+                    borderRadius: '8px'
                   }}
                 >
-                  <Trash2 className="w-4 h-4" />
                   <span>清除</span>
                 </button>
               )}
 
-              {/* 儲存按鈕 */}
-              {canEdit && onSave && (
-                <button
-                  onClick={onSave}
-                  disabled={saving || submitting || !canEdit}
-                  className={`px-5 py-2 rounded-lg transition-colors flex items-center space-x-2 font-medium disabled:opacity-50 ${
-                    canEdit && !saving && !submitting
-                      ? 'bg-blue-600 text-white hover:bg-blue-700 cursor-pointer'
-                      : 'bg-gray-400 text-gray-200 cursor-not-allowed'
-                  }`}
-                >
-                  {saving ? (
-                    <>
-                      <Loader2 className="w-4 h-4 animate-spin" />
-                      <span>儲存中...</span>
-                    </>
-                  ) : (
-                    <>
-                      <Save className="w-4 h-4" />
-                      <span>儲存</span>
-                    </>
-                  )}
-                </button>
-              )}
-
-              {/* 提交按鈕 */}
+              {/* 提交按鈕 - Figma 設計：黑色背景 + 白色文字 */}
               <button
                 onClick={onSubmit}
-                disabled={submitting || saving || !canSubmit}
-                className={`px-6 py-2 rounded-lg transition-colors flex items-center space-x-2 font-medium disabled:opacity-50 ${
-                  canSubmit && !saving && !submitting
-                    ? 'bg-green-600 text-white hover:bg-green-700 cursor-pointer'
-                    : 'bg-gray-400 text-gray-200 cursor-not-allowed'
-                }`}
+                disabled={submitting || !canSubmit}
+                className="flex items-center justify-center font-medium transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                style={{
+                  width: '101.593px',
+                  height: '49px',
+                  background: submitting || !canSubmit ? '#666666' : '#000000',
+                  color: '#FFFFFF',
+                  border: '1px solid #000000',
+                  borderRadius: '8px'
+                }}
               >
-                {currentStatus === 'approved' ? (
-                  <>
-                    <CheckCircle className="w-4 h-4" />
-                    <span>已通過（鎖定）</span>
-                  </>
-                ) : submitting ? (
-                  <>
-                    <Loader2 className="w-4 h-4 animate-spin" />
-                    <span>處理中...</span>
-                  </>
-                ) : (
-                  <>
-                    <Upload className="w-4 h-4" />
-                    <span>
-                      {!hasSubmittedBefore ? '提交填報' :
-                       currentStatus === 'rejected' ? 
-                         (hasAnyData ? '重新提交（已修正）' : '重新提交') :
-                       '更新提交'}
-                    </span>
-                  </>
-                )}
+                <span>提交</span>
               </button>
             </div>
-          </div>
-        </div>
       </div>
     </div>
   )

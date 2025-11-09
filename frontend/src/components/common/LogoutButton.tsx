@@ -46,8 +46,7 @@ const LogoutButton: React.FC<LogoutButtonProps> = ({
         fontStyle: 'normal',
         fontWeight: 700,
         lineHeight: 'normal',
-        borderRadius: '50px',
-        boxShadow: '0px 4px 4px 0px rgba(0, 0, 0, 0.25)'
+        borderRadius: '50px'
       }}
     >
       {isLoading ? '登出中...' : 'Log out'}

@@ -32,6 +32,8 @@
 | `useEnergySubmit` | 提交邏輯（單記錄） | 儲存資料、上傳檔案、錯誤處理 |
 | `useMultiRecordSubmit` | 提交邏輯（多記錄） | 多筆記錄提交、檔案映射、統一訊息 |
 | `useEnergyClear` | 清除邏輯 | 刪除 entry、刪除檔案、清理記憶體 |
+| `useApprovalStatus` | 審核狀態查詢 | 查詢資料庫狀態、返回布林標記 |
+| `useStatusBanner` | 狀態橫幅邏輯 | 決定顯示哪種橫幅、返回配置物件 |
 | `useGhostFileCleaner` | 幽靈檔案清理 | 驗證檔案存在、刪除幽靈檔案記錄 |
 | `useRecordFileMapping` | 多記錄檔案映射 | 用穩定 ID 關聯檔案，防止檔案錯位 |
 | `useReloadWithFileSync` | Reload 同步延遲 | 處理 reload 後的檔案同步問題 |
@@ -1259,6 +1261,505 @@ export default function WD40Page() {
   )
 }
 ```
+
+---
+
+## useApprovalStatus + useStatusBanner - 審核狀態顯示
+
+### 設計理念
+
+**問題：每個頁面都要顯示審核狀態橫幅（通過/退回/待審核），導致大量重複程式碼。**
+
+**解決方案：Hook + 組件 分離設計**
+
+```
+資料層（Hook 1）：useApprovalStatus
+  ↓ 查詢資料庫，返回狀態布林值
+邏輯層（Hook 2）：useStatusBanner
+  ↓ 決定顯示哪種橫幅，返回配置物件
+視圖層（組件）：StatusBanner
+  ↓ 渲染橫幅 UI
+```
+
+**優點：**
+- ✅ 單一職責：每層各司其職
+- ✅ 可組合：Hook 之間獨立，可自由組合
+- ✅ 零重複：14 個頁面共用同一套邏輯和 UI
+- ✅ 易維護：改文案只需改一個地方
+
+---
+
+### API 定義
+
+#### useApprovalStatus（資料查詢）
+
+```typescript
+const {
+  // 狀態布林值
+  isApproved,        // 是否已通過（boolean）
+  isRejected,        // 是否已退回（boolean）
+  isPending,         // 是否待審核（boolean）
+  isSaved,           // 是否已暫存（boolean）
+
+  // 詳細資訊
+  status,            // 原始狀態（'approved' | 'rejected' | 'submitted' | 'saved' | null）
+  reviewNotes,       // 審核備註（string）
+  reviewedAt,        // 審核時間（string）
+  reviewerId,        // 審核者 ID（string）
+
+  // 控制
+  loading,           // 載入中（boolean）
+  error,             // 錯誤訊息（string | null）
+  reload             // 重新查詢（function）
+
+} = useApprovalStatus(pageKey, year)
+```
+
+#### useStatusBanner（邏輯判斷）
+
+```typescript
+const banner = useStatusBanner(
+  approvalStatus,  // useApprovalStatus 的返回值
+  isReviewMode     // 是否為審核模式（審核模式不顯示橫幅）
+)
+
+// 返回值：StatusBannerConfig | null
+interface StatusBannerConfig {
+  type: 'approved' | 'rejected' | 'pending' | 'saved'
+  icon: string           // 🎉 | ⚠️ | 📋 | 💾
+  title: string          // "恭喜您已審核通過！"
+  statusText: string     // "已審核通過"（簡短版，給底部狀態欄用）
+  message?: string       // "此填報已完成審核..."
+  reason?: string        // 退回原因（只有 rejected 時有值）
+  reviewedAt?: string    // 審核時間（只有 approved/rejected 時有值）
+}
+```
+
+#### StatusBanner 組件（UI 渲染）
+
+```typescript
+<StatusBanner config={banner} />
+```
+
+---
+
+### 使用範例
+
+#### 基本使用（3 行搞定）
+
+```tsx
+// 任何一個頁面
+import { useApprovalStatus } from '../../hooks/useApprovalStatus'
+import { useStatusBanner } from '../../hooks/useStatusBanner'
+import { StatusBanner } from '../../components/StatusBanner'
+
+function DieselPage() {
+  const pageKey = 'diesel'
+  const year = 2025
+  const isReviewMode = searchParams.get('mode') === 'review'
+
+  // 1. 查詢審核狀態
+  const approvalStatus = useApprovalStatus(pageKey, year)
+
+  // 2. 決定顯示什麼橫幅
+  const banner = useStatusBanner(approvalStatus, isReviewMode)
+
+  return (
+    <div>
+      {/* 3. 渲染橫幅 */}
+      <StatusBanner config={banner} />
+
+      {/* 表單內容 */}
+      <div>柴油使用記錄...</div>
+    </div>
+  )
+}
+```
+
+#### 完整範例（含權限控制）
+
+```tsx
+function LPGPage() {
+  const pageKey = 'lpg'
+  const year = 2025
+  const isReviewMode = searchParams.get('mode') === 'review'
+
+  // 查詢狀態
+  const approvalStatus = useApprovalStatus(pageKey, year)
+  const banner = useStatusBanner(approvalStatus, isReviewMode)
+
+  // 權限判斷
+  const canEdit = !approvalStatus.isApproved  // 審核通過後不能編輯
+
+  return (
+    <div>
+      {/* 狀態橫幅 */}
+      <StatusBanner config={banner} />
+
+      {/* 表單（根據權限決定是否可編輯） */}
+      <form>
+        <input
+          type="number"
+          disabled={!canEdit}  // 審核通過後鎖定
+        />
+
+        <button
+          type="submit"
+          disabled={!canEdit}
+        >
+          {approvalStatus.isApproved ? '已鎖定' : '提交'}
+        </button>
+      </form>
+
+      {/* 載入中 */}
+      {approvalStatus.loading && <div>載入中...</div>}
+
+      {/* 錯誤訊息 */}
+      {approvalStatus.error && (
+        <div className="text-red-500">
+          {approvalStatus.error}
+        </div>
+      )}
+    </div>
+  )
+}
+```
+
+---
+
+### 橫幅樣式對照表
+
+| 狀態 | type | icon | 顏色 | title | message |
+|------|------|------|------|-------|---------|
+| 已通過 | `approved` | 🎉 | 綠色 | 恭喜您已審核通過！ | 此填報已完成審核，資料已鎖定無法修改。 |
+| 已退回 | `rejected` | ⚠️ | 紅色 | 填報已被退回 | 請修正後重新提交 + 退回原因 |
+| 待審核 | `pending` | 📋 | 藍色 | 等待審核中 | 您的填報已提交，請等待管理員審核。 |
+| 已暫存 | `saved` | 💾 | 灰色 | 資料已暫存 | 您的資料已儲存，可隨時修改後提交審核。 |
+
+---
+
+### 資料流程圖
+
+```
+使用者打開頁面
+  ↓
+useApprovalStatus('diesel', 2025)
+  ↓
+查詢 energy_entries 表
+  .eq('page_key', 'diesel')
+  .eq('period_year', 2025)
+  .eq('owner_id', user.id)
+  ↓
+返回 {
+  isApproved: false,
+  isPending: true,
+  status: 'submitted',
+  ...
+}
+  ↓
+useStatusBanner(approvalStatus, false)
+  ↓
+判斷邏輯：
+  if (isPending) return {
+    type: 'pending',
+    icon: '📋',
+    title: '等待審核中',
+    statusText: '已提交待審核',
+    message: '您的填報已提交...'
+  }
+  ↓
+<StatusBanner config={banner} />
+  ↓
+渲染藍色橫幅：
+  📋 等待審核中
+  您的填報已提交，請等待管理員審核。
+```
+
+---
+
+### 常見問題
+
+#### Q1: 為什麼需要兩個 Hook？
+
+**A:** 單一職責原則。
+
+- `useApprovalStatus` → 負責資料查詢（從資料庫取狀態）
+- `useStatusBanner` → 負責業務邏輯（決定顯示什麼）
+
+**如果只有一個 Hook：**
+```tsx
+// ❌ 混亂：資料查詢和業務邏輯混在一起
+const banner = useApprovalStatus(pageKey, year)
+```
+
+**分開後：**
+```tsx
+// ✅ 清晰：各司其職
+const approvalStatus = useApprovalStatus(pageKey, year)  // 純資料
+const banner = useStatusBanner(approvalStatus)           // 純邏輯
+```
+
+#### Q2: 為什麼還需要 StatusBanner 組件？
+
+**A:** Hook 不能返回 JSX，組件才能。
+
+- Hook（.ts）→ 返回資料和函數
+- 組件（.tsx）→ 返回 UI
+
+**如果沒有組件：**
+```tsx
+// ❌ 每個頁面都要複製這段 JSX
+{banner && (
+  <div className={`border-l-4 p-4 ${colors}`}>
+    <div>{banner.icon}</div>
+    <p>{banner.title}</p>
+    {/* ... 30 行 JSX ... */}
+  </div>
+)}
+```
+
+**有組件後：**
+```tsx
+// ✅ 一行搞定
+<StatusBanner config={banner} />
+```
+
+#### Q3: 審核模式下為什麼不顯示橫幅？
+
+**A:** 審核模式是給管理員看的，不需要橫幅。
+
+```tsx
+const banner = useStatusBanner(approvalStatus, isReviewMode)
+
+// isReviewMode = true → 返回 null（不顯示）
+// isReviewMode = false → 返回橫幅配置（顯示）
+```
+
+管理員進入審核頁面時，URL 是 `?mode=review`，`isReviewMode = true`，此時橫幅不顯示。
+
+#### Q4: 如何手動刷新狀態？
+
+**A:** 使用 `reload()` 函數。
+
+```tsx
+const { reload, ...approvalStatus } = useApprovalStatus(pageKey, year)
+
+// 提交後重新查詢狀態
+const handleSubmit = async () => {
+  await submitData()
+  reload()  // 重新查詢，橫幅會自動更新
+}
+```
+
+---
+
+### 重構前後對比
+
+#### 重構前（垃圾）
+
+```tsx
+// DieselPage.tsx - 80 行重複程式碼
+{!isReviewMode && approvalStatus.isSaved && (
+  <div className="bg-blue-100 border-l-4 border-blue-500 text-blue-700 p-4 mb-6">
+    <div className="flex items-center">
+      <div className="text-2xl mr-3">💾</div>
+      <div>
+        <p className="font-bold text-lg">資料已暫存</p>
+        <p className="text-sm mt-1">您的資料已儲存...</p>
+      </div>
+    </div>
+  </div>
+)}
+
+{!isReviewMode && approvalStatus.isApproved && (
+  <div className="bg-green-100 border-l-4 border-green-500 text-green-700 p-4 mb-6">
+    {/* ... 20 行 ... */}
+  </div>
+)}
+
+{!isReviewMode && approvalStatus.isRejected && (
+  <div className="bg-red-100 border-l-4 border-red-500 text-red-700 p-4 mb-6">
+    {/* ... 30 行 ... */}
+  </div>
+)}
+
+{!isReviewMode && approvalStatus.isPending && (
+  <div className="bg-green-100 border-l-4 border-green-500 text-green-700 p-4 mb-6">
+    {/* ... 20 行 ... */}
+  </div>
+)}
+
+// LPGPage.tsx - 再複製一遍（80 行）
+// GasolinePage.tsx - 再複製一遍（80 行）
+// ... 14 個頁面 × 80 行 = 1120 行垃圾
+```
+
+**問題：**
+- 1120 行重複程式碼
+- 改個文案要改 14 個檔案
+- 條件判斷散落各處
+
+#### 重構後（好）
+
+```tsx
+// 所有頁面（3 行）
+const approvalStatus = useApprovalStatus(pageKey, year)
+const banner = useStatusBanner(approvalStatus, isReviewMode)
+<StatusBanner config={banner} />
+
+// 14 個頁面 × 3 行 = 42 行
+// + Hook（100 行）+ 組件（50 行）= 192 行
+```
+
+**改善：**
+- 消除 928 行垃圾程式碼
+- 改文案只需改 1 個 Hook
+- 邏輯集中管理
+
+---
+
+## useReviewMode - 審核模式檢測
+
+> **注意：** 可重用組件文檔已移至 [COMPONENTS.md](./COMPONENTS.md)，包含 LoadingPage、StatusBanner、ConfirmClearModal、SuccessModal 等 4 個組件的詳細說明。
+
+### 用途
+
+統一管理審核模式的 URL 參數讀取邏輯。所有能源填報頁面都需要判斷是否為「審核模式」（管理員查看用戶提交的資料）。
+
+### 文件位置
+
+```
+frontend/src/hooks/useReviewMode.ts
+```
+
+### 問題
+
+**Before（每個頁面重複寫）：**
+```tsx
+const [searchParams] = useSearchParams()
+const isReviewMode = searchParams.get('mode') === 'review'
+const reviewEntryId = searchParams.get('entryId')
+const reviewUserId = searchParams.get('userId')
+```
+
+- 每個頁面複製貼上這 3 行
+- URL 參數名稱分散在 15 個文件
+- 修改參數名需要改 15 個地方
+
+### 返回值
+
+```typescript
+{
+  isReviewMode: boolean         // 是否為審核模式
+  reviewEntryId: string | null  // 待審核的記錄 ID
+  reviewUserId: string | null   // 填報者 ID
+}
+```
+
+### URL 參數
+
+當管理員點擊「審核此筆記錄」時，URL 格式如下：
+
+```
+/app/diesel?mode=review&entryId=abc123&userId=user456
+```
+
+- `mode=review` - 啟用審核模式
+- `entryId=abc123` - 要審核的記錄 ID
+- `userId=user456` - 填報者的用戶 ID
+
+### 使用方式
+
+```tsx
+import { useReviewMode } from '../../hooks/useReviewMode'
+
+function DieselPage() {
+  const { isReviewMode, reviewEntryId, reviewUserId } = useReviewMode()
+
+  // 根據審核模式調整 UI
+  if (isReviewMode) {
+    return <h1>管理員審核模式 - 查看用戶 {reviewUserId} 的填報</h1>
+  }
+
+  return <h1>柴油使用量填報</h1>
+}
+```
+
+### 實際應用場景
+
+#### 場景 1：控制頁面標題
+
+```tsx
+const { isReviewMode } = useReviewMode()
+
+<h1>柴油使用量填報</h1>
+<p>
+  {isReviewMode
+    ? '管理員審核模式 - 檢視填報內容和相關檔案'
+    : '請上傳加油單或發票作為佐證文件'
+  }
+</p>
+```
+
+#### 場景 2：載入特定記錄
+
+```tsx
+const { isReviewMode, reviewEntryId } = useReviewMode()
+
+const { entry, loading } = useEnergyData(
+  'diesel',
+  year,
+  isReviewMode ? reviewEntryId : undefined  // 審核模式載入指定記錄
+)
+```
+
+#### 場景 3：控制編輯權限
+
+```tsx
+const { isReviewMode } = useReviewMode()
+const { role } = useRole()
+
+// 審核模式下，只有管理員可編輯
+const isReadOnly = isReviewMode && role !== 'admin'
+
+<button disabled={isReadOnly}>儲存</button>
+```
+
+#### 場景 4：隱藏狀態橫幅
+
+```tsx
+const { isReviewMode } = useReviewMode()
+
+// 審核模式下不顯示狀態橫幅
+<StatusBanner
+  approvalStatus={approvalStatus}
+  isReviewMode={isReviewMode}
+/>
+```
+
+### Before vs. After
+
+**Before (每個頁面 3 行):**
+```tsx
+// DieselPage.tsx
+const [searchParams] = useSearchParams()
+const isReviewMode = searchParams.get('mode') === 'review'
+const reviewEntryId = searchParams.get('entryId')
+
+// LPGPage.tsx
+const [searchParams] = useSearchParams()
+const isReviewMode = searchParams.get('mode') === 'review'
+const reviewEntryId = searchParams.get('entryId')
+
+// ... 重複 15 次
+```
+
+**After (每個頁面 1 行):**
+```tsx
+const { isReviewMode, reviewEntryId, reviewUserId } = useReviewMode()
+```
+
+**成果：** 3 行 → 1 行，消除 45 行重複代碼
 
 ---
 

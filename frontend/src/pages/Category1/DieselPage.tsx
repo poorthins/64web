@@ -11,17 +11,22 @@
  * - 柴油頁面：多筆記錄 → page_key + record_index 組合識別
  */
 
-import { useState, useEffect, useMemo, useCallback } from 'react';
-import { useNavigate, useSearchParams } from 'react-router-dom'
-import { AlertCircle, X, Trash2, Eye, Loader2, CheckCircle, Download } from 'lucide-react'
+import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
+import { createPortal } from 'react-dom';
+import { useNavigate } from 'react-router-dom'
+import { X, Trash2, Eye, Loader2, Download, Pencil } from 'lucide-react'
 import EvidenceUpload from '../../components/EvidenceUpload';
 import { MemoryFile } from '../../components/EvidenceUpload';
 import { EntryStatus } from '../../components/StatusSwitcher';
-import BottomActionBar from '../../components/BottomActionBar';
 import ReviewSection from '../../components/ReviewSection'
+import LoadingPage from '../../components/LoadingPage'
+import ConfirmClearModal from '../../components/ConfirmClearModal'
+import SuccessModal from '../../components/SuccessModal'
+import SharedPageLayout from '../../layouts/SharedPageLayout'
 import { useEditPermissions } from '../../hooks/useEditPermissions';
 import { useFrontendStatus } from '../../hooks/useFrontendStatus';
 import { useApprovalStatus } from '../../hooks/useApprovalStatus';
+import { useReviewMode } from '../../hooks/useReviewMode'
 import { useEnergyData } from '../../hooks/useEnergyData'
 import { useMultiRecordSubmit } from '../../hooks/useMultiRecordSubmit'
 import { useEnergyClear } from '../../hooks/useEnergyClear'
@@ -39,6 +44,41 @@ import { DocumentHandler } from '../../services/documentHandler';
 import Toast, { ToastType } from '../../components/Toast';
 import { generateRecordId } from '../../utils/idGenerator';
 
+// ==================== 常數定義 ====================
+const LAYOUT_CONSTANTS = {
+  // 容器尺寸
+  CONTAINER_WIDTH: 1102,
+  CONTAINER_MIN_HEIGHT: 555,
+
+  // 編輯區 - 左側上傳區
+  EDITOR_UPLOAD_WIDTH: 358,
+  EDITOR_UPLOAD_HEIGHT: 308,
+
+  // 編輯區 - 右側表單
+  EDITOR_FORM_WIDTH: 599,
+  EDITOR_FORM_MIN_HEIGHT: 250,
+  EDITOR_FORM_HEADER_HEIGHT: 58,
+
+  // 間距
+  EDITOR_GAP: 47,
+  SECTION_TOP_MARGIN: 103,
+  SECTION_BOTTOM_MARGIN: 34,
+  LIST_TOP_MARGIN: 116.75,
+
+  // 檔案上傳
+  MAX_FILES_PER_GROUP: 1,
+  MAX_FILE_SIZE_MB: 10,
+
+  // 預設記錄數
+  DEFAULT_RECORDS_COUNT: 3,
+
+  // 列表項目
+  GROUP_LIST_WIDTH: 924,
+  GROUP_LIST_HEIGHT: 87,
+
+  // z-index
+  MODAL_Z_INDEX: 20000
+} as const
 
 interface DieselRecord {
   id: string;  // ⭐ 改為 string 型別（穩定的 recordId）
@@ -49,22 +89,175 @@ interface DieselRecord {
   groupId?: string;          // ⭐ 群組 ID（undefined = 未上傳區）
 }
 
+// ==================== 工具函數 ====================
+
+/**
+ * 建立指定數量的空白記錄
+ * @param count - 記錄數量，預設為 3
+ * @returns DieselRecord[] - 空白記錄陣列
+ */
+const createEmptyRecords = (count: number = LAYOUT_CONSTANTS.DEFAULT_RECORDS_COUNT): DieselRecord[] => {
+  return Array.from({ length: count }, () => ({
+    id: generateRecordId(),
+    date: '',
+    quantity: 0,
+    evidenceFiles: [],
+    memoryFiles: [],
+    groupId: undefined
+  }))
+}
+
+/**
+ * 檔案類型定義
+ */
+type FileType = 'image' | 'pdf' | 'excel' | 'word' | 'other' | 'none'
+
+/**
+ * 判斷檔案類型
+ * @param mimeType - MIME 類型
+ * @param fileName - 檔案名稱
+ * @returns FileType - 檔案類型
+ */
+const getFileType = (mimeType?: string, fileName?: string): FileType => {
+  if (!mimeType && !fileName) return 'none'
+
+  // 圖片
+  if (mimeType?.startsWith('image/')) return 'image'
+
+  // PDF
+  if (mimeType === 'application/pdf') return 'pdf'
+
+  // Excel
+  if (
+    mimeType?.includes('excel') ||
+    mimeType?.includes('spreadsheet') ||
+    fileName?.match(/\.(xlsx?|xls)$/i)
+  ) return 'excel'
+
+  // Word
+  if (
+    mimeType?.includes('wordprocessingml') ||
+    mimeType === 'application/msword' ||
+    fileName?.match(/\.(docx?|doc)$/i)
+  ) return 'word'
+
+  return 'other'
+}
+
+/**
+ * 渲染檔案類型 icon
+ * @param fileType - 檔案類型
+ * @returns JSX.Element - icon 元素
+ */
+const renderFileTypeIcon = (fileType: FileType): JSX.Element => {
+  switch (fileType) {
+    case 'pdf':
+      return (
+        <svg width="36" height="36" viewBox="0 0 24 24" fill="none">
+          <path d="M14 2H6C5.46957 2 4.96086 2.21071 4.58579 2.58579C4.21071 2.96086 4 3.46957 4 4V20C4 20.5304 4.21071 21.0391 4.58579 21.4142C4.96086 21.7893 5.46957 22 6 22H18C18.5304 22 19.0391 21.7893 19.4142 21.4142C19.7893 21.0391 20 20.5304 20 20V8L14 2Z" stroke="#DC2626" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+          <path d="M14 2V8H20" stroke="#DC2626" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+          <text x="12" y="17" fontSize="7" fill="#DC2626" textAnchor="middle" fontWeight="bold">PDF</text>
+        </svg>
+      )
+
+    case 'excel':
+      return (
+        <svg width="36" height="36" viewBox="0 0 24 24" fill="none">
+          <path d="M14 2H6C5.46957 2 4.96086 2.21071 4.58579 2.58579C4.21071 2.96086 4 3.46957 4 4V20C4 20.5304 4.21071 21.0391 4.58579 21.4142C4.96086 21.7893 5.46957 22 6 22H18C18.5304 22 19.0391 21.7893 19.4142 21.4142C19.7893 21.0391 20 20.5304 20 20V8L14 2Z" stroke="#16A34A" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+          <path d="M14 2V8H20" stroke="#16A34A" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+          <text x="12" y="17" fontSize="6.5" fill="#16A34A" textAnchor="middle" fontWeight="bold">XLS</text>
+        </svg>
+      )
+
+    case 'word':
+      return (
+        <svg width="36" height="36" viewBox="0 0 24 24" fill="none">
+          <path d="M14 2H6C5.46957 2 4.96086 2.21071 4.58579 2.58579C4.21071 2.96086 4 3.46957 4 4V20C4 20.5304 4.21071 21.0391 4.58579 21.4142C4.96086 21.7893 5.46957 22 6 22H18C18.5304 22 19.0391 21.7893 19.4142 21.4142C19.7893 21.0391 20 20.5304 20 20V8L14 2Z" stroke="#2563EB" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+          <path d="M14 2V8H20" stroke="#2563EB" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+          <text x="12" y="17" fontSize="6.5" fill="#2563EB" textAnchor="middle" fontWeight="bold">DOC</text>
+        </svg>
+      )
+
+    case 'other':
+      return (
+        <svg width="36" height="36" viewBox="0 0 24 24" fill="none">
+          <path d="M14 2H6C5.46957 2 4.96086 2.21071 4.58579 2.58579C4.21071 2.96086 4 3.46957 4 4V20C4 20.5304 4.21071 21.0391 4.58579 21.4142C4.96086 21.7893 5.46957 22 6 22H18C18.5304 22 19.0391 21.7893 19.4142 21.4142C19.7893 21.0391 20 20.5304 20 20V8L14 2Z" stroke="#666666" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+          <path d="M14 2V8H20" stroke="#666666" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+        </svg>
+      )
+
+    case 'none':
+      return <span className="text-[24px]">📁</span>
+
+    default:
+      return <span className="text-[24px]">📄</span>
+  }
+}
+
+/**
+ * 準備提交/儲存的資料
+ * @param dieselData - 柴油使用記錄
+ * @returns 準備好的資料物件
+ */
+const prepareSubmissionData = (dieselData: DieselRecord[]) => {
+  const totalQuantity = dieselData.reduce((sum, item) => sum + item.quantity, 0)
+
+  // 清理 payload：只送基本資料，移除 File 物件
+  const cleanedDieselData = dieselData.map((r: DieselRecord) => ({
+    id: r.id,
+    date: r.date,
+    quantity: r.quantity,
+    groupId: r.groupId
+  }))
+
+  // 建立群組 → recordIds 映射表
+  const groupRecordIds = new Map<string, string[]>()
+  dieselData.forEach(record => {
+    if (record.groupId) {
+      if (!groupRecordIds.has(record.groupId)) {
+        groupRecordIds.set(record.groupId, [])
+      }
+      groupRecordIds.get(record.groupId)!.push(record.id)
+    }
+  })
+
+  // 去重：每個群組只保留第一個 record 的 memoryFiles
+  const seenGroupIds = new Set<string>()
+  const deduplicatedRecordData = dieselData.map(record => {
+    const allRecordIds = record.groupId ? groupRecordIds.get(record.groupId) : [record.id]
+
+    if (record.groupId && seenGroupIds.has(record.groupId)) {
+      return { ...record, memoryFiles: [], allRecordIds }
+    }
+    if (record.groupId) {
+      seenGroupIds.add(record.groupId)
+    }
+    return { ...record, allRecordIds }
+  })
+
+  return {
+    totalQuantity,
+    cleanedDieselData,
+    deduplicatedRecordData
+  }
+}
+
 export default function DieselPage() {
   const navigate = useNavigate()
-  const [searchParams] = useSearchParams()
 
   // 審核模式檢測
-  const isReviewMode = searchParams.get('mode') === 'review'
-  const reviewEntryId = searchParams.get('entryId')
-  const reviewUserId = searchParams.get('userId')
+  const { isReviewMode, reviewEntryId, reviewUserId } = useReviewMode()
+
+  // 文件上傳的 ref
+  const fileInputRef = useRef<HTMLInputElement>(null)
 
   const pageKey = 'diesel'
   const [year] = useState(new Date().getFullYear())
   const [initialStatus, setInitialStatus] = useState<EntryStatus>('submitted')
   const [currentEntryId, setCurrentEntryId] = useState<string | null>(null)
   const { executeSubmit, submitting } = useSubmitGuard()
-  const [hasSubmittedBefore, setHasSubmittedBefore] = useState(false)
   const [showSuccessModal, setShowSuccessModal] = useState(false)
+  const [successModalType, setSuccessModalType] = useState<'save' | 'submit'>('submit')
   const [showClearConfirmModal, setShowClearConfirmModal] = useState(false)
 
   // 圖片放大 lightbox
@@ -97,7 +290,7 @@ export default function DieselPage() {
   // 審核模式下只有管理員可編輯
   const isReadOnly = isReviewMode && role !== 'admin'
 
-  const editPermissions = useEditPermissions(currentStatus, isReadOnly, role)
+  const editPermissions = useEditPermissions(currentStatus, isReadOnly, role ?? undefined)
 
   // 資料載入 Hook
   const entryIdToLoad = isReviewMode && reviewEntryId ? reviewEntryId : undefined
@@ -149,18 +342,25 @@ export default function DieselPage() {
     removeRecordMapping
   } = useRecordFileMapping(pageKey, currentEntryId)
 
-  // ⭐ 初始化時給一個 groupId
-  const [initialGroupId] = useState(generateRecordId())
-  const [dieselData, setDieselData] = useState<DieselRecord[]>([
-    {
-      id: generateRecordId(),
-      date: '',
-      quantity: 0,
-      evidenceFiles: [],
-      memoryFiles: [],
-      groupId: initialGroupId  // ⭐ 給第一筆記錄一個 groupId
-    },
-  ]);
+  // ⭐ 新架構：分離「當前編輯」和「已保存群組」
+  // 當前正在編輯的群組（對應 Figma 上方「使用數據」區）
+  const [currentEditingGroup, setCurrentEditingGroup] = useState<{
+    groupId: string | null      // null = 新增模式，有值 = 編輯模式
+    records: DieselRecord[]     // 該群組的記錄
+    memoryFiles: MemoryFile[]   // 暫存佐證
+  }>({
+    groupId: null,
+    records: createEmptyRecords(),
+    memoryFiles: []
+  })
+
+  // 已保存的群組（對應 Figma 下方「資料列表」區）
+  const [savedGroups, setSavedGroups] = useState<DieselRecord[]>([])
+
+  // ⭐ 保留舊的 dieselData（提交時用）
+  const dieselData = useMemo(() => {
+    return savedGroups
+  }, [savedGroups])
 
   // 檢查是否有填寫任何資料
   const hasAnyData = useMemo(() => {
@@ -171,61 +371,33 @@ export default function DieselPage() {
     )
   }, [dieselData])
 
-  // 第一步：載入記錄資料（不等檔案）
+  // ⭐ TODO: 重構載入邏輯以配合新架構
+  // 第一步：載入記錄資料
   useEffect(() => {
     if (loadedEntry && !dataLoading) {
       const entryStatus = loadedEntry.status as EntryStatus
       setInitialStatus(entryStatus)
       setCurrentEntryId(loadedEntry.id)
-      setHasSubmittedBefore(true)
-
-      // ⭐ 同步前端狀態
       setCurrentStatus(entryStatus)
 
       // 從 payload 取得柴油使用資料
       if (loadedEntry.payload?.dieselData) {
-        // 確保 dieselData 是陣列
         const dataArray = Array.isArray(loadedEntry.payload.dieselData)
           ? loadedEntry.payload.dieselData
           : []
 
         if (dataArray.length > 0) {
-          // 先載入記錄資料，檔案欄位暫時為空（不阻塞顯示）
           const updated = dataArray.map((item: any) => ({
             ...item,
-            id: String(item.id || generateRecordId()),  // ⭐ 確保 id 是字串型別
-            evidenceFiles: [],  // 先空著，稍後由檔案載入 useEffect 分配
+            id: String(item.id || generateRecordId()),
+            evidenceFiles: [],
             memoryFiles: [],
           }))
 
-          // ⭐ 檢查是否已有空白記錄，沒有才添加
-          const hasBlankRecord = updated.some((r: DieselRecord) =>
-            r.date.trim() === '' &&
-            r.quantity === 0 &&
-            (!r.memoryFiles || r.memoryFiles.length === 0)
-          )
+          // ⭐ 載入到 savedGroups（新架構）
+          setSavedGroups(updated)
 
-          let finalData = updated
-          if (!hasBlankRecord) {
-            const newGroupId = generateRecordId()
-            const blankRecord: DieselRecord = {
-              id: generateRecordId(),
-              date: '',
-              quantity: 0,
-              evidenceFiles: [],
-              memoryFiles: [],
-              groupId: newGroupId
-            }
-            finalData = [blankRecord, ...updated]
-            console.log(`🔍 [DieselPage] 添加空白群組`)
-          } else {
-            console.log(`🔍 [DieselPage] 已有空白群組，不重複添加`)
-          }
-
-          console.log(`🔍 [DieselPage] Loaded records: ${updated.length}`)
-          setDieselData(finalData)
-
-          // ⭐ 載入檔案映射表
+          // 載入檔案映射表
           const payload = loadedEntry.payload || loadedEntry.extraPayload
           if (payload) {
             loadFileMapping(payload)
@@ -236,46 +408,28 @@ export default function DieselPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loadedEntry, dataLoading])
 
-  // 第二步：檔案載入後分配到記錄（非破壞性更新）
+  // 第二步：檔案載入後分配到記錄
   useEffect(() => {
-    // ⭐ 等待檔案載入完成（避免在 files = [] 時執行）
-    if (dataLoading) {
-      console.log('🔍 [DieselPage] 等待檔案載入中...')
-      return
-    }
+    if (dataLoading) return
 
-    if (loadedFiles.length > 0 && dieselData.length > 1) {
-      // 檔案過濾：只取 file_type='other' 且 page_key === pageKey 的檔案
+    if (loadedFiles.length > 0 && savedGroups.length > 0) {
       const dieselFiles = loadedFiles.filter(f =>
         f.file_type === 'other' && f.page_key === pageKey
       )
 
       if (dieselFiles.length > 0) {
-        // ✅ 先清理所有檔案,再分配給記錄(避免 EvidenceUpload 載入幽靈檔案)
         const cleanAndAssignFiles = async () => {
-          console.log('🔍 [DieselPage] Starting ghost file cleanup for', dieselFiles.length, 'files')
-
-          // 第一階段：清理所有幽靈檔案（使用 Hook）
           const validDieselFiles = await cleanFiles(dieselFiles)
-          console.log('✅ [DieselPage] Cleanup complete. Valid files:', validDieselFiles.length)
 
-          // ⭐ 第二階段：使用 recordId 分配檔案（非破壞性更新）
-          setDieselData(prev => {
-            console.log(`📂 [DieselPage] Updating ${prev.length} records with files`)
-
-            const updatedRows = prev.map((item) => {
-              // ✅ 使用 recordId 查找檔案，取代陣列索引
+          setSavedGroups(prev => {
+            return prev.map((item) => {
               const filesForThisRecord = getRecordFiles(item.id, validDieselFiles)
-
               return {
-                ...item,  // ✅ 保留所有原有資料（id, date, quantity）
+                ...item,
                 evidenceFiles: filesForThisRecord,
-                memoryFiles: []  // ✅ 清空 memoryFiles，避免重複提交
+                memoryFiles: []
               }
             })
-
-            console.log(`✅ [DieselPage] Assigned files to ${updatedRows.filter((r: DieselRecord) => r.evidenceFiles && r.evidenceFiles.length > 0).length} records`)
-            return updatedRows
           })
         }
 
@@ -285,164 +439,179 @@ export default function DieselPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loadedFiles, pageKey, dataLoading])
 
-  const addNewEntry = () => {
-    const lastRecord = dieselData[dieselData.length - 1]
+  // ⭐ 新架構的 Helper Functions
 
-    const newEntry: DieselRecord = {
-      id: generateRecordId(),  // ⭐ 使用 generateRecordId
-      date: '',
-      quantity: 0,
-      evidenceFiles: lastRecord?.evidenceFiles || [],  // ✅ 自動帶入上一筆的檔案
-      memoryFiles: lastRecord?.memoryFiles || []  // ✅ 也複製記憶體檔案
-    };
-    setDieselData(prev => [...prev, newEntry]);
-  };
+  // 處理檔案選擇（整個白色框框點擊上傳）
+  const handleFileInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const selectedFiles = e.target.files
+    if (!selectedFiles || selectedFiles.length === 0) return
 
-  const removeEntry = (id: string) => {  // ⭐ 改為 string 型別
-    if (dieselData.length > 1) {
-      // ⭐ 移除檔案映射
-      removeRecordMapping(id)
-      setDieselData(prev => prev.filter((r: DieselRecord) => r.id !== id))
-    }
-  };
-
-  const updateEntry = useCallback((id: string, field: keyof DieselRecord, value: any) => {  // ⭐ 改為 string 型別
-    setDieselData(prev => prev.map(item => item.id === id ? { ...item, [field]: value } : item));
-  }, []);
-
-  // 為每個記錄建立穩定的 callback
-  const handleMemoryFilesChange = useCallback((id: string) => {  // ⭐ 改為 string 型別
-    return (files: MemoryFile[]) => updateEntry(id, 'memoryFiles', files);
-  }, [updateEntry]);
-
-  // ✅ 刪除佐證（清空所有使用該檔案的記錄，群組保留）
-  const deleteEvidence = async (evidenceId: string) => {
-    try {
-      // Check if admin in review mode
-      if (role === 'admin' && isReviewMode) {
-        await adminDeleteEvidence(evidenceId)
-      } else {
-        await deleteEvidenceFile(evidenceId)
-      }
-
-      // ⭐ 清空所有使用這個檔案的記錄（但保留 groupId）
-      setDieselData(prev => prev.map((record: DieselRecord) =>
-        record.evidenceFiles?.[0]?.id === evidenceId
-          ? { ...record, evidenceFiles: [], memoryFiles: [] }  // ⭐ 群組變成空群組
-          : record
-      ))
-
-      setSuccess('佐證已刪除，群組已變成空群組')
-    } catch (error) {
-      setError(error instanceof Error ? error.message : '刪除佐證失敗')
-    }
-  }
-
-  // ✅ 群組的暫存檔案（Key = 群組 ID，Value = 暫存檔案）
-  const [groupMemoryFiles, setGroupMemoryFiles] = useState<Record<string, MemoryFile[]>>({})
-
-  // ✅ 新增佐證群組
-  const addNewGroup = () => {
-    const newGroupId = generateRecordId()
-
-    // 建立第一筆空記錄
-    const newRecord: DieselRecord = {
-      id: generateRecordId(),
-      date: '',
-      quantity: 0,
-      evidenceFiles: [],
-      memoryFiles: [],
-      groupId: newGroupId
-    }
-
-    // ⭐ 新記錄放在最前面（新的在上方）
-    setDieselData(prev => [newRecord, ...prev])
-
-    // 初始化該群組的 memoryFiles
-    setGroupMemoryFiles(prev => ({
-      ...prev,
-      [newGroupId]: []
-    }))
-
-    setSuccess('已新增佐證群組')
-  }
-
-
-  // ✅ 在特定群組新增記錄
-  const addRecordToGroup = (groupId: string) => {
-    const newRecord: DieselRecord = {
-      id: generateRecordId(),
-      date: '',
-      quantity: 0,
-      evidenceFiles: [],
-      memoryFiles: [],
-      groupId: groupId  // ⭐ 直接使用 groupId，不再特殊處理
-    }
-
-    setDieselData(prev => [...prev, newRecord])
-  }
-
-  // ✅ 刪除整個群組（包含所有記錄）
-  const deleteGroup = (groupId: string) => {
-    const groupRecords = dieselData.filter((r: DieselRecord) => r.groupId === groupId)
-
-    if (!window.confirm(`刪除此群組後，所有 ${groupRecords.length} 筆記錄將一併刪除。確定要刪除嗎？`)) {
+    // 檢查檔案數量
+    if (currentEditingGroup.memoryFiles.length >= 1) {
+      setError('已達到最大檔案數量限制 (1 個)')
       return
     }
 
-    // ⭐ 直接刪除該群組的所有記錄
-    setDieselData(prev => prev.filter((r: DieselRecord) => r.groupId !== groupId))
+    // 建立 MemoryFile
+    const file = selectedFiles[0]
+    let preview = ''
+    if (file.type.startsWith('image/')) {
+      preview = URL.createObjectURL(file)
+    }
 
-    // 清除該群組的 memoryFiles
-    setGroupMemoryFiles(prev => {
-      const newMap = { ...prev }
-      delete newMap[groupId]
-      return newMap
+    const memoryFile: MemoryFile = {
+      id: `memory-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+      file,
+      preview,
+      file_name: file.name,
+      file_size: file.size,
+      mime_type: file.type
+    }
+
+    // 更新 memoryFiles
+    setCurrentEditingGroup(prev => ({
+      ...prev,
+      memoryFiles: [memoryFile]
+    }))
+
+    // 清空 input value
+    if (fileInputRef.current) {
+      fileInputRef.current.value = ''
+    }
+  }
+
+  // 在當前編輯群組新增記錄
+  const addRecordToCurrentGroup = () => {
+    setCurrentEditingGroup(prev => ({
+      ...prev,
+      records: [...prev.records, {
+        id: generateRecordId(),
+        date: '',
+        quantity: 0,
+        evidenceFiles: [],
+        memoryFiles: [],
+        groupId: prev.groupId || undefined
+      }]
+    }))
+  }
+
+  // 更新當前編輯群組的記錄
+  const updateCurrentGroupRecord = (recordId: string, field: keyof DieselRecord, value: any) => {
+    setCurrentEditingGroup(prev => ({
+      ...prev,
+      records: prev.records.map(r =>
+        r.id === recordId ? { ...r, [field]: value } : r
+      )
+    }))
+  }
+
+  // 刪除當前編輯群組的記錄
+  const removeRecordFromCurrentGroup = (recordId: string) => {
+    setCurrentEditingGroup(prev => ({
+      ...prev,
+      records: prev.records.filter(r => r.id !== recordId)
+    }))
+  }
+
+  // 保存群組：新增或更新
+  const saveCurrentGroup = () => {
+    const { groupId, records, memoryFiles } = currentEditingGroup
+
+    // 判斷是編輯模式還是新增模式
+    const isEditMode = groupId !== null
+
+    // ✅ 只在新增模式驗證（編輯模式的資料已經驗證過了）
+    if (!isEditMode) {
+      // 驗證：至少要有一筆記錄
+      if (records.length === 0) {
+        setError('請至少新增一筆記錄')
+        return
+      }
+
+      // 驗證：至少有一筆「有效」記錄（有日期或數量）
+      const hasValidData = records.some(r =>
+        r.date.trim() !== '' || r.quantity > 0
+      )
+      if (!hasValidData) {
+        setError('請至少填寫一筆有效數據（日期或數量）')
+        return
+      }
+    }
+
+    const targetGroupId = isEditMode ? groupId : generateRecordId()
+
+    // 將 groupId 和 memoryFiles 套用到所有記錄
+    const recordsWithGroupId = records.map(r => ({
+      ...r,
+      groupId: targetGroupId,
+      memoryFiles: [...memoryFiles]
+    }))
+
+    if (isEditMode) {
+      // 編輯模式：更新該群組（移除舊的，加入新的）
+      setSavedGroups(prev => [
+        ...recordsWithGroupId,
+        ...prev.filter(r => r.groupId !== groupId)
+      ])
+      setSuccess('群組已更新')
+    } else {
+      // 新增模式：加入已保存列表
+      setSavedGroups(prev => [...recordsWithGroupId, ...prev])
+      setSuccess('群組已新增')
+    }
+
+    // 清空編輯區（準備下一個群組），預設 3 格
+    setCurrentEditingGroup({
+      groupId: null,
+      records: createEmptyRecords(),
+      memoryFiles: []
+    })
+  }
+
+  // 載入群組到編輯區（點「編輯群組」）
+  const loadGroupToEditor = (groupId: string) => {
+    // 檢查當前編輯區是否有未保存的資料
+    const currentHasData = currentEditingGroup.records.some(r =>
+      r.date.trim() !== '' || r.quantity > 0
+    ) || currentEditingGroup.memoryFiles.length > 0
+
+    // 如果有未保存的資料，提示用戶
+    if (currentHasData && currentEditingGroup.groupId === null) {
+      // 當前是新增模式且有資料，先保存
+      if (!window.confirm('目前編輯區有未保存的資料，是否先保存後再載入其他群組？')) {
+        return
+      }
+      saveCurrentGroup()
+    }
+
+    // 從 savedGroups 找出該群組的所有記錄
+    const groupRecords = savedGroups.filter(r => r.groupId === groupId)
+
+    if (groupRecords.length === 0) return
+
+    // ✅ 不從列表移除，只複製到編輯區
+    setCurrentEditingGroup({
+      groupId,
+      records: groupRecords,
+      memoryFiles: groupRecords[0]?.memoryFiles || []
     })
 
-    // ⭐ 移除檔案映射
-    removeRecordMapping(groupId)
+    setSuccess('群組已載入到編輯區')
+  }
 
+  // 刪除已保存的群組
+  const deleteSavedGroup = (groupId: string) => {
+    if (!window.confirm('確定要刪除此群組嗎？')) return
+
+    setSavedGroups(prev => prev.filter(r => r.groupId !== groupId))
+    removeRecordMapping(groupId)
     setSuccess('群組已刪除')
   }
 
   const handleSubmit = async () => {
     await executeSubmit(async () => {
-      const totalQuantity = dieselData.reduce((sum, item) => sum + item.quantity, 0)
-
-      // ✅ 清理 payload：只送基本資料，移除 File 物件
-      const cleanedDieselData = dieselData.map((r: DieselRecord) => ({
-        id: r.id,
-        date: r.date,
-        quantity: r.quantity,
-        groupId: r.groupId  // ⭐ 保存 groupId
-      }))
-
-      // ⭐ 建立群組 → recordIds 映射表
-      const groupRecordIds = new Map<string, string[]>()
-      dieselData.forEach(record => {
-        if (record.groupId) {
-          if (!groupRecordIds.has(record.groupId)) {
-            groupRecordIds.set(record.groupId, [])
-          }
-          groupRecordIds.get(record.groupId)!.push(record.id)
-        }
-      })
-
-      // ⭐ 去重：每個群組只保留第一個 record 的 memoryFiles（避免重複上傳）
-      const seenGroupIds = new Set<string>()
-      const deduplicatedRecordData = dieselData.map(record => {
-        const allRecordIds = record.groupId ? groupRecordIds.get(record.groupId) : [record.id]
-
-        if (record.groupId && seenGroupIds.has(record.groupId)) {
-          // 同群組的第 2+ 筆記錄：清空 memoryFiles（不重複上傳）
-          return { ...record, memoryFiles: [], allRecordIds }
-        }
-        if (record.groupId) {
-          seenGroupIds.add(record.groupId)
-        }
-        return { ...record, allRecordIds }
-      })
+      // ✅ 使用統一的資料準備函數
+      const { totalQuantity, cleanedDieselData, deduplicatedRecordData } = prepareSubmissionData(dieselData)
 
       // ⭐ 使用 hook 的 submit 函數
       await submit({
@@ -463,7 +632,6 @@ export default function DieselPage() {
           // ⭐ 簡化為只有收尾工作
           setCurrentEntryId(entry_id)
           await reload()
-          setHasSubmittedBefore(true)
         }
       })
 
@@ -472,6 +640,7 @@ export default function DieselPage() {
       // 重新載入審核狀態，更新狀態橫幅
       reloadApprovalStatus()
 
+      setSuccessModalType('submit')
       setShowSuccessModal(true)
     }).catch(error => {
       setError(error instanceof Error ? error.message : '提交失敗，請重試');
@@ -483,35 +652,21 @@ export default function DieselPage() {
       setError(null)
       setSuccess(null)
 
-      const totalQuantity = dieselData.reduce((sum, item) => sum + item.quantity, 0)
+      // ✅ 使用統一的資料準備函數
+      const { totalQuantity, cleanedDieselData, deduplicatedRecordData } = prepareSubmissionData(dieselData)
 
       // 審核模式：使用 useAdminSave hook
       if (isReviewMode && reviewEntryId) {
         console.log('📝 管理員審核模式：使用 useAdminSave hook', reviewEntryId)
 
-        const cleanedDieselData = dieselData.map((r: DieselRecord) => ({
-          id: r.id,
-          date: r.date,
-          quantity: r.quantity,
-          groupId: r.groupId
+        // ⭐ 新架構：準備檔案列表（從當前編輯群組收集）
+        const filesToUpload = currentEditingGroup.memoryFiles.map((mf: MemoryFile) => ({
+          file: mf.file,
+          metadata: {
+            recordIndex: 0,
+            allRecordIds: currentEditingGroup.records.map(r => r.id)
+          }
         }))
-
-        // 準備檔案列表：從 groupMemoryFiles 收集所有檔案
-        const filesToUpload = evidenceGroups.flatMap((group, groupIndex) => {
-          const memFiles = groupMemoryFiles[group.groupId] || []
-          const recordIndex = dieselData.findIndex(r => r.groupId === group.groupId)
-          
-          // Collect all record IDs in this group
-          const groupRecordIds = group.records.map(r => r.id)
-          
-          return memFiles.map(mf => ({
-            file: mf.file,
-            metadata: {
-              recordIndex: recordIndex >= 0 ? recordIndex : groupIndex,
-              allRecordIds: groupRecordIds
-            }
-          }))
-        })
 
         await adminSave({
           updateData: {
@@ -529,46 +684,12 @@ export default function DieselPage() {
         await reload()
         reloadApprovalStatus()
         // 清空記憶體檔案（在 reload 之後，避免檔案暫時消失）
-        setGroupMemoryFiles({})
+        setCurrentEditingGroup(prev => ({ ...prev, memoryFiles: [] }))
         setSuccess('✅ 儲存成功！資料已更新')
         return
       }
 
-      // 非審核模式：原本的邏輯
-      // ✅ 清理 payload：只送基本資料，移除 File 物件
-      const cleanedDieselData = dieselData.map((r: DieselRecord) => ({
-        id: r.id,
-        date: r.date,
-        quantity: r.quantity,
-        groupId: r.groupId  // ⭐ 保存 groupId
-      }))
-
-      // ⭐ 建立群組 → recordIds 映射表
-      const groupRecordIds = new Map<string, string[]>()
-      dieselData.forEach(record => {
-        if (record.groupId) {
-          if (!groupRecordIds.has(record.groupId)) {
-            groupRecordIds.set(record.groupId, [])
-          }
-          groupRecordIds.get(record.groupId)!.push(record.id)
-        }
-      })
-
-      // ⭐ 去重 + 附加 allRecordIds
-      const seenGroupIds = new Set<string>()
-      const deduplicatedRecordData = dieselData.map(record => {
-        const allRecordIds = record.groupId ? groupRecordIds.get(record.groupId) : [record.id]
-
-        if (record.groupId && seenGroupIds.has(record.groupId)) {
-          // 同群組的第 2+ 筆記錄：清空 memoryFiles（不重複上傳）
-          return { ...record, memoryFiles: [], allRecordIds }
-        }
-        if (record.groupId) {
-          seenGroupIds.add(record.groupId)
-        }
-        return { ...record, allRecordIds }
-      })
-
+      // 非審核模式：使用統一的資料準備函數（已在函數開頭準備好）
       // ⭐ 使用 hook 的 save 函數（跳過驗證）
       await save({
         entryInput: {
@@ -585,10 +706,9 @@ export default function DieselPage() {
         recordData: deduplicatedRecordData,  // ⭐ 包含 allRecordIds
         uploadRecordFiles,
         onSuccess: async (entry_id) => {
-          // ⭐ 簡化為 3 行（原本 ~55 行）
+          // ⭐ 簡化為 2 行（原本 ~55 行）
           setCurrentEntryId(entry_id)
           await reload()
-          setHasSubmittedBefore(true)
         }
       })
 
@@ -596,6 +716,8 @@ export default function DieselPage() {
       reloadApprovalStatus()
 
       setSuccess('暫存成功！資料已儲存')
+      setSuccessModalType('save')
+      setShowSuccessModal(true)
     }).catch(error => {
       console.error('❌ 暫存失敗:', error)
       setError(error instanceof Error ? error.message : '暫存失敗')
@@ -608,9 +730,15 @@ export default function DieselPage() {
 
   const handleClearConfirm = async () => {
     try {
-      // 收集所有檔案和記憶體檔案
-      const allFiles = dieselData.flatMap((r: DieselRecord) => r.evidenceFiles || [])
-      const allMemoryFiles = dieselData.map((r: DieselRecord) => r.memoryFiles || [])
+      // 收集所有檔案和記憶體檔案（包含編輯中和已保存的）
+      const allFiles = [
+        ...currentEditingGroup.records.flatMap(r => r.evidenceFiles || []),
+        ...savedGroups.flatMap(r => r.evidenceFiles || [])
+      ]
+      const allMemoryFiles = [
+        currentEditingGroup.memoryFiles,
+        ...savedGroups.map(r => r.memoryFiles || [])
+      ]
 
       // 使用 Hook 清除
       await clear({
@@ -618,19 +746,20 @@ export default function DieselPage() {
         memoryFilesToClean: allMemoryFiles
       })
 
-      // 重置前端狀態
-      const newGroupId = generateRecordId()
-      setDieselData([{
-        id: generateRecordId(),  // ⭐ 使用 generateRecordId
-        date: '',
-        quantity: 0,
-        evidenceFiles: [],
-        memoryFiles: [],
-        groupId: newGroupId  // ⭐ 添加 groupId
-      }])
+      // 重置前端狀態（新架構），預設 3 格
+      setCurrentEditingGroup({
+        groupId: null,
+        records: createEmptyRecords(),
+        memoryFiles: []
+      })
+      setSavedGroups([])
       setCurrentEntryId(null)
-      setHasSubmittedBefore(false)
       setShowClearConfirmModal(false)
+
+      // 重新載入審核狀態，清除狀態橫幅
+      await reload()
+      reloadApprovalStatus()
+
       setSuccess('資料已完全清除')
     } catch (error) {
       setError(error instanceof Error ? error.message : '清除失敗，請重試')
@@ -728,591 +857,662 @@ export default function DieselPage() {
       }
     })
   }, [evidenceGroups])
-
-  // Loading 狀態
-  if (dataLoading) {
-    return (
-      <div
-        className="min-h-screen flex items-center justify-center"
-        style={{ backgroundColor: designTokens.colors.background }}
-      >
-        <div className="text-center">
-          <Loader2
-            className="w-12 h-12 animate-spin mx-auto mb-4"
-            style={{ color: designTokens.colors.accentPrimary }}
-          />
-          <p style={{ color: designTokens.colors.textPrimary }}>載入中...</p>
-        </div>
-      </div>
-    )
-  }
-
   return (
-    <div className="min-h-screen bg-green-50">
-      <div className="px-6 py-8">
-        <div className="text-center mb-8">
-          {/* 審核模式指示器 */}
-          {isReviewMode && (
-            <div className="mb-4 p-3 bg-orange-100 border-2 border-orange-300 rounded-lg max-w-4xl mx-auto">
-              <div className="flex items-center justify-center">
-                <Eye className="w-5 h-5 text-orange-600 mr-2" />
-                <span className="text-orange-800 font-medium">
-                  📋 審核模式 - 查看填報內容
-                </span>
-              </div>
-              <p className="text-sm text-orange-600 mt-1">
-                所有輸入欄位已鎖定，僅供審核查看
-              </p>
-            </div>
-          )}
+    <>
+      {/* 隱藏瀏覽器原生日曆圖示 */}
+      <style>{`
+        input[type="date"]::-webkit-calendar-picker-indicator {
+          display: none;
+          -webkit-appearance: none;
+        }
+        input[type="date"]::-webkit-inner-spin-button,
+        input[type="date"]::-webkit-outer-spin-button {
+          -webkit-appearance: none;
+          margin: 0;
+        }
+      `}</style>
 
-          <h1 className="text-3xl font-semibold mb-3" style={{ color: designTokens.colors.textPrimary }}>
-            柴油使用量填報
-          </h1>
-          <p className="text-base" style={{ color: designTokens.colors.textSecondary }}>
-            {isReviewMode
-              ? '管理員審核模式 - 檢視填報內容和相關檔案'
-              : '請上傳加油單或發票作為佐證文件，並完整填寫使用日期與使用量'
-            }
+      <SharedPageLayout
+        pageHeader={{
+          category: "D",
+          title: "柴油(移動源)",
+          subtitle: "Diesel (Mobile Sources)"
+        }}
+        statusBanner={{
+          approvalStatus,
+          isReviewMode
+        }}
+        instructionText="請先選擇設備項目，並上傳加油單據作為佐證，若同一份佐證文件（PDF／JPG）內含多筆加油紀錄，請使用 「+新增數據到此群組」，<br />讓一份佐證可對應多筆加油數據；當同一份佐證的所有數據新增完成後，請點選 「+新增群組」，以填寫下一份佐證的數據。"
+      bottomActionBar={{
+        currentStatus,
+        submitting,
+        onSubmit: handleSubmit,
+        onSave: handleSave,
+        onClear: handleClear,
+        show: !isReadOnly && !approvalStatus.isApproved && !isReviewMode
+      }}
+    >
+      {/* 審核模式指示器 */}
+      {isReviewMode && (
+        <div className="mb-4 p-3 bg-orange-100 border-2 border-orange-300 rounded-lg mx-auto" style={{ maxWidth: '993px' }}>
+          <div className="flex items-center justify-center">
+            <Eye className="w-5 h-5 text-orange-600 mr-2" />
+            <span className="text-orange-800 font-medium">
+              📋 審核模式 - 查看填報內容
+            </span>
+          </div>
+          <p className="text-sm text-orange-600 mt-1 text-center">
+            所有輸入欄位已鎖定，僅供審核查看
           </p>
         </div>
+      )}
 
-        {/* 審核狀態橫幅 */}
-        {!isReviewMode && approvalStatus.isSaved && (
-          <div className="bg-blue-100 border-l-4 border-blue-500 text-blue-700 p-4 mb-6 rounded-r-lg max-w-4xl mx-auto">
-            <div className="flex items-center">
-              <div className="text-2xl mr-3">💾</div>
-              <div>
-                <p className="font-bold text-lg">資料已暫存</p>
-                <p className="text-sm mt-1">您的資料已儲存，可隨時修改後提交審核。</p>
-              </div>
-            </div>
+      {/* 使用數據標題 - icon 距離左邊界 367px，在說明文字下方 103px */}
+      <div style={{ marginTop: '103px', marginLeft: '367px' }}>
+        <div className="flex items-center gap-[29px]">
+          {/* Database Icon */}
+          <div className="w-[42px] h-[42px] bg-[#3996fe] rounded-[10px] flex items-center justify-center flex-shrink-0">
+            <svg xmlns="http://www.w3.org/2000/svg" width="29" height="29" viewBox="0 0 29 29" fill="none">
+              <path d="M25.375 6.04163C25.375 8.04366 20.5061 9.66663 14.5 9.66663C8.4939 9.66663 3.625 8.04366 3.625 6.04163M25.375 6.04163C25.375 4.03959 20.5061 2.41663 14.5 2.41663C8.4939 2.41663 3.625 4.03959 3.625 6.04163M25.375 6.04163V22.9583C25.375 24.9641 20.5417 26.5833 14.5 26.5833C8.45833 26.5833 3.625 24.9641 3.625 22.9583V6.04163M25.375 14.5C25.375 16.5058 20.5417 18.125 14.5 18.125C8.45833 18.125 3.625 16.5058 3.625 14.5" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+            </svg>
           </div>
-        )}
 
-        {!isReviewMode && approvalStatus.isApproved && (
-          <div className="bg-green-100 border-l-4 border-green-500 text-green-700 p-4 mb-6 rounded-r-lg max-w-4xl mx-auto">
-            <div className="flex items-center">
-              <div className="text-2xl mr-3">🎉</div>
-              <div>
-                <p className="font-bold text-lg">恭喜您已審核通過！</p>
-                <p className="text-sm mt-1">此填報已完成審核，資料已鎖定無法修改。</p>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {!isReviewMode && approvalStatus.isRejected && (
-          <div className="bg-red-100 border-l-4 border-red-500 text-red-700 p-4 mb-6 rounded-r-lg max-w-4xl mx-auto">
-            <div className="flex items-start">
-              <div className="text-2xl mr-3 mt-0.5">⚠️</div>
-              <div className="flex-1">
-                <p className="font-bold text-lg">填報已被退回</p>
-                <p className="text-sm mt-2">
-                  <span className="font-semibold">退回原因：</span>
-                  {approvalStatus.reviewNotes || '無'}
-                </p>
-                {approvalStatus.reviewedAt && (
-                  <p className="text-xs mt-1 text-red-600">
-                    退回時間：{new Date(approvalStatus.reviewedAt).toLocaleString('zh-TW')}
-                  </p>
-                )}
-                <p className="text-sm mt-2 text-red-600">
-                  請修正後重新提交
-                </p>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {!isReviewMode && approvalStatus.isPending && (
-          <div className="bg-green-100 border-l-4 border-green-500 text-green-700 p-4 mb-6 rounded-r-lg max-w-4xl mx-auto">
-            <div className="flex items-center">
-              <div className="text-2xl mr-3">📋</div>
-              <div>
-                <p className="font-bold text-lg">等待審核中</p>
-                <p className="text-sm mt-1">您的填報已提交，請等待管理員審核。</p>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* 外層白色卡片：置中 + 自動包住內容寬度 */}
-        <div className="flex justify-center">
-          <div
-            className="rounded-lg border p-6 mx-auto w-fit"
-            style={{
-              backgroundColor: designTokens.colors.cardBg,
-              borderColor: designTokens.colors.border,
-              boxShadow: designTokens.shadows.sm,
-            }}
-          >
-            <h3 className="text-2xl font-bold mb-6 text-center" style={{ color: designTokens.colors.textPrimary }}>
-              柴油使用記錄
+          {/* 標題文字 */}
+          <div className="flex flex-col justify-center h-[86px]">
+            <h3 className="text-[28px] font-bold text-black">
+              使用數據
             </h3>
-
-            {/* 控制填寫區總寬度 */}
-            <div className="w-[1000px] mx-auto space-y-6">
-
-              {/* 新增群組按鈕（移到這裡） */}
-              {!isReadOnly && !approvalStatus.isApproved && !isReviewMode && (
-                <div className="flex justify-center py-4">
-                  <button
-                    onClick={addNewGroup}
-                    disabled={submitting}
-                    className="px-8 py-3 bg-gradient-to-r from-blue-500 to-blue-600 hover:from-blue-600 hover:to-blue-700 text-white rounded-xl font-semibold shadow-md hover:shadow-lg transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-3"
-                  >
-                    <span className="text-2xl">+</span>
-                    <span>新增佐證群組</span>
-                  </button>
-                </div>
-              )}
-
-              {/* 群組卡片渲染 */}
-              <div className="space-y-6">
-                {evidenceGroups.map((group, groupIndex) => {
-                  const groupId = group.groupId
-                  const currentMemoryFiles = groupMemoryFiles[groupId] || []
-
-                  if (group.evidence === null) {
-                    // ==================== 空群組（藍色） ====================
-                    return (
-                      <div
-                        key={groupId}
-                        className="bg-gradient-to-br from-blue-50 to-blue-100/50 border-2 border-blue-200 rounded-xl p-6 shadow-md"
-                      >
-                        <div className="flex items-center justify-between mb-5">
-                          <div className="flex items-center gap-3">
-                            <div className="w-10 h-10 rounded-lg bg-blue-200 flex items-center justify-center">
-                              <span className="text-2xl">📁</span>
-                            </div>
-                            <div>
-                              <h4 className="text-lg font-bold text-blue-900">
-                                佐證群組
-                              </h4>
-                              <p className="text-sm text-blue-700">
-                                {group.records.length} 筆記錄
-                              </p>
-                            </div>
-                          </div>
-                          <button
-                            onClick={() => deleteGroup(groupId)}
-                            disabled={isReadOnly || approvalStatus.isApproved}
-                            className="px-4 py-2 text-sm bg-red-500 hover:bg-red-600 text-white rounded-lg font-medium shadow-sm hover:shadow transition-all disabled:opacity-50 disabled:cursor-not-allowed"
-                          >
-                            刪除群組
-                          </button>
-                        </div>
-
-                        {/* 大型上傳區 */}
-                        <div className="mb-6 bg-white rounded-xl p-5 shadow-sm border border-gray-200">
-                          <EvidenceUpload
-                            pageKey={`${pageKey}_${groupId}`}
-                            files={[]}
-                            onFilesChange={() => {}}
-                            memoryFiles={currentMemoryFiles}
-                            onMemoryFilesChange={(files) => {
-                              // 自動套用到該群組的所有記錄
-                              setDieselData(prev => prev.map((record: DieselRecord) => {
-                                if (record.groupId === groupId) {
-                                  return { ...record, memoryFiles: [...files] }
-                                }
-                                return record
-                              }))
-
-                              // 更新群組的 memoryFiles（保留用於顯示）
-                              setGroupMemoryFiles(prev => ({
-                                ...prev,
-                                [groupId]: files
-                              }))
-
-                              if (files.length > 0) {
-                                setSuccess(`已自動套用佐證到 ${group.records.length} 筆記錄`)
-                              }
-                            }}
-                            maxFiles={1}
-                            kind="other"
-                            disabled={submitting || !editPermissions.canUploadFiles}
-                            mode={isReadOnly || approvalStatus.isApproved ? "view" : "edit"}
-                            isAdminReviewMode={isReviewMode && role === 'admin'}
-                          />
-                        </div>
-
-                        {/* 記錄列表 */}
-                        <table className="w-full table-fixed border-collapse bg-white rounded-xl overflow-hidden shadow-sm mb-4">
-                          <thead>
-                            <tr className="bg-gradient-to-r from-blue-400 to-blue-500">
-                              <th className="px-3 py-3 text-center text-sm font-semibold text-white w-[180px]">使用日期</th>
-                              <th className="px-3 py-3 text-center text-sm font-semibold text-white w-[120px]">使用量(L)</th>
-                              <th className="px-3 py-3 text-center text-sm font-semibold text-white w-[80px]">操作</th>
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {group.records.map((record) => (
-                              <tr key={record.id} className="hover:bg-blue-50 transition-colors border-b border-gray-100 last:border-b-0">
-                                <td className="px-3 py-3">
-                                  <input
-                                    type="date"
-                                    value={record.date}
-                                    onChange={(e) => updateEntry(record.id, 'date', e.target.value)}
-                                    disabled={isReadOnly || approvalStatus.isApproved}
-                                    className={`w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 hover:border-blue-300 transition-colors ${
-                                      isReadOnly || approvalStatus.isApproved ? 'bg-gray-100 cursor-not-allowed' : ''
-                                    }`}
-                                  />
-                                </td>
-                                <td className="px-3 py-3">
-                                  <input
-                                    type="number"
-                                    min="0"
-                                    step="0.01"
-                                    value={record.quantity || ''}
-                                    onChange={(e) => updateEntry(record.id, 'quantity', parseFloat(e.target.value) || 0)}
-                                    disabled={isReadOnly || approvalStatus.isApproved}
-                                    className={`w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 hover:border-blue-300 transition-colors ${
-                                      isReadOnly || approvalStatus.isApproved ? 'bg-gray-100 cursor-not-allowed' : ''
-                                    }`}
-                                  />
-                                </td>
-                                <td className="px-3 py-3">
-                                  <div className="flex justify-center">
-                                    {group.records.length > 1 && (
-                                      <button
-                                        onClick={() => removeEntry(record.id)}
-                                        disabled={isReadOnly || approvalStatus.isApproved}
-                                        className={`text-red-500 hover:text-red-700 p-1 rounded-lg hover:bg-red-50 transition-colors ${
-                                          isReadOnly || approvalStatus.isApproved ? 'opacity-50 cursor-not-allowed' : ''
-                                        }`}
-                                        title="刪除此記錄"
-                                      >
-                                        <Trash2 className="w-4 h-4" />
-                                      </button>
-                                    )}
-                                  </div>
-                                </td>
-                              </tr>
-                            ))}
-                          </tbody>
-                        </table>
-
-                        {/* 新增記錄到此群組 */}
-                        <button
-                          onClick={() => addRecordToGroup(groupId)}
-                          disabled={isReadOnly || approvalStatus.isApproved}
-                          className={`w-full py-3 border-2 border-dashed border-blue-300 hover:bg-blue-50 text-blue-700 bg-white rounded-xl font-semibold transition-all hover:shadow-sm ${
-                            isReadOnly || approvalStatus.isApproved ? 'opacity-50 cursor-not-allowed' : ''
-                          } flex items-center justify-center gap-2`}
-                        >
-                          <span className="text-xl">+</span>
-                          <span>新增記錄到此群組</span>
-                        </button>
-                      </div>
-                    )
-                  } else {
-                    // ==================== 有佐證的群組 ====================
-                    return (
-                      <div
-                        key={groupId}
-                        className="bg-white border-2 border-gray-200 rounded-xl p-6 shadow-md hover:shadow-lg transition-shadow"
-                      >
-                        {/* 群組標題 */}
-                        <div className="flex items-center gap-3 mb-6">
-                          <div className="w-10 h-10 rounded-lg bg-green-100 flex items-center justify-center">
-                            <span className="text-2xl">✅</span>
-                          </div>
-                          <div>
-                            <h4 className="text-lg font-bold text-gray-900">已上傳佐證</h4>
-                            <p className="text-sm text-gray-600">{group.records.length} 筆記錄</p>
-                          </div>
-                        </div>
-
-                        <div className="flex gap-6">
-                          {/* 左側：佐證預覽 */}
-                          <div className="w-64 flex-shrink-0">
-                            <div className="bg-gradient-to-br from-gray-50 to-gray-100 rounded-xl overflow-hidden shadow-sm border border-gray-200">
-                              {/* ⭐ 根據檔案類型分別渲染：圖片可點擊，PDF 靜態顯示 */}
-                              {group.evidence.mime_type.startsWith('image/') ? (
-                                // 圖片：可點擊放大
-                                <div
-                                  className="cursor-pointer hover:opacity-90 transition-opacity group relative"
-                                  onClick={async () => {
-                                    const url = await getFileUrl(group.evidence!.file_path)
-                                    setLightboxSrc(url)
-                                  }}
-                                >
-                                  <img
-                                    src={thumbnails[group.evidence.id] || '/柴油.png'}
-                                    alt="佐證資料"
-                                    className="w-full h-48 object-cover"
-                                    loading="lazy"
-                                    onError={(e) => {
-                                      (e.target as HTMLImageElement).src = '/柴油.png'
-                                    }}
-                                  />
-                                  <div className="absolute inset-0 bg-black/0 group-hover:bg-black/10 transition-all flex items-center justify-center">
-                                    <Eye className="w-8 h-8 text-white opacity-0 group-hover:opacity-100 transition-opacity" />
-                                  </div>
-                                </div>
-                              ) : (
-                                // PDF：靜態顯示 + 下載按鈕
-                                <div className="relative">
-                                  <div className="w-full h-48 flex items-center justify-center bg-gray-100">
-                                    <span className="text-8xl">📄</span>
-                                  </div>
-                                  {/* PDF 下載按鈕 */}
-                                  <button
-                                    onClick={() => handleDownloadFile(group.evidence!)}
-                                    disabled={downloadingFileId === group.evidence!.id}
-                                    className="absolute top-2 right-2 bg-blue-500 hover:bg-blue-600 text-white p-2 rounded-lg shadow-lg transition-all disabled:opacity-50 disabled:cursor-not-allowed"
-                                    title={downloadingFileId === group.evidence!.id ? '下載中...' : '下載 PDF'}
-                                  >
-                                    {downloadingFileId === group.evidence!.id ? (
-                                      <Loader2 className="w-5 h-5 animate-spin" />
-                                    ) : (
-                                      <Download className="w-5 h-5" />
-                                    )}
-                                  </button>
-                                </div>
-                              )}
-                              <div className="p-3 bg-white border-t border-gray-200">
-                                <p className="text-sm text-gray-900 font-medium truncate" title={group.evidence.file_name}>
-                                  {group.evidence.file_name}
-                                </p>
-                                <p className="text-xs text-gray-500 mt-1">
-                                  {(group.evidence.file_size / 1024).toFixed(1)} KB
-                                </p>
-                              </div>
-                              {/* 刪除按鈕 */}
-                              <div className="p-3 border-t border-gray-200 space-y-2 bg-white">
-                                <button
-                                  onClick={() => {
-                                    if (window.confirm('刪除此佐證後，群組將變成空群組，記錄保留。確定要刪除嗎？')) {
-                                      deleteEvidence(group.evidence!.id)
-                                    }
-                                  }}
-                                  disabled={isReadOnly || approvalStatus.isApproved}
-                                  className={`w-full py-2 bg-red-500 hover:bg-red-600 text-white rounded-lg font-medium shadow-sm hover:shadow transition-all flex items-center justify-center gap-2 ${
-                                    isReadOnly || approvalStatus.isApproved ? 'opacity-50 cursor-not-allowed' : ''
-                                  }`}
-                                >
-                                  <Trash2 className="w-4 h-4" />
-                                  刪除佐證
-                                </button>
-                                <button
-                                  onClick={() => deleteGroup(groupId)}
-                                  disabled={isReadOnly || approvalStatus.isApproved}
-                                  className={`w-full py-2 bg-gray-500 hover:bg-gray-600 text-white rounded-lg font-medium shadow-sm hover:shadow transition-all disabled:opacity-50 disabled:cursor-not-allowed`}
-                                >
-                                  刪除群組
-                                </button>
-                              </div>
-                            </div>
-                          </div>
-
-                          {/* 右側：記錄列表 */}
-                          <div className="flex-1">
-
-                            <table className="w-full table-fixed border-collapse bg-white rounded-xl overflow-hidden shadow-sm mb-4">
-                              <thead>
-                                <tr className="bg-gradient-to-r from-green-500 to-green-600">
-                                  <th className="px-3 py-3 text-center text-sm font-semibold text-white w-[180px]">使用日期</th>
-                                  <th className="px-3 py-3 text-center text-sm font-semibold text-white w-[120px]">使用量(L)</th>
-                                  <th className="px-3 py-3 text-center text-sm font-semibold text-white w-[80px]">操作</th>
-                                </tr>
-                              </thead>
-                              <tbody>
-                                {group.records.map((record) => (
-                                  <tr key={record.id} className="hover:bg-green-50 transition-colors border-b border-gray-100 last:border-b-0">
-                                    <td className="px-3 py-3">
-                                      <input
-                                        type="date"
-                                        value={record.date}
-                                        onChange={(e) => updateEntry(record.id, 'date', e.target.value)}
-                                        disabled={isReadOnly || approvalStatus.isApproved}
-                                        className={`w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-green-500 hover:border-green-300 transition-colors ${
-                                          isReadOnly || approvalStatus.isApproved ? 'bg-gray-100 cursor-not-allowed' : ''
-                                        }`}
-                                      />
-                                    </td>
-                                    <td className="px-3 py-3">
-                                      <input
-                                        type="number"
-                                        min="0"
-                                        step="0.01"
-                                        value={record.quantity || ''}
-                                        onChange={(e) => updateEntry(record.id, 'quantity', parseFloat(e.target.value) || 0)}
-                                        disabled={isReadOnly || approvalStatus.isApproved}
-                                        className={`w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-green-500 hover:border-green-300 transition-colors ${
-                                          isReadOnly || approvalStatus.isApproved ? 'bg-gray-100 cursor-not-allowed' : ''
-                                        }`}
-                                      />
-                                    </td>
-                                    <td className="px-3 py-3">
-                                      <div className="flex justify-center">
-                                        <button
-                                          onClick={() => removeEntry(record.id)}
-                                          disabled={isReadOnly || approvalStatus.isApproved}
-                                          className={`text-red-500 hover:text-red-700 p-1 rounded-lg hover:bg-red-50 transition-colors ${
-                                            isReadOnly || approvalStatus.isApproved ? 'opacity-50 cursor-not-allowed' : ''
-                                          }`}
-                                          title="刪除此記錄"
-                                        >
-                                          <Trash2 className="w-4 h-4" />
-                                        </button>
-                                      </div>
-                                    </td>
-                                  </tr>
-                                ))}
-                              </tbody>
-                            </table>
-
-                            {/* 新增記錄到此群組 */}
-                            <button
-                              onClick={() => addRecordToGroup(groupId)}
-                              disabled={isReadOnly || approvalStatus.isApproved}
-                              className={`w-full py-3 border-2 border-dashed border-green-300 bg-white hover:bg-green-50 text-green-700 rounded-xl font-semibold transition-all hover:shadow-sm ${
-                                isReadOnly || approvalStatus.isApproved ? 'opacity-50 cursor-not-allowed' : ''
-                              } flex items-center justify-center gap-2`}
-                            >
-                              <span className="text-xl">+</span>
-                              <span>新增記錄到此群組</span>
-                            </button>
-                          </div>
-                        </div>
-                      </div>
-                    )
-                  }
-                })}
-              </div>
-            </div>
           </div>
         </div>
-
-        {/* 審核區塊 - 只在審核模式顯示 */}
-        {isReviewMode && (
-          <div className="max-w-4xl mx-auto mt-8">
-            <ReviewSection
-              entryId={reviewEntryId || currentEntryId || `diesel_${year}`}
-              userId={reviewUserId || "current_user"}
-              category="柴油"
-              userName="填報用戶"
-              amount={dieselData.reduce((sum, item) => sum + item.quantity, 0)}
-              unit="L"
-              role={role}
-              onSave={handleSave}
-              isSaving={submitLoading}
-              onApprove={() => {
-                // ReviewSection 會處理 API 呼叫和導航
-              }}
-              onReject={(reason) => {
-                // ReviewSection 會處理 API 呼叫和導航
-              }}
-            />
-          </div>
-        )}
-
-        <div className="h-20"></div>
       </div>
 
-      {!isReadOnly && !approvalStatus.isApproved && !isReviewMode && (
-        <BottomActionBar
-          currentStatus={currentStatus}
-          currentEntryId={currentEntryId}
-          isUpdating={false}
-          hasSubmittedBefore={hasSubmittedBefore}
-          hasAnyData={hasAnyData}
-          editPermissions={editPermissions}
-          submitting={submitting}
-          saving={submitting}
-          onSubmit={handleSubmit}
-          onSave={handleSave}
-          onClear={handleClear}
-          designTokens={designTokens}
-        />
-      )}
+      {/* ==================== 使用數據區塊 - 標題底部往下 34px，頁面置中 ==================== */}
+      <div style={{ marginTop: `${LAYOUT_CONSTANTS.SECTION_BOTTOM_MARGIN}px`, marginBottom: '32px' }} className="flex justify-center">
+        <div
+          className="bg-[#ebedf0] rounded-[37px]"
+          style={{
+            width: `${LAYOUT_CONSTANTS.CONTAINER_WIDTH}px`,
+            minHeight: `${LAYOUT_CONSTANTS.CONTAINER_MIN_HEIGHT}px`,
+            flexShrink: 0,
+            padding: '38px 0 38px 49px'
+          }}
+        >
+          {/* 標題區 - 358px × 73px，文字靠左上對齊 */}
+          <div style={{
+            width: `${LAYOUT_CONSTANTS.EDITOR_UPLOAD_WIDTH}px`,
+            height: '73px',
+            marginBottom: '0',
+            display: 'flex',
+            flexDirection: 'column',
+            justifyContent: 'flex-start',
+            alignItems: 'flex-start'
+          }}>
+            <h4 className="text-[24px] font-bold" style={{ lineHeight: '1.2', marginBottom: '8px', color: '#000' }}>佐證文件</h4>
+            <p className="text-[18px] text-gray-500" style={{ lineHeight: '1.2' }}>* 加油單據上需註明 年、月、日</p>
+          </div>
 
-      {/* 清除確認模態框 */}
-      {showClearConfirmModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50 p-4">
-          <div
-            className="bg-white rounded-lg shadow-lg max-w-md w-full"
-            style={{ borderRadius: designTokens.borderRadius.lg }}
-          >
-            <div className="p-6">
-              <div className="flex items-start space-x-3 mb-4">
-                <div
-                  className="w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0"
-                  style={{ backgroundColor: `${designTokens.colors.warning}15` }}
-                >
-                  <AlertCircle
-                    className="h-5 w-5"
-                    style={{ color: designTokens.colors.warning }}
-                  />
-                </div>
-                <div className="flex-1">
-                  <h3
-                    className="text-xl font-semibold mb-2"
-                    style={{ color: designTokens.colors.textPrimary }}
-                  >
-                    確認清除
-                  </h3>
-                  <p
-                    className="text-base"
-                    style={{ color: designTokens.colors.textSecondary }}
-                  >
-                    清除後，這一頁所有資料都會被移除，包括已上傳到伺服器的檔案也會被永久刪除。此操作無法復原，確定要繼續嗎？
-                  </p>
+          {/* 框框容器 */}
+          <div className="flex" style={{ gap: `${LAYOUT_CONSTANTS.EDITOR_GAP}px`, alignItems: 'flex-start' }}>
+            {/* 左側：佐證上傳區 */}
+            <div style={{ width: `${LAYOUT_CONSTANTS.EDITOR_UPLOAD_WIDTH}px` }} className="flex-shrink-0">
+              {/* 上傳區 - 整個白色框框可點擊上傳 */}
+              <div
+                className="bg-white flex flex-col items-center justify-center cursor-pointer hover:bg-blue-50 transition-colors"
+                style={{
+                  width: `${LAYOUT_CONSTANTS.EDITOR_UPLOAD_WIDTH}px`,
+                  height: `${LAYOUT_CONSTANTS.EDITOR_UPLOAD_HEIGHT}px`,
+                  flexShrink: 0,
+                  border: '1px solid rgba(0, 0, 0, 0.25)',
+                  borderRadius: '25px',
+                  padding: '20px'
+                }}
+                onClick={() => {
+                  if (!isReadOnly && !approvalStatus.isApproved && !submitting && editPermissions.canUploadFiles && currentEditingGroup.memoryFiles.length === 0) {
+                    fileInputRef.current?.click()
+                  }
+                }}
+              >
+                {/* 隱藏的文件輸入 */}
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept=".xlsx,.xls,.pdf,.jpg,.jpeg,.png,.gif,.webp,.bmp,.svg,image/*,application/pdf,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                  onChange={handleFileInputChange}
+                  className="hidden"
+                  disabled={isReadOnly || approvalStatus.isApproved || submitting || !editPermissions.canUploadFiles}
+                />
+
+                <div className="flex flex-col items-center justify-center text-center pointer-events-none">
+                  <svg xmlns="http://www.w3.org/2000/svg" width="48" height="40" viewBox="0 0 48 40" fill="none" className="mb-4">
+                    <path d="M31.9999 27.9951L23.9999 19.9951M23.9999 19.9951L15.9999 27.9951M23.9999 19.9951V37.9951M40.7799 32.7751C42.7306 31.7116 44.2716 30.0288 45.1597 27.9923C46.0477 25.9558 46.2323 23.6815 45.6843 21.5285C45.1363 19.3754 43.8869 17.4661 42.1333 16.102C40.3796 14.7378 38.2216 13.9966 35.9999 13.9951H33.4799C32.8746 11.6536 31.7462 9.47975 30.1798 7.63707C28.6134 5.79439 26.6496 4.33079 24.4361 3.3563C22.2226 2.38181 19.817 1.9218 17.4002 2.01085C14.9833 2.0999 12.6181 2.73569 10.4823 3.87042C8.34649 5.00515 6.49574 6.60929 5.06916 8.56225C3.64259 10.5152 2.6773 12.7662 2.24588 15.1459C1.81446 17.5256 1.92813 19.9721 2.57835 22.3016C3.22856 24.6311 4.3984 26.7828 5.99992 28.5951" stroke="#1E1E1E" strokeWidth="4" strokeLinecap="round" strokeLinejoin="round"/>
+                  </svg>
+                  <p className="text-[16px] text-black font-medium mb-1">點擊或拖放檔案暫存</p>
+                  <p className="text-[14px] text-gray-500">支援所有檔案格式，最大 10MB</p>
                 </div>
               </div>
-              <div className="flex justify-end space-x-3">
-                <button
-                  onClick={() => setShowClearConfirmModal(false)}
-                  className="px-4 py-2 border rounded-lg transition-colors font-medium"
+
+              {/* 已上傳檔案列表 */}
+              {currentEditingGroup.memoryFiles.length > 0 && currentEditingGroup.memoryFiles.map((file, index) => (
+                <div
+                  key={index}
                   style={{
-                    borderColor: designTokens.colors.border,
-                    color: designTokens.colors.textSecondary
+                    marginTop: '19px',
+                    width: '358px',
+                    height: '78px',
+                    flexShrink: 0,
+                    borderRadius: '28px',
+                    border: '1px solid rgba(0, 0, 0, 0.25)',
+                    background: '#FFF',
+                    display: 'flex',
+                    alignItems: 'center',
+                    paddingLeft: '21px',
+                    paddingRight: '16px',
+                    position: 'relative'
                   }}
                 >
-                  取消
-                </button>
-                <button
-                  onClick={handleClearConfirm}
-                  disabled={clearLoading}
-                  className="px-4 py-2 text-white rounded-lg transition-colors font-medium flex items-center justify-center"
-                  style={{
-                    backgroundColor: clearLoading ? '#9ca3af' : designTokens.colors.error,
-                    opacity: clearLoading ? 0.7 : 1
-                  }}
-                  onMouseEnter={(e) => {
-                    if (!clearLoading) {
-                      (e.target as HTMLButtonElement).style.backgroundColor = '#dc2626';
-                    }
-                  }}
-                  onMouseLeave={(e) => {
-                    if (!clearLoading) {
-                      (e.target as HTMLButtonElement).style.backgroundColor = designTokens.colors.error;
-                    }
-                  }}
-                >
-                  {clearLoading ? (
-                    <>
-                      <Loader2 className="w-4 h-4 animate-spin mr-2" />
-                      清除中...
-                    </>
-                  ) : (
-                    '確定清除'
-                  )}
-                </button>
+                  {/* 檔案縮圖 */}
+                  <div
+                    style={{
+                      width: '48px',
+                      height: '48px',
+                      borderRadius: '8px',
+                      overflow: 'hidden',
+                      flexShrink: 0,
+                      cursor: file.file.type.startsWith('image/') ? 'pointer' : 'default',
+                      background: '#f0f0f0',
+                      border: '1px solid rgba(0, 0, 0, 0.1)',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center'
+                    }}
+                    onClick={() => {
+                      if (file.file.type.startsWith('image/')) {
+                        const url = URL.createObjectURL(file.file)
+                        setLightboxSrc(url)
+                      }
+                    }}
+                  >
+                    {file.file.type.startsWith('image/') ? (
+                      <img
+                        src={URL.createObjectURL(file.file)}
+                        alt={file.file.name}
+                        style={{
+                          width: '100%',
+                          height: '100%',
+                          objectFit: 'cover'
+                        }}
+                      />
+                    ) : (
+                      <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                        <path d="M14 2H6C5.46957 2 4.96086 2.21071 4.58579 2.58579C4.21071 2.96086 4 3.46957 4 4V20C4 20.5304 4.21071 21.0391 4.58579 21.4142C4.96086 21.7893 5.46957 22 6 22H18C18.5304 22 19.0391 21.7893 19.4142 21.4142C19.7893 21.0391 20 20.5304 20 20V8L14 2Z" stroke="#666" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                        <path d="M14 2V8H20" stroke="#666" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                      </svg>
+                    )}
+                  </div>
+
+                  {/* 檔案名稱 */}
+                  <div style={{ flex: 1, marginLeft: '12px', overflow: 'hidden' }}>
+                    <p style={{
+                      fontSize: '14px',
+                      fontWeight: 500,
+                      color: '#000',
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis',
+                      whiteSpace: 'nowrap'
+                    }}>
+                      {file.file.name}
+                    </p>
+                    <p style={{
+                      fontSize: '12px',
+                      color: '#666',
+                      marginTop: '2px'
+                    }}>
+                      {(file.file.size / 1024).toFixed(1)} KB
+                    </p>
+                  </div>
+
+                  {/* 刪除按鈕 */}
+                  <button
+                    onClick={() => {
+                      setCurrentEditingGroup(prev => ({
+                        ...prev,
+                        memoryFiles: prev.memoryFiles.filter((_, i) => i !== index)
+                      }))
+                    }}
+                    disabled={isReadOnly || approvalStatus.isApproved}
+                    className="p-2 text-black hover:text-red-600 hover:bg-red-50 rounded transition-colors"
+                    title="刪除檔案"
+                  >
+                    <Trash2 style={{ width: '32px', height: '28px' }} />
+                  </button>
+                </div>
+              ))}
+            </div>
+
+            {/* 右側：輸入表單區域（含按鈕） */}
+            <div style={{ display: 'flex', flexDirection: 'column' }}>
+              {/* 輸入表單 - 完整框框 - 動態高度 */}
+              <div
+                style={{
+                  width: `${LAYOUT_CONSTANTS.EDITOR_FORM_WIDTH}px`,
+                  minHeight: `${LAYOUT_CONSTANTS.EDITOR_UPLOAD_HEIGHT}px`,
+                  borderRadius: '30px',
+                  overflow: 'hidden'
+                }}
+              >
+              {/* 表頭 - 藍色區域 58px */}
+              <div className="bg-[#3996fe] flex items-center" style={{ height: `${LAYOUT_CONSTANTS.EDITOR_FORM_HEADER_HEIGHT}px`, paddingLeft: '43px', paddingRight: '16px' }}>
+                <div style={{ width: '199px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                  <span className="text-white text-[20px] font-medium">加油日期</span>
+                </div>
+                <div style={{ width: '27px' }}></div>
+                <div style={{ width: '230px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                  <span className="text-white text-[20px] font-medium">加油量 (L)</span>
+                </div>
+                <div style={{ width: '40px' }}></div> {/* 刪除按鈕空間 */}
+              </div>
+
+              {/* 輸入行 - 白色區域 - 動態高度 */}
+              <div className="bg-white" style={{ minHeight: '250px', paddingLeft: '43px', paddingRight: '16px', paddingTop: '16px', paddingBottom: '16px' }}>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '22px' }}>
+                {currentEditingGroup.records.map((record, index) => (
+                  <div key={record.id} className="flex items-center" style={{ gap: '27px' }}>
+                    {/* 日期輸入框（帶右側日曆圖示） */}
+                    <div className="relative" style={{ width: '199px' }}>
+                      <input
+                        id={`date-input-${record.id}`}
+                        type="date"
+                        value={record.date}
+                        onChange={(e) => updateCurrentGroupRecord(record.id, 'date', e.target.value)}
+                        disabled={isReadOnly || approvalStatus.isApproved}
+                        className="rounded-[5px] focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        style={{
+                          width: '199px',
+                          height: '52px',
+                          border: '1px solid rgba(0, 0, 0, 0.25)',
+                          background: '#FFF',
+                          flexShrink: 0,
+                          color: '#000',
+                          fontFamily: 'Inter',
+                          fontSize: '20px',
+                          fontWeight: 400,
+                          lineHeight: 'normal',
+                          paddingLeft: '20px',
+                          paddingRight: '48px',
+                          paddingTop: '0',
+                          paddingBottom: '0',
+                          colorScheme: 'light',
+                          WebkitAppearance: 'none',
+                          MozAppearance: 'textfield'
+                        }}
+                      />
+                      {/* 日曆圖示（右側，可點擊） */}
+                      <div
+                        className="absolute right-3 top-1/2 -translate-y-1/2 cursor-pointer"
+                        onClick={() => {
+                          const input = document.getElementById(`date-input-${record.id}`) as HTMLInputElement
+                          if (input && !input.disabled) {
+                            input.showPicker?.()
+                          }
+                        }}
+                      >
+                        <svg xmlns="http://www.w3.org/2000/svg" width="27" height="23" viewBox="0 0 27 23" fill="none">
+                          <path d="M18 1.89673V5.69037M9 1.89673V5.69037M3.375 9.48401H23.625M5.625 3.79355H21.375C22.6176 3.79355 23.625 4.64278 23.625 5.69037V18.9681C23.625 20.0157 22.6176 20.8649 21.375 20.8649H5.625C4.38236 20.8649 3.375 20.0157 3.375 18.9681V5.69037C3.375 4.64278 4.38236 3.79355 5.625 3.79355Z" stroke="#1E1E1E" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                        </svg>
+                      </div>
+                    </div>
+
+                    {/* 加油量輸入框 */}
+                    <input
+                      type="number"
+                      min="0"
+                      step="0.01"
+                      value={record.quantity || ''}
+                      onChange={(e) => updateCurrentGroupRecord(record.id, 'quantity', parseFloat(e.target.value) || 0)}
+                      disabled={isReadOnly || approvalStatus.isApproved}
+                      placeholder="100"
+                      className="rounded-[5px] focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      style={{
+                        width: '230px',
+                        height: '52px',
+                        border: '1px solid rgba(0, 0, 0, 0.25)',
+                        background: '#FFF',
+                        flexShrink: 0,
+                        color: '#000',
+                        fontFamily: 'Inter',
+                        fontSize: '20px',
+                        fontWeight: 400,
+                        lineHeight: 'normal',
+                        paddingLeft: '20px',
+                        paddingRight: '20px',
+                        paddingTop: '0',
+                        paddingBottom: '0',
+                        WebkitAppearance: 'none',
+                        MozAppearance: 'textfield'
+                      }}
+                    />
+
+                    {/* 刪除按鈕（每行都有，但最後一行且只有一行時不顯示） */}
+                    {currentEditingGroup.records.length > 1 ? (
+                      <button
+                        onClick={() => removeRecordFromCurrentGroup(record.id)}
+                        disabled={isReadOnly || approvalStatus.isApproved}
+                        className="p-2 text-black hover:text-red-600 hover:bg-red-50 rounded transition-colors"
+                        title="刪除此記錄"
+                      >
+                        <Trash2 style={{ width: '32px', height: '28px' }} />
+                      </button>
+                    ) : (
+                      <div className="w-9 h-9"></div>
+                    )}
+                  </div>
+                ))}
+                </div>
               </div>
             </div>
+
+            {/* 新增數據按鈕 */}
+            <button
+              onClick={addRecordToCurrentGroup}
+              disabled={isReadOnly || approvalStatus.isApproved}
+              style={{
+                marginTop: '35px',
+                width: '599px',
+                height: '46px',
+                flexShrink: 0,
+                background: '#3996FE',
+                border: 'none',
+                borderRadius: '5px',
+                display: 'flex',
+                flexDirection: 'column',
+                justifyContent: 'center',
+                alignItems: 'center',
+                color: '#FFF',
+                textAlign: 'center',
+                fontFamily: 'var(--sds-typography-body-font-family)',
+                fontSize: '20px',
+                fontStyle: 'normal',
+                fontWeight: 400,
+                lineHeight: '100%',
+                cursor: 'pointer',
+                transition: 'all 0.2s'
+              }}
+              className="hover:opacity-90"
+            >
+              + 新增數據到此群組
+            </button>
           </div>
+          </div>
+        </div>
+      </div>
+
+      {/* 保存群組按鈕 - 灰色框框下方 46px */}
+      <div className="flex justify-center" style={{ marginTop: '46px' }}>
+        <button
+          onClick={saveCurrentGroup}
+          style={{
+            width: '237px',
+            height: '46.25px',
+            flexShrink: 0,
+            borderRadius: '7px',
+            border: '1px solid rgba(0, 0, 0, 0.50)',
+            background: '#000',
+            boxShadow: '0 4px 4px 0 rgba(0, 0, 0, 0.25)',
+            cursor: 'pointer',
+            color: '#FFF',
+            textAlign: 'center',
+            fontFamily: 'var(--sds-typography-body-font-family)',
+            fontSize: '20px',
+            fontStyle: 'normal',
+            fontWeight: 'var(--sds-typography-body-font-weight-regular)',
+            lineHeight: '100%'
+          }}
+        >
+          {currentEditingGroup.groupId === null ? '+ 新增群組' : '變更儲存'}
+        </button>
+      </div>
+
+      {/* ==================== 資料列表區塊 ==================== */}
+      <div className="max-w-6xl mx-auto px-4 mb-8" style={{ marginTop: '116.75px' }}>
+        <div className="flex items-center gap-3" style={{ marginBottom: '80px' }}>
+          <div className="w-[42px] h-[42px] bg-[#3996fe] rounded-[10px] flex items-center justify-center">
+            <svg className="w-[34px] h-[34px] text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
+            </svg>
+          </div>
+          <h3 style={{
+            color: '#000',
+            fontFamily: 'Inter',
+            fontSize: '28px',
+            fontStyle: 'normal',
+            fontWeight: 500,
+            lineHeight: '42px'
+          }}>資料列表</h3>
+        </div>
+
+        {/* 群組列表 */}
+        <div className="space-y-4 flex flex-col items-center">
+          {Array.from(new Set(savedGroups.map(r => r.groupId))).map((groupId, index) => {
+            const groupRecords = savedGroups.filter(r => r.groupId === groupId)
+            const firstRecord = groupRecords[0]
+            const evidenceFile = firstRecord?.evidenceFiles?.[0]
+            const memoryFile = firstRecord?.memoryFiles?.[0]
+            const hasFile = evidenceFile || memoryFile
+
+            return (
+              <div
+                key={groupId}
+                className="flex items-center"
+                style={{
+                  width: `${LAYOUT_CONSTANTS.GROUP_LIST_WIDTH}px`,
+                  height: `${LAYOUT_CONSTANTS.GROUP_LIST_HEIGHT}px`,
+                  flexShrink: 0,
+                  borderRadius: '28px',
+                  border: '1px solid rgba(0, 0, 0, 0.25)',
+                  background: '#FFF',
+                  paddingLeft: '26px',
+                  gap: '39px'
+                }}
+              >
+                {/* 編號 */}
+                <div className="w-[42px] h-[42px] bg-black rounded-full flex items-center justify-center">
+                  <span className="text-white text-[18px] font-medium">{index + 1}</span>
+                </div>
+
+                {/* 檔案預覽 */}
+                <div
+                  className="flex items-center justify-center"
+                  style={{
+                    width: '55.769px',
+                    height: '55.769px',
+                    flexShrink: 0,
+                    borderRadius: '10px',
+                    border: '1px solid rgba(0, 0, 0, 0.25)',
+                    background: '#EBEDF0',
+                    overflow: 'hidden',
+                    cursor: (() => {
+                      const mimeType = evidenceFile?.mime_type || memoryFile?.mime_type || memoryFile?.file?.type
+                      return mimeType?.startsWith('image/') ? 'pointer' : 'default'
+                    })()
+                  }}
+                  onClick={() => {
+                    const mimeType = evidenceFile?.mime_type || memoryFile?.mime_type || memoryFile?.file?.type
+                    // 只有圖片可以點擊預覽
+                    if (mimeType?.startsWith('image/')) {
+                      if (evidenceFile) {
+                        getFileUrl(evidenceFile.file_path).then(url => setLightboxSrc(url))
+                      } else if (memoryFile?.file) {
+                        const url = URL.createObjectURL(memoryFile.file)
+                        setLightboxSrc(url)
+                      }
+                    }
+                  }}
+                >
+                  {(() => {
+                    const mimeType = evidenceFile?.mime_type || memoryFile?.mime_type || memoryFile?.file?.type
+                    const fileName = evidenceFile?.file_name || memoryFile?.file_name
+
+                    // 1. 圖片：顯示縮圖
+                    if (mimeType?.startsWith('image/')) {
+                      if (evidenceFile) {
+                        const thumbnailUrl = thumbnails[evidenceFile.id]
+                        return thumbnailUrl ? (
+                          <img src={thumbnailUrl} alt="preview" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                        ) : (
+                          <span className="text-[24px]">🖼️</span>
+                        )
+                      } else if (memoryFile) {
+                        const previewUrl = memoryFile.preview || (memoryFile.file ? URL.createObjectURL(memoryFile.file) : '')
+                        return previewUrl ? (
+                          <img src={previewUrl} alt="preview" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                        ) : (
+                          <span className="text-[24px]">🖼️</span>
+                        )
+                      }
+                    }
+
+                    // 2. PDF：紅色 icon
+                    if (mimeType === 'application/pdf') {
+                      return (
+                        <svg width="36" height="36" viewBox="0 0 24 24" fill="none">
+                          <path d="M14 2H6C5.46957 2 4.96086 2.21071 4.58579 2.58579C4.21071 2.96086 4 3.46957 4 4V20C4 20.5304 4.21071 21.0391 4.58579 21.4142C4.96086 21.7893 5.46957 22 6 22H18C18.5304 22 19.0391 21.7893 19.4142 21.4142C19.7893 21.0391 20 20.5304 20 20V8L14 2Z" stroke="#DC2626" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                          <path d="M14 2V8H20" stroke="#DC2626" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                          <text x="12" y="17" fontSize="7" fill="#DC2626" textAnchor="middle" fontWeight="bold">PDF</text>
+                        </svg>
+                      )
+                    }
+
+                    // 3. Excel：綠色 icon
+                    if (mimeType?.includes('excel') || mimeType?.includes('spreadsheet') ||
+                        fileName?.match(/\.(xlsx?|xls)$/i)) {
+                      return (
+                        <svg width="36" height="36" viewBox="0 0 24 24" fill="none">
+                          <path d="M14 2H6C5.46957 2 4.96086 2.21071 4.58579 2.58579C4.21071 2.96086 4 3.46957 4 4V20C4 20.5304 4.21071 21.0391 4.58579 21.4142C4.96086 21.7893 5.46957 22 6 22H18C18.5304 22 19.0391 21.7893 19.4142 21.4142C19.7893 21.0391 20 20.5304 20 20V8L14 2Z" stroke="#16A34A" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                          <path d="M14 2V8H20" stroke="#16A34A" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                          <text x="12" y="17" fontSize="6.5" fill="#16A34A" textAnchor="middle" fontWeight="bold">XLS</text>
+                        </svg>
+                      )
+                    }
+
+                    // 4. Word：藍色 icon
+                    if (mimeType?.includes('wordprocessingml') || mimeType === 'application/msword' ||
+                        fileName?.match(/\.(docx?|doc)$/i)) {
+                      return (
+                        <svg width="36" height="36" viewBox="0 0 24 24" fill="none">
+                          <path d="M14 2H6C5.46957 2 4.96086 2.21071 4.58579 2.58579C4.21071 2.96086 4 3.46957 4 4V20C4 20.5304 4.21071 21.0391 4.58579 21.4142C4.96086 21.7893 5.46957 22 6 22H18C18.5304 22 19.0391 21.7893 19.4142 21.4142C19.7893 21.0391 20 20.5304 20 20V8L14 2Z" stroke="#2563EB" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                          <path d="M14 2V8H20" stroke="#2563EB" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                          <text x="12" y="17" fontSize="6.5" fill="#2563EB" textAnchor="middle" fontWeight="bold">DOC</text>
+                        </svg>
+                      )
+                    }
+
+                    // 5. 其他檔案：灰色 icon
+                    if (hasFile) {
+                      return (
+                        <svg width="36" height="36" viewBox="0 0 24 24" fill="none">
+                          <path d="M14 2H6C5.46957 2 4.96086 2.21071 4.58579 2.58579C4.21071 2.96086 4 3.46957 4 4V20C4 20.5304 4.21071 21.0391 4.58579 21.4142C4.96086 21.7893 5.46957 22 6 22H18C18.5304 22 19.0391 21.7893 19.4142 21.4142C19.7893 21.0391 20 20.5304 20 20V8L14 2Z" stroke="#666666" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                          <path d="M14 2V8H20" stroke="#666666" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                        </svg>
+                      )
+                    }
+
+                    // 6. 無檔案：資料夾 icon
+                    return <span className="text-[24px]">📁</span>
+                  })()}
+                </div>
+
+                {/* 檔名 */}
+                <div className="flex-1">
+                  <p className="text-[16px] text-black font-medium">
+                    {evidenceFile?.file_name || memoryFile?.file_name || '無佐證'}
+                  </p>
+                  <p className="text-[15px] text-gray-500">
+                    {evidenceFile ? `${(evidenceFile.file_size / 1024).toFixed(1)} KB` : memoryFile ? `${(memoryFile.file_size / 1024).toFixed(1)} KB` : ''}
+                  </p>
+                </div>
+
+                {/* 使用數據 */}
+                <div className="text-center">
+                  <p className="text-[24px] text-black">/ 使用數據</p>
+                </div>
+
+                {/* 筆數 */}
+                <div className="text-center">
+                  <p className="text-[28px] font-medium text-black">{groupRecords.length} 筆</p>
+                </div>
+
+                {/* 操作按鈕組 */}
+                <div className="flex items-center" style={{ gap: '8px', marginRight: '20px' }}>
+                  {/* 編輯按鈕 */}
+                  <button
+                    onClick={() => loadGroupToEditor(groupId!)}
+                    disabled={isReadOnly || approvalStatus.isApproved}
+                    className="p-2 text-black hover:text-gray-700 hover:bg-gray-100 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                    title="編輯群組"
+                  >
+                    <Pencil className="w-6 h-6" />
+                  </button>
+
+                  {/* 刪除按鈕 */}
+                  <button
+                    onClick={() => deleteSavedGroup(groupId!)}
+                    disabled={isReadOnly || approvalStatus.isApproved}
+                    className="p-2 hover:bg-red-50 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                    title="刪除群組"
+                  >
+                    <Trash2 className="w-7 h-7" style={{ color: '#DC2626' }} />
+                  </button>
+                </div>
+              </div>
+            )
+          })}
+
+          {savedGroups.length === 0 && (
+            <div className="text-center py-8 text-gray-400">
+              尚無已新增的群組
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* 審核區塊 - 只在審核模式顯示 */}
+      {isReviewMode && (
+        <div className="max-w-4xl mx-auto mt-8">
+          <ReviewSection
+            entryId={reviewEntryId || currentEntryId || `diesel_${year}`}
+            userId={reviewUserId || "current_user"}
+            category="柴油"
+            userName="填報用戶"
+            amount={dieselData.reduce((sum, item) => sum + item.quantity, 0)}
+            unit="L"
+            role={role}
+            onSave={handleSave}
+            isSaving={submitLoading}
+            onApprove={() => {
+              // ReviewSection 會處理 API 呼叫和導航
+            }}
+            onReject={(reason) => {
+              // ReviewSection 會處理 API 呼叫和導航
+            }}
+          />
         </div>
       )}
 
+      <div className="h-20"></div>
+
+      {/* 清除確認模態框 */}
+      <ConfirmClearModal
+        show={showClearConfirmModal}
+        onConfirm={handleClearConfirm}
+        onCancel={() => setShowClearConfirmModal(false)}
+        isClearing={clearLoading}
+      />
+
       {/* Lightbox：點圖放大 */}
-      {lightboxSrc && (
+      {lightboxSrc && createPortal(
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/70"
+          className="fixed inset-0 flex items-center justify-center bg-black/70"
+          style={{ zIndex: LAYOUT_CONSTANTS.MODAL_Z_INDEX }}
           onClick={() => setLightboxSrc(null)}
         >
           <img
@@ -1328,7 +1528,8 @@ export default function DieselPage() {
           >
             <X className="w-8 h-8" />
           </button>
-        </div>
+        </div>,
+        document.body
       )}
 
       {/* Toast 訊息 */}
@@ -1349,87 +1550,13 @@ export default function DieselPage() {
       )}
 
       {/* 提交成功彈窗 */}
-      {showSuccessModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50 p-4">
-          <div className="bg-white rounded-lg shadow-lg max-w-md w-full">
-            <div className="p-6">
-              {/* 關閉按鈕 */}
-              <div className="flex justify-end mb-2">
-                <button
-                  onClick={() => setShowSuccessModal(false)}
-                  className="text-gray-400 hover:text-gray-600 transition-colors"
-                  aria-label="關閉"
-                >
-                  <X className="w-5 h-5" />
-                </button>
-              </div>
-
-              {/* 內容區 */}
-              <div className="text-center">
-                {/* 成功圖示 */}
-                <div
-                  className="w-12 h-12 mx-auto rounded-full mb-4 flex items-center justify-center"
-                  style={{ backgroundColor: designTokens.colors.success }}
-                >
-                  <CheckCircle className="h-6 w-6 text-white" />
-                </div>
-
-                {/* 標題 */}
-                <h3
-                  className="text-lg font-medium mb-2"
-                  style={{ color: designTokens.colors.textPrimary }}
-                >
-                  提交成功！
-                </h3>
-
-                {/* 成功訊息 */}
-                <p
-                  className="mb-4 font-medium text-lg"
-                  style={{ color: designTokens.colors.textPrimary }}
-                >
-                  {success}
-                </p>
-
-                {/* 提示資訊卡片 */}
-                <div
-                  className="rounded-lg p-4 mb-4 text-left"
-                  style={{ backgroundColor: designTokens.colors.accentLight }}
-                >
-                  <p
-                    className="text-base mb-2 font-medium"
-                    style={{ color: designTokens.colors.textPrimary }}
-                  >
-                    您的資料已成功儲存，您可以：
-                  </p>
-                  <ul
-                    className="text-base space-y-1"
-                    style={{ color: designTokens.colors.textSecondary }}
-                  >
-                    <li>• 隨時回來查看或修改資料</li>
-                    <li>• 重新上傳新的證明文件</li>
-                    <li>• 新增或刪除使用記錄</li>
-                  </ul>
-                </div>
-
-                {/* 確認按鈕 */}
-                <button
-                  onClick={() => setShowSuccessModal(false)}
-                  className="w-full py-2 rounded-lg text-white font-medium transition-colors"
-                  style={{ backgroundColor: designTokens.colors.primary }}
-                  onMouseEnter={(e) => {
-                    (e.target as HTMLButtonElement).style.backgroundColor = '#10b981';
-                  }}
-                  onMouseLeave={(e) => {
-                    (e.target as HTMLButtonElement).style.backgroundColor = designTokens.colors.primary;
-                  }}
-                >
-                  確認
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-    </div>
+      <SuccessModal
+        show={showSuccessModal}
+        message={success || ''}
+        type={successModalType}
+        onClose={() => setShowSuccessModal(false)}
+      />
+    </SharedPageLayout>
+    </>
   );
 }

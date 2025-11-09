@@ -3,6 +3,12 @@ import { useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabaseClient'
 import { CATEGORY_GROUPS } from '../config/categoryMapping'
 import LogoutButton from '../components/common/LogoutButton'
+import BottomActionBar from '../components/BottomActionBar'
+import { EntryStatus } from '../components/StatusSwitcher'
+import PageHeader from '../components/PageHeader'
+import StatusBanner from '../components/StatusBanner'
+import InstructionText from '../components/InstructionText'
+import { ApprovalStatus } from '../hooks/useApprovalStatus'
 
 interface SharedPageLayoutProps {
   children: React.ReactNode
@@ -10,6 +16,32 @@ interface SharedPageLayoutProps {
   actionButtonText?: string
   /** 是否顯示右側按鈕，預設為 true */
   showActionButton?: boolean
+
+  // PageHeader 配置 - 頁面標題（D、柴油(移動源)、Diesel）
+  pageHeader?: {
+    category: string
+    title: string
+    subtitle: string
+  }
+
+  // StatusBanner 配置 - 審核狀態橫幅
+  statusBanner?: {
+    approvalStatus: ApprovalStatus
+    isReviewMode?: boolean
+  }
+
+  // InstructionText 配置 - 說明文字（每頁不同）
+  instructionText?: string
+
+  // BottomActionBar 配置 - 傳入這些 props 即可自動顯示底部操作欄
+  bottomActionBar?: {
+    currentStatus: EntryStatus
+    submitting: boolean
+    onSubmit: () => void
+    onSave?: () => void
+    onClear: () => void
+    show?: boolean  // 是否顯示（預設 true）
+  }
 }
 
 /**
@@ -23,7 +55,11 @@ interface SharedPageLayoutProps {
 const SharedPageLayout: React.FC<SharedPageLayoutProps> = ({
   children,
   actionButtonText = '盤查清單/佐證範例',
-  showActionButton = true
+  showActionButton = true,
+  pageHeader,
+  statusBanner,
+  instructionText,
+  bottomActionBar
 }) => {
   const navigate = useNavigate()
   const [scale, setScale] = useState(1)
@@ -224,7 +260,7 @@ const SharedPageLayout: React.FC<SharedPageLayoutProps> = ({
                   top: '50%',
                   transform: 'translateY(-50%)',
                   width: '273px',
-                  height: '54px',
+                  height: '51px',
                   fontSize: '20px',
                   fontWeight: 600,
                   letterSpacing: '1.4px',
@@ -258,9 +294,56 @@ const SharedPageLayout: React.FC<SharedPageLayoutProps> = ({
             backgroundColor: '#FFFFFF'
           }}
         >
+          {/* 頁面標題 */}
+          {pageHeader && (
+            <PageHeader
+              category={pageHeader.category}
+              title={pageHeader.title}
+              subtitle={pageHeader.subtitle}
+            />
+          )}
+
+          {/* 審核狀態橫幅 */}
+          {statusBanner && (
+            <StatusBanner
+              approvalStatus={statusBanner.approvalStatus}
+              isReviewMode={statusBanner.isReviewMode}
+            />
+          )}
+
+          {/* 說明文字 */}
+          {instructionText && (
+            <InstructionText content={instructionText} />
+          )}
+
           {children}
         </main>
       </div>
+
+      {/* 底部操作欄 - 固定在視窗底部，並應用相同的縮放 */}
+      {bottomActionBar && (bottomActionBar.show !== false) && (
+        <div
+          className="fixed bottom-0 left-0 flex justify-center"
+          style={{ zIndex: 50, right: `${30 / scale}px` }}
+        >
+          <div
+            style={{
+              width: '1920px',
+              transform: `scale(${scale})`,
+              transformOrigin: 'bottom center'
+            }}
+          >
+            <BottomActionBar
+              currentStatus={bottomActionBar.currentStatus}
+              submitting={bottomActionBar.submitting}
+              onSubmit={bottomActionBar.onSubmit}
+              onSave={bottomActionBar.onSave}
+              onClear={bottomActionBar.onClear}
+              containerMode={true}
+            />
+          </div>
+        </div>
+      )}
     </div>
   )
 }

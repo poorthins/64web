@@ -54,6 +54,7 @@ interface EvidenceUploadProps {
   hideFileCount?: boolean  // 隱藏檔案數量顯示
   isAdminReviewMode?: boolean  // 管理員審核模式標記
   onFileDeleted?: () => void  // 檔案刪除成功後的回調（用於 reload）
+  hideUploadArea?: boolean  // 隱藏上傳區域（讓外層自定義觸發）
 }
 
 // 輔助函數：判斷當前狀態是否允許上傳檔案
@@ -85,7 +86,8 @@ const EvidenceUpload: React.FC<EvidenceUploadProps> = ({
   onMemoryFilesChange,
   hideFileCount = false,
   isAdminReviewMode = false,
-  onFileDeleted
+  onFileDeleted,
+  hideUploadArea = false
 }) => {
 
   const [uploading, setUploading] = useState(false)
@@ -606,8 +608,8 @@ const EvidenceUpload: React.FC<EvidenceUploadProps> = ({
         </div>
       )}
 
-      {/* 上傳區域 - 只在未達上限時顯示 */}
-      {!isAtMaxCapacity && (
+      {/* 上傳區域 - 只在未達上限且未隱藏時顯示 */}
+      {!hideUploadArea && !isAtMaxCapacity && (
         <div
           className={`
             min-h-[120px] border-2 border-dashed rounded-lg text-center transition-all duration-200
@@ -680,6 +682,23 @@ const EvidenceUpload: React.FC<EvidenceUploadProps> = ({
             </>
           )}
         </div>
+      )}
+
+      {/* 隱藏上傳區域時，仍需要提供 input 元素供外部觸發 */}
+      {hideUploadArea && (
+        <input
+          ref={fileInputRef}
+          type="file"
+          multiple
+          accept=".xlsx,.xls,.pdf,.jpg,.jpeg,.png,.gif,.webp,.bmp,.svg,image/*,application/pdf,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+          onChange={(e) => {
+            if (!uploading && e.target.files) {
+              handleFileSelect(e.target.files)
+            }
+          }}
+          className="hidden"
+          disabled={isUploadDisabled}
+        />
       )}
 
       {/* 成功訊息 */}
