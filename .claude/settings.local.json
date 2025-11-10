@@ -53,7 +53,9 @@
       "Bash(nul)",
       "Bash(copy DieselPage.tsx +,,)",
       "mcp__figma-remote-mcp__get_screenshot",
-      "mcp__figma-remote-mcp__get_design_context"
+      "mcp__figma-remote-mcp__get_design_context",
+      "Bash(sed:*)",
+      "Bash(mkdir:*)"
     ],
     "deny": [],
     "ask": []

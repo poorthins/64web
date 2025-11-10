@@ -1,12 +1,14 @@
 import React from 'react'
 
 interface PageHeaderProps {
-  /** 類別標籤（如 "Diesel (Mobile Sources)"） */
+  /** 類別標籤（如 "D", "G"） */
   category: string
-  /** 中文主標題（如 "柴油使用量填報"） */
+  /** 中文主標題（如 "柴油(移動源)"） */
   title: string
-  /** 英文副標題（如 "Diesel Usage Report"） */
+  /** 英文副標題（如 "Diesel (Mobile Sources)"） */
   subtitle: string
+  /** Icon 顏色（可選，預設 #3996FE） */
+  iconColor?: string
 }
 
 /**
@@ -29,7 +31,8 @@ interface PageHeaderProps {
 export const PageHeader: React.FC<PageHeaderProps> = ({
   category,
   title,
-  subtitle
+  subtitle,
+  iconColor = '#3996FE'
 }) => {
   return (
     <div
@@ -51,7 +54,7 @@ export const PageHeader: React.FC<PageHeaderProps> = ({
       >
         <p
           style={{
-            color: '#3996FE',
+            color: iconColor,
             textAlign: 'center',
             fontFamily: '"Pixelify Sans"',
             fontSize: '96px',

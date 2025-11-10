@@ -1646,6 +1646,208 @@ frontend/src/
 
 ---
 
+## 移動源能源頁面架構 (柴油、汽油)
+
+### 快速參考：我要改什麼？
+
+這是配置驅動的架構 - **所有差異都在配置檔**。
+
+#### 📋 配置檔案一覽表
+
+| 需求 | 修改檔案 | 修改位置 |
+|------|---------|---------|
+| 🎨 **改顏色** | `mobileEnergyConfig.ts` | `iconColor: '#0219A7'` (L45) |
+| 🔤 **改標題** | `mobileEnergyConfig.ts` | `title: '汽油'` (L43) |
+| 📝 **改說明文字** | `mobileEnergyConfig.ts` | `instructionText: '...'` (L47) |
+| 🔧 **改單位** | `mobileEnergyConfig.ts` | `unit: 'L'` (L46) |
+| 🆕 **新增頁面** | 複製 `GasolinePage.tsx` → 只改 `import CONFIG` |
+| 🔌 **改 API 欄位名** | `mobileEnergyConfig.ts` | `dataFieldName: 'gasolineData'` (L48) |
+
+#### 📂 檔案結構
+
+```
+src/pages/Category1/
+├── DieselPage.tsx          # 柴油頁面 (使用 DIESEL_CONFIG)
+├── GasolinePage.tsx        # 汽油頁面 (使用 GASOLINE_CONFIG)
+└── shared/
+    ├── mobileEnergyConfig.ts           # ⭐ 所有配置集中在這裡
+    └── mobile/
+        ├── mobileEnergyTypes.ts        # 型別定義
+        ├── mobileEnergyConstants.ts    # 版面常數
+        ├── mobileEnergyUtils.ts        # 共用函式
+        └── components/
+            ├── MobileEnergyUsageSection.tsx     # 編輯區組件
+            ├── MobileEnergyGroupListSection.tsx # 列表區組件
+            └── ImageLightbox.tsx                # 圖片燈箱
+```
+
+### 配置檔詳解 (mobileEnergyConfig.ts)
+
+```typescript
+export interface MobileEnergyConfig {
+  pageKey: 'diesel' | 'gasoline'           // API 識別碼
+  category: string                          // 大字母標籤 (D, G)
+  title: string                             // 中文標題
+  subtitle: string                          // 英文副標題
+  iconColor: string                         // 主題顏色 (16進位)
+  unit: string                              // 數據單位 (L, kg...)
+  instructionText: string                   // 頁面說明文字
+  dataFieldName: string                     // API payload 欄位名
+}
+
+// 柴油配置
+export const DIESEL_CONFIG: MobileEnergyConfig = {
+  pageKey: 'diesel',
+  category: 'D',
+  title: '柴油(移動源)',
+  subtitle: 'Diesel (Mobile Sources)',
+  iconColor: '#3996FE',   // 藍色
+  unit: 'L',
+  instructionText: '請先選擇設備項目...',
+  dataFieldName: 'dieselData'
+}
+
+// 汽油配置
+export const GASOLINE_CONFIG: MobileEnergyConfig = {
+  pageKey: 'gasoline',
+  category: 'G',
+  title: '汽油',
+  subtitle: 'Gasoline)',
+  iconColor: '#0219A7',   // 深藍色
+  unit: 'L',
+  instructionText: '請先選擇設備項目...',
+  dataFieldName: 'gasolineData'
+}
+```
+
+### 主題顏色如何運作
+
+配置檔的 `iconColor` 會自動應用到以下位置：
+
+| UI 元素 | 顏色來源 | 檔案位置 |
+|---------|---------|---------|
+| 類別字母 "G" | `iconColor` → `PageHeader` | `PageHeader.tsx:54` |
+| 審核狀態陰影 | `accentColor` → `StatusBanner` | `StatusBanner.tsx:70` |
+| 底部操作欄 | `accentColor` → `BottomActionBar` | `BottomActionBar.tsx:56` |
+| Database Icon | `iconColor` → `MobileEnergyUsageSection` | `MobileEnergyUsageSection.tsx:108` |
+| 表頭背景 | `iconColor` → `MobileEnergyUsageSection` | `MobileEnergyUsageSection.tsx:309` |
+| 新增按鈕 | `iconColor` → `MobileEnergyUsageSection` | `MobileEnergyUsageSection.tsx:348` |
+| List Icon | `iconColor` → `MobileEnergyGroupListSection` | `MobileEnergyGroupListSection.tsx:47` |
+
+**實例：**
+- 柴油頁面 = `#3996FE` (原藍色)
+- 汽油頁面 = `#0219A7` (深藍色)
+
+### 如何新增類似頁面 (如天然氣)
+
+**步驟 1：新增配置** (`mobileEnergyConfig.ts`)
+
+```typescript
+export const NATURALGAS_CONFIG: MobileEnergyConfig = {
+  pageKey: 'naturalgas',
+  category: 'N',
+  title: '天然氣',
+  subtitle: 'Natural Gas)',
+  iconColor: '#FF6B35',  // 橘色
+  unit: 'm³',
+  instructionText: '請上傳天然氣使用單據...',
+  dataFieldName: 'naturalgasData'
+}
+```
+
+**步驟 2：複製頁面檔案**
+
+```bash
+cp GasolinePage.tsx NaturalGasPage.tsx
+```
+
+**步驟 3：只改 3 行**
+
+```tsx
+// NaturalGasPage.tsx
+import { NATURALGAS_CONFIG } from './shared/mobileEnergyConfig'  // L26
+
+export default function NaturalGasPage() {
+  const pageKey = 'naturalgas'  // L37
+  // ... 其他程式碼完全不用改
+}
+```
+
+**步驟 4：在 SharedPageLayout、Section 組件傳入時改用新 CONFIG**
+
+```tsx
+// 所有用到 GASOLINE_CONFIG 的地方改成 NATURALGAS_CONFIG
+<SharedPageLayout
+  pageHeader={{
+    category: NATURALGAS_CONFIG.category,
+    title: NATURALGAS_CONFIG.title,
+    subtitle: NATURALGAS_CONFIG.subtitle,
+    iconColor: NATURALGAS_CONFIG.iconColor
+  }}
+  // ...
+/>
+```
+
+完成！整個頁面自動套用新配置。
+
+### 資料流程圖
+
+```
+使用者輸入
+    ↓
+currentEditingGroup (編輯中的群組)
+    ↓
+saveCurrentGroup() → savedGroups (已儲存的群組)
+    ↓
+handleSubmit() / handleSave()
+    ↓
+prepareSubmissionData() - 清理資料、去重檔案
+    ↓
+submit() / save() - 上傳到 Supabase
+    ↓
+API Payload 使用 config.dataFieldName
+```
+
+### 為什麼不用「萬能組件」？
+
+❌ **錯誤做法：**
+
+```tsx
+<UniversalEnergyPage
+  mode={isDiesel ? 'mobile' : isLPG ? 'monthly' : 'fixed'}
+  config={configs[pageType]}
+  // ... 20 個 if/else
+/>
+```
+
+✅ **正確做法：**
+
+```tsx
+// DieselPage.tsx - 只處理柴油
+<MobileEnergyUsageSection iconColor={DIESEL_CONFIG.iconColor} />
+
+// GasolinePage.tsx - 只處理汽油
+<MobileEnergyUsageSection iconColor={GASOLINE_CONFIG.iconColor} />
+```
+
+**Linus 原則：** 消除特殊情況（配置），而不是用 if/else 處理特殊情況。
+
+### 快速問答
+
+**Q: 我要改汽油頁面的顏色，要改幾個檔案？**
+A: 只改 1 個檔案 - `mobileEnergyConfig.ts` L45
+
+**Q: 我要新增煤炭頁面，要寫多少程式碼？**
+A: 加 10 行配置，複製 1 個頁面檔案，改 3 行
+
+**Q: 為什麼不把柴油和汽油合併成一個組件？**
+A: 它們已經共用組件了 (`MobileEnergyUsageSection`)，只有配置不同。分開的頁面檔案讓每個頁面更清晰，符合單一職責原則。
+
+**Q: 測試怎麼辦？**
+A: 測試共用組件 1 次，所有頁面都受益。配置檔不需要測試（只是資料）。
+
+---
+
 ## 總結
 
 **成果：**
@@ -1654,12 +1856,14 @@ frontend/src/
 - ✅ 改善比例 7.2 倍
 - ✅ 維護成本降低 10 倍
 - ✅ 測試成本降低 4 倍
+- ✅ 移動源頁面實現配置驅動架構 (柴油、汽油共用)
 
 **原則：**
 - 重複 ≥3 次才抽取
 - 100% 相同邏輯
 - 抽取後更簡單
 - 不強行統一不同的東西
+- **配置驅動 > 萬能組件**
 
 **Linus 語錄：**
 > "消除邊界情況永遠優於增加條件判斷。"

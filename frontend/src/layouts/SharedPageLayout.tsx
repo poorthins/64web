@@ -22,12 +22,14 @@ interface SharedPageLayoutProps {
     category: string
     title: string
     subtitle: string
+    iconColor?: string
   }
 
   // StatusBanner 配置 - 審核狀態橫幅
   statusBanner?: {
     approvalStatus: ApprovalStatus
     isReviewMode?: boolean
+    accentColor?: string
   }
 
   // InstructionText 配置 - 說明文字（每頁不同）
@@ -41,6 +43,7 @@ interface SharedPageLayoutProps {
     onSave?: () => void
     onClear: () => void
     show?: boolean  // 是否顯示（預設 true）
+    accentColor?: string
   }
 }
 
@@ -300,6 +303,7 @@ const SharedPageLayout: React.FC<SharedPageLayoutProps> = ({
               category={pageHeader.category}
               title={pageHeader.title}
               subtitle={pageHeader.subtitle}
+              iconColor={pageHeader.iconColor}
             />
           )}
 
@@ -308,6 +312,7 @@ const SharedPageLayout: React.FC<SharedPageLayoutProps> = ({
             <StatusBanner
               approvalStatus={statusBanner.approvalStatus}
               isReviewMode={statusBanner.isReviewMode}
+              accentColor={statusBanner.accentColor}
             />
           )}
 
@@ -340,6 +345,7 @@ const SharedPageLayout: React.FC<SharedPageLayoutProps> = ({
               onSave={bottomActionBar.onSave}
               onClear={bottomActionBar.onClear}
               containerMode={true}
+              accentColor={bottomActionBar.accentColor}
             />
           </div>
         </div>

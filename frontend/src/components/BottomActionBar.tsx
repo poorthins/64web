@@ -15,6 +15,9 @@ interface BottomActionBarProps {
 
   // 容器模式：true 時由父容器控制定位，false 時使用 fixed 定位（預設）
   containerMode?: boolean
+
+  // 主題顏色（預設 #3996FE 柴油藍）
+  accentColor?: string
 }
 
 /**
@@ -32,7 +35,8 @@ export default function BottomActionBar({
   onSubmit,
   onSave,
   onClear,
-  containerMode = false
+  containerMode = false,
+  accentColor = '#3996FE'
 }: BottomActionBarProps) {
 
   // 權限判斷
@@ -53,7 +57,7 @@ export default function BottomActionBar({
           width: '1920px',
           height: '83px',
           flexShrink: 0,
-          background: '#3996FE'
+          background: accentColor
         }}
       >
             {/* 操作按鈕組 - 按照 Figma 精確定位 */}

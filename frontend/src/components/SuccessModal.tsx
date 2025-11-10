@@ -91,7 +91,7 @@ export const SuccessModal: React.FC<SuccessModalProps> = ({
             {/* 提示資訊卡片 */}
             <div
               className="rounded-lg p-4 mb-4 text-left"
-              style={{ backgroundColor: designTokens.colors.accentLight }}
+              style={{ backgroundColor: 'rgba(245, 245, 245, 0.90)' }}
             >
               <p
                 className="text-base mb-2 font-medium"

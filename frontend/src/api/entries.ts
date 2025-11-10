@@ -81,10 +81,15 @@ export function getCategoryFromPageKey(pageKey: string): string {
 /**
  * 新增或更新能源填報記錄
  * @param input - 填報輸入資料
- * @param preserveStatus - 是否保持現有狀態（預設為 false，會設為 submitted）
+ * @param preserveStatus - 是否保持現有狀態（預設為 false，會設為 initialStatus 或 submitted）
+ * @param initialStatus - 當 preserveStatus=false 或無現有記錄時使用的初始狀態（預設 'submitted'）
  * @returns Promise<UpsertEntryResult>
  */
-export async function upsertEnergyEntry(input: UpsertEntryInput, preserveStatus: boolean = false): Promise<UpsertEntryResult> {
+export async function upsertEnergyEntry(
+  input: UpsertEntryInput,
+  preserveStatus: boolean = false,
+  initialStatus: 'saved' | 'submitted' = 'submitted'
+): Promise<UpsertEntryResult> {
   try {
     const authResult = await validateAuth()
     if (authResult.error || !authResult.user) {
@@ -97,7 +102,8 @@ export async function upsertEnergyEntry(input: UpsertEntryInput, preserveStatus:
       page_key: input.page_key,
       period_year: input.period_year,
       monthly_data_count: Object.keys(input.monthly).length,
-      preserve_status: preserveStatus
+      preserve_status: preserveStatus,
+      initial_status: initialStatus
     })
 
     // 計算總使用量
@@ -132,13 +138,13 @@ export async function upsertEnergyEntry(input: UpsertEntryInput, preserveStatus:
 
     console.log('📋 [upsertEnergyEntry] Existing entry:', existingEntry)
 
-    // 決定狀態：如果要保持現有狀態且有現有記錄，則使用現有狀態；否則設為 submitted
-    let status = 'submitted'
+    // 決定狀態：如果要保持現有狀態且有現有記錄，則使用現有狀態；否則使用 initialStatus
+    let status = initialStatus
     if (preserveStatus && existingEntry?.status) {
       status = existingEntry.status
       console.log('🔄 [upsertEnergyEntry] Preserving existing status:', status)
     } else {
-      console.log('🔄 [upsertEnergyEntry] Setting status to submitted')
+      console.log(`🔄 [upsertEnergyEntry] Setting status to ${initialStatus}`)
     }
 
     // 準備 upsert 資料

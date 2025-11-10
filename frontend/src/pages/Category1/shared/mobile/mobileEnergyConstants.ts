@@ -1,0 +1,38 @@
+/**
+ * 移動源能源頁面常數定義（柴油、汽油等共用）
+ */
+
+export const LAYOUT_CONSTANTS = {
+  // 容器尺寸
+  CONTAINER_WIDTH: 1102,
+  CONTAINER_MIN_HEIGHT: 555,
+
+  // 編輯區 - 左側上傳區
+  EDITOR_UPLOAD_WIDTH: 358,
+  EDITOR_UPLOAD_HEIGHT: 308,
+
+  // 編輯區 - 右側表單
+  EDITOR_FORM_WIDTH: 599,
+  EDITOR_FORM_MIN_HEIGHT: 250,
+  EDITOR_FORM_HEADER_HEIGHT: 58,
+
+  // 間距
+  EDITOR_GAP: 47,
+  SECTION_TOP_MARGIN: 103,
+  SECTION_BOTTOM_MARGIN: 34,
+  LIST_TOP_MARGIN: 116.75,
+
+  // 檔案上傳
+  MAX_FILES_PER_GROUP: 1,
+  MAX_FILE_SIZE_MB: 10,
+
+  // 預設記錄數
+  DEFAULT_RECORDS_COUNT: 3,
+
+  // 列表項目
+  GROUP_LIST_WIDTH: 924,
+  GROUP_LIST_HEIGHT: 87,
+
+  // z-index
+  MODAL_Z_INDEX: 20000
+} as const

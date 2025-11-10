@@ -97,7 +97,7 @@ export function useMultiRecordSubmit(
         isDraft ? '暫存多記錄能源填報' : '提交多記錄能源填報',
         async () => await upsertEnergyEntry(
           params.entryInput,
-          isDraft,                           // preserveStatus: 暫存時保持原狀態
+          false,                             // preserveStatus: 總是更新狀態，不保持原狀態
           isDraft ? 'saved' : 'submitted'    // initialStatus: 暫存用 saved，提交用 submitted
         )
       )

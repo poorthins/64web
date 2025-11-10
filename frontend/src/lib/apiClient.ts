@@ -2,7 +2,7 @@
  * API 客戶端配置
  */
 import axios, { AxiosInstance, AxiosRequestConfig, AxiosResponse, AxiosError } from 'axios';
-import { getAuthToken, refreshAuthToken, clearAuth } from '@/features/auth/services/authService';
+import { getAuthToken, refreshAuthToken, clearAuth } from '@/services/authService';
 
 // API 基礎配置
 const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000';

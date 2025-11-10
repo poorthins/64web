@@ -7,6 +7,8 @@ interface StatusBannerProps {
   approvalStatus: ApprovalStatus
   /** 是否為審核模式 */
   isReviewMode?: boolean
+  /** 主題顏色（預設 #3996FE 柴油藍） */
+  accentColor?: string
 }
 
 /**
@@ -35,7 +37,8 @@ interface StatusBannerProps {
  */
 export const StatusBanner: React.FC<StatusBannerProps> = ({
   approvalStatus,
-  isReviewMode = false
+  isReviewMode = false,
+  accentColor = '#3996FE'
 }) => {
   // 審核模式下不顯示狀態橫幅
   if (isReviewMode) {
@@ -65,7 +68,7 @@ export const StatusBanner: React.FC<StatusBannerProps> = ({
         style={{
           width: '993px',
           height: '119px',
-          background: '#3996FE',
+          background: accentColor,
           left: '12px',
           top: '6px'
         }}
@@ -102,23 +105,7 @@ export const StatusBanner: React.FC<StatusBannerProps> = ({
     </div>
   )
 
-  // 已暫存狀態
-  if (approvalStatus.isSaved) {
-    return (
-      <DoubleLayeredCard icon={<Save size={28} />}>
-        <div>
-          <div className="font-semibold mb-2">
-            {formatDate()}資料已暫存
-          </div>
-          <div>
-            您可以繼續提交並編輯資料，異動後請再次點擊「提交」以更新記錄。
-          </div>
-        </div>
-      </DoubleLayeredCard>
-    )
-  }
-
-  // 已審核通過狀態
+  // 已審核通過狀態（最高優先級）
   if (approvalStatus.isApproved) {
     return (
       <DoubleLayeredCard icon={<Star size={28} />}>
@@ -137,25 +124,32 @@ export const StatusBanner: React.FC<StatusBannerProps> = ({
     )
   }
 
-  // 已退回狀態
+  // 已退回狀態（次高優先級）
   if (approvalStatus.isRejected) {
     return (
       <DoubleLayeredCard icon={<X size={28} />}>
         <div>
-          <div className="font-semibold mb-2">
-            填報已被退回
+          <div className="mb-2">
+            {formatDate(approvalStatus.reviewedAt)}填報已被退回，請修正後重新提交
           </div>
-          <div className="mb-1">
-            <span className="font-semibold">退回原因：</span>
-            {approvalStatus.reviewNotes || '無'}
-          </div>
-          {approvalStatus.reviewedAt && (
-            <div className="mb-1">
-              退回時間：{formatDate(approvalStatus.reviewedAt)}
-            </div>
-          )}
           <div>
-            請修正後重新提交
+            退回原因：{approvalStatus.reviewNotes || '無'}
+          </div>
+        </div>
+      </DoubleLayeredCard>
+    )
+  }
+
+  // 已儲存狀態（優先於已提交）
+  if (approvalStatus.isSaved) {
+    return (
+      <DoubleLayeredCard icon={<Save size={28} />}>
+        <div>
+          <div className="font-semibold mb-2">
+            {formatDate()}資料已儲存
+          </div>
+          <div>
+            資料已儲存但尚未提交，您可以繼續修改資料、上傳文件或編輯記錄，完成後請點選「提交審核」
           </div>
         </div>
       </DoubleLayeredCard>
