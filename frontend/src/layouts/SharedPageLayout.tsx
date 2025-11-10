@@ -23,6 +23,7 @@ interface SharedPageLayoutProps {
     title: string
     subtitle: string
     iconColor?: string
+    categoryPosition?: { left: number; top: number }
   }
 
   // StatusBanner 配置 - 審核狀態橫幅
@@ -304,6 +305,7 @@ const SharedPageLayout: React.FC<SharedPageLayoutProps> = ({
               title={pageHeader.title}
               subtitle={pageHeader.subtitle}
               iconColor={pageHeader.iconColor}
+              categoryPosition={pageHeader.categoryPosition}
             />
           )}
 

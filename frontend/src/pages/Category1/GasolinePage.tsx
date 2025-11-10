@@ -587,7 +587,8 @@ export default function GasolinePage() {
           category: GASOLINE_CONFIG.category,
           title: GASOLINE_CONFIG.title,
           subtitle: GASOLINE_CONFIG.subtitle,
-          iconColor: GASOLINE_CONFIG.iconColor
+          iconColor: GASOLINE_CONFIG.iconColor,
+          categoryPosition: GASOLINE_CONFIG.categoryPosition
         }}
         statusBanner={{
           approvalStatus,

@@ -587,7 +587,8 @@ export default function DieselPage() {
           category: DIESEL_CONFIG.category,
           title: DIESEL_CONFIG.title,
           subtitle: DIESEL_CONFIG.subtitle,
-          iconColor: DIESEL_CONFIG.iconColor
+          iconColor: DIESEL_CONFIG.iconColor,
+          categoryPosition: DIESEL_CONFIG.categoryPosition
         }}
         statusBanner={{
           approvalStatus,

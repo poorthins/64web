@@ -296,6 +296,8 @@ return (
 - category: _______（大寫字母，例如：D, G, E, LPG）
 - title: _______（中文標題，例如：柴油(移動源)）
 - subtitle: _______（英文標題，例如：Diesel (Mobile Sources)）
+- categoryPosition.left: _______（類別字母 LEFT 位置，單位 px，例如：646）
+  ※ TOP 統一為 39px（水平對齊）
 
 【InstructionText 配置】
 - instructionText: _______（說明文字，可用 <br /> 換行）

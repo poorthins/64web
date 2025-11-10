@@ -9,6 +9,8 @@ interface PageHeaderProps {
   subtitle: string
   /** Icon 顏色（可選，預設 #3996FE） */
   iconColor?: string
+  /** 類別字母位置（可選，預設 left: 646px, top: 39px） */
+  categoryPosition?: { left: number; top: number }
 }
 
 /**
@@ -32,7 +34,8 @@ export const PageHeader: React.FC<PageHeaderProps> = ({
   category,
   title,
   subtitle,
-  iconColor = '#3996FE'
+  iconColor = '#3996FE',
+  categoryPosition = { left: 646, top: 39 }
 }) => {
   return (
     <div
@@ -46,8 +49,8 @@ export const PageHeader: React.FC<PageHeaderProps> = ({
       <div
         className="absolute flex flex-col justify-center"
         style={{
-          left: '646px',
-          top: '39px',
+          left: `${categoryPosition.left}px`,
+          top: `${categoryPosition.top}px`,
           width: '216px',
           height: '180px'
         }}
