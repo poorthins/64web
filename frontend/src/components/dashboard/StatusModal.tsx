@@ -94,7 +94,7 @@ const StatusModal: React.FC<StatusModalProps> = ({
                 {items.map(item => (
                   <button
                     key={item.id}
-                    onClick={() => handleItemClick(item.route)}
+                    onClick={() => handleItemClick(item.id)}
                     className={`
                       ${config.buttonBg} ${config.buttonText}
                       px-6 py-4 rounded-lg font-medium

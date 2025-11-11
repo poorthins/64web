@@ -1,6 +1,5 @@
 import { useState, useEffect, useMemo } from 'react';
 import { EntryStatus } from '../../components/StatusSwitcher';
-import ReviewSection from '../../components/ReviewSection'
 import ConfirmClearModal from '../../components/ConfirmClearModal'
 import SuccessModal from '../../components/SuccessModal'
 import SharedPageLayout from '../../layouts/SharedPageLayout'
@@ -592,7 +591,8 @@ export default function DieselPage() {
         }}
         statusBanner={{
           approvalStatus,
-          isReviewMode
+          isReviewMode,
+          accentColor: DIESEL_CONFIG.iconColor
         }}
         instructionText={DIESEL_CONFIG.instructionText}
       bottomActionBar={{
@@ -601,7 +601,22 @@ export default function DieselPage() {
         onSubmit: handleSubmit,
         onSave: handleSave,
         onClear: handleClear,
-        show: !isReadOnly && !approvalStatus.isApproved && !isReviewMode
+        show: !isReadOnly && !approvalStatus.isApproved && !isReviewMode,
+        accentColor: DIESEL_CONFIG.iconColor
+      }}
+      reviewSection={{
+        isReviewMode,
+        reviewEntryId,
+        reviewUserId,
+        currentEntryId,
+        pageKey,
+        year,
+        category: DIESEL_CONFIG.title,
+        amount: dieselData.reduce((sum, item) => sum + item.quantity, 0),
+        unit: DIESEL_CONFIG.unit,
+        role,
+        onSave: handleSave,
+        isSaving: submitLoading
       }}
     >
       {/* 使用數據區塊 */}
@@ -633,29 +648,6 @@ export default function DieselPage() {
         onPreviewImage={(src) => setLightboxSrc(src)}
         iconColor={DIESEL_CONFIG.iconColor}
       />
-
-      {/* 審核區塊 - 只在審核模式顯示 */}
-      {isReviewMode && (
-        <div className="max-w-4xl mx-auto mt-8">
-          <ReviewSection
-            entryId={reviewEntryId || currentEntryId || `${pageKey}_${year}`}
-            userId={reviewUserId || "current_user"}
-            category={DIESEL_CONFIG.title}
-            userName="填報用戶"
-            amount={dieselData.reduce((sum, item) => sum + item.quantity, 0)}
-            unit={DIESEL_CONFIG.unit}
-            role={role}
-            onSave={handleSave}
-            isSaving={submitLoading}
-            onApprove={() => {
-              // ReviewSection 會處理 API 呼叫和導航
-            }}
-            onReject={(reason) => {
-              // ReviewSection 會處理 API 呼叫和導航
-            }}
-          />
-        </div>
-      )}
 
       <div className="h-20"></div>
 

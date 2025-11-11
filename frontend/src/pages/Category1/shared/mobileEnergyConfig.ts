@@ -7,7 +7,7 @@
 
 export interface MobileEnergyConfig {
   /** 頁面 key（用於 API） */
-  pageKey: 'diesel' | 'gasoline'
+  pageKey: 'diesel' | 'gasoline' | 'urea'
   /** 類別標籤（顯示在標題左側） */
   category: string
   /** 主標題 */
@@ -24,6 +24,8 @@ export interface MobileEnergyConfig {
   instructionText: string
   /** 資料欄位名稱（在 payload 中） */
   dataFieldName: string
+  /** 是否需要 SDS 上傳（選填） */
+  requiresSDS?: boolean
 }
 
 // 柴油配置
@@ -50,4 +52,18 @@ export const GASOLINE_CONFIG: MobileEnergyConfig = {
   unit: 'L',
   instructionText: '請先選擇設備項目；接著上傳加油單據作為佐證，若同一份佐證文件內含多筆加油紀錄，請使用 「+新增數據到此群組」，<br />讓一份佐證可對應多筆加油數據；當同一份佐證的所有數據新完成後，點選 「+新增群組」，以填寫下一份佐證的數據。',
   dataFieldName: 'gasolineData'
+}
+
+// 尿素配置
+export const UREA_CONFIG: MobileEnergyConfig = {
+  pageKey: 'urea',
+  category: 'U',
+  title: '尿素',
+  subtitle: 'Urea',
+  iconColor: '#3E6606',
+  categoryPosition: { left: 746, top: 39 },
+  unit: 'L',
+  instructionText: '請先上傳 SDS 安全資料表；再上傳添加紀錄佐證，請使用 「+新增數據到此群組」，讓一份佐證可對應多筆數據；<br />當同一份佐證的所有數據新增完成後，請點選 「+新增群組」，以填寫下一份佐證的數據。',
+  dataFieldName: 'ureaData',
+  requiresSDS: true
 }

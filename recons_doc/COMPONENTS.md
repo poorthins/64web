@@ -1671,6 +1671,7 @@ frontend/src/
 src/pages/Category1/
 ├── DieselPage.tsx          # 柴油頁面 (使用 DIESEL_CONFIG)
 ├── GasolinePage.tsx        # 汽油頁面 (使用 GASOLINE_CONFIG)
+├── UreaPage.tsx            # 尿素頁面 (使用 UREA_CONFIG, 含 SDS 上傳)
 └── shared/
     ├── mobileEnergyConfig.ts           # ⭐ 所有配置集中在這裡
     └── mobile/
@@ -1687,14 +1688,16 @@ src/pages/Category1/
 
 ```typescript
 export interface MobileEnergyConfig {
-  pageKey: 'diesel' | 'gasoline'           // API 識別碼
-  category: string                          // 大字母標籤 (D, G)
+  pageKey: 'diesel' | 'gasoline' | 'urea'  // API 識別碼
+  category: string                          // 大字母標籤 (D, G, U)
   title: string                             // 中文標題
   subtitle: string                          // 英文副標題
   iconColor: string                         // 主題顏色 (16進位)
+  categoryPosition: { left: number; top: number }  // 類別字母位置
   unit: string                              // 數據單位 (L, kg...)
   instructionText: string                   // 頁面說明文字
   dataFieldName: string                     // API payload 欄位名
+  requiresSDS?: boolean                     // 是否需要 SDS 上傳（尿素專用）
 }
 
 // 柴油配置
@@ -1714,11 +1717,26 @@ export const GASOLINE_CONFIG: MobileEnergyConfig = {
   pageKey: 'gasoline',
   category: 'G',
   title: '汽油',
-  subtitle: 'Gasoline)',
+  subtitle: 'Gasoline',
   iconColor: '#0219A7',   // 深藍色
+  categoryPosition: { left: 746, top: 39 },
   unit: 'L',
   instructionText: '請先選擇設備項目...',
   dataFieldName: 'gasolineData'
+}
+
+// 尿素配置
+export const UREA_CONFIG: MobileEnergyConfig = {
+  pageKey: 'urea',
+  category: 'U',
+  title: '尿素',
+  subtitle: 'Urea',
+  iconColor: '#3E6606',   // 綠色
+  categoryPosition: { left: 476, top: 39 },
+  unit: 'L',
+  instructionText: '請先上傳 SDS 安全資料表...',
+  dataFieldName: 'ureaData',
+  requiresSDS: true       // ⭐ 尿素需要 SDS
 }
 ```
 
@@ -1739,6 +1757,7 @@ export const GASOLINE_CONFIG: MobileEnergyConfig = {
 **實例：**
 - 柴油頁面 = `#3996FE` (原藍色)
 - 汽油頁面 = `#0219A7` (深藍色)
+- 尿素頁面 = `#3E6606` (綠色)
 
 ### 如何新增類似頁面 (如天然氣)
 

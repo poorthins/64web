@@ -275,6 +275,7 @@ const EvidenceUpload: React.FC<EvidenceUploadProps> = ({
                         kind === 'other' ? 'other' : 'usage_evidence'
         return await uploadEvidence(file, {
           pageKey,
+          standard: '64',  // ISO 14064 標準
           year: new Date().getFullYear(),
           category,
           month: category === 'usage_evidence' ? month : undefined,

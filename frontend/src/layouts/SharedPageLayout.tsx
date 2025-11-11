@@ -9,6 +9,7 @@ import PageHeader from '../components/PageHeader'
 import StatusBanner from '../components/StatusBanner'
 import InstructionText from '../components/InstructionText'
 import { ApprovalStatus } from '../hooks/useApprovalStatus'
+import ReviewSection from '../components/ReviewSection'
 
 interface SharedPageLayoutProps {
   children: React.ReactNode
@@ -46,6 +47,22 @@ interface SharedPageLayoutProps {
     show?: boolean  // 是否顯示（預設 true）
     accentColor?: string
   }
+
+  // ReviewSection 配置 - 審核區塊（統一處理，消除重複程式碼）
+  reviewSection?: {
+    isReviewMode: boolean
+    reviewEntryId: string | null
+    reviewUserId: string | null
+    currentEntryId: string | null
+    pageKey: string
+    year: number
+    category: string
+    amount: number
+    unit: string
+    role: string | null
+    onSave: () => void
+    isSaving: boolean
+  }
 }
 
 /**
@@ -63,7 +80,8 @@ const SharedPageLayout: React.FC<SharedPageLayoutProps> = ({
   pageHeader,
   statusBanner,
   instructionText,
-  bottomActionBar
+  bottomActionBar,
+  reviewSection
 }) => {
   const navigate = useNavigate()
   const [scale, setScale] = useState(1)
@@ -324,6 +342,25 @@ const SharedPageLayout: React.FC<SharedPageLayoutProps> = ({
           )}
 
           {children}
+
+          {/* 審核區塊 - 只在審核模式顯示 */}
+          {reviewSection && reviewSection.isReviewMode && (
+            <div className="max-w-4xl mx-auto mt-8">
+              <ReviewSection
+                entryId={reviewSection.reviewEntryId || reviewSection.currentEntryId || `${reviewSection.pageKey}_${reviewSection.year}`}
+                userId={reviewSection.reviewUserId || "current_user"}
+                category={reviewSection.category}
+                userName="填報用戶"
+                amount={reviewSection.amount}
+                unit={reviewSection.unit}
+                role={reviewSection.role}
+                onSave={reviewSection.onSave}
+                isSaving={reviewSection.isSaving}
+                onApprove={() => {}}
+                onReject={(reason) => {}}
+              />
+            </div>
+          )}
         </main>
       </div>
 

@@ -9,9 +9,8 @@
  * - 保存群組按鈕
  */
 
-import { useRef } from 'react'
 import { Trash2 } from 'lucide-react'
-import { UploadedFileList } from '../../../../../components/energy/UploadedFileList'
+import { FileDropzone } from '../../../../../components/FileDropzone'
 import { RecordInputRow } from '../../../../../components/energy/RecordInputRow'
 import { FileTypeIcon } from '../../../../../components/energy/FileTypeIcon'
 import { getFileType } from '../../../../../utils/energy/fileTypeDetector'
@@ -63,46 +62,6 @@ export function MobileEnergyUsageSection(props: MobileEnergyUsageSectionProps) {
     iconColor
   } = props
 
-  const fileInputRef = useRef<HTMLInputElement>(null)
-
-  const handleFileInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const selectedFiles = e.target.files
-    if (!selectedFiles || selectedFiles.length === 0) return
-
-    // 檢查檔案數量
-    if (currentEditingGroup.memoryFiles.length >= 1) {
-      onError('已達到最大檔案數量限制 (1 個)')
-      return
-    }
-
-    // 建立 MemoryFile
-    const file = selectedFiles[0]
-    let preview = ''
-    if (file.type.startsWith('image/')) {
-      preview = URL.createObjectURL(file)
-    }
-
-    const memoryFile: MemoryFile = {
-      id: `memory-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-      file,
-      preview,
-      file_name: file.name,
-      file_size: file.size,
-      mime_type: file.type
-    }
-
-    // 更新 memoryFiles
-    setCurrentEditingGroup(prev => ({
-      ...prev,
-      memoryFiles: [memoryFile]
-    }))
-
-    // 清空 input value
-    if (fileInputRef.current) {
-      fileInputRef.current.value = ''
-    }
-  }
-
   return (
     <>
       {/* 使用數據標題 - icon 距離左邊界 367px，在說明文字下方 103px */}
@@ -153,57 +112,60 @@ export function MobileEnergyUsageSection(props: MobileEnergyUsageSectionProps) {
           <div className="flex" style={{ gap: `${LAYOUT_CONSTANTS.EDITOR_GAP}px`, alignItems: 'flex-start' }}>
             {/* 左側：佐證上傳區 */}
             <div style={{ width: `${LAYOUT_CONSTANTS.EDITOR_UPLOAD_WIDTH}px` }} className="flex-shrink-0">
-              {/* 上傳區 - 整個白色框框可點擊上傳 */}
-              <div
-                className="bg-white flex flex-col items-center justify-center cursor-pointer hover:bg-blue-50 transition-colors"
-                style={{
-                  width: `${LAYOUT_CONSTANTS.EDITOR_UPLOAD_WIDTH}px`,
-                  height: `${LAYOUT_CONSTANTS.EDITOR_UPLOAD_HEIGHT}px`,
-                  flexShrink: 0,
-                  border: '1px solid rgba(0, 0, 0, 0.25)',
-                  borderRadius: '25px',
-                  padding: '20px'
-                }}
-                onClick={() => {
-                  if (!isReadOnly && !approvalStatus.isApproved && !submitting && editPermissions.canUploadFiles && currentEditingGroup.memoryFiles.length === 0) {
-                    fileInputRef.current?.click()
+              {/* 使用 FileDropzone 元件 */}
+              <FileDropzone
+                width={`${LAYOUT_CONSTANTS.EDITOR_UPLOAD_WIDTH}px`}
+                height={`${LAYOUT_CONSTANTS.EDITOR_UPLOAD_HEIGHT}px`}
+                accept=".xlsx,.xls,.pdf,.jpg,.jpeg,.png,.gif,.webp,.bmp,.svg,image/*,application/pdf,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                multiple={false}
+                onFileSelect={(files) => {
+                  if (!isReadOnly && !submitting && !approvalStatus.isApproved && editPermissions.canUploadFiles) {
+                    // 檢查數量限制
+                    if (currentEditingGroup.memoryFiles.length >= 1) {
+                      onError('已達到最大檔案數量限制 (1 個)')
+                      return
+                    }
+
+                    // 建立 MemoryFile
+                    const file = files[0]
+                    let preview = ''
+                    if (file.type.startsWith('image/')) {
+                      preview = URL.createObjectURL(file)
+                    }
+
+                    const memoryFile: MemoryFile = {
+                      id: `memory-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+                      file,
+                      preview,
+                      file_name: file.name,
+                      file_size: file.size,
+                      mime_type: file.type
+                    }
+
+                    // 更新 memoryFiles
+                    setCurrentEditingGroup(prev => ({
+                      ...prev,
+                      memoryFiles: [memoryFile]
+                    }))
                   }
                 }}
-              >
-                {/* 隱藏的文件輸入 */}
-                <input
-                  ref={fileInputRef}
-                  type="file"
-                  accept=".xlsx,.xls,.pdf,.jpg,.jpeg,.png,.gif,.webp,.bmp,.svg,image/*,application/pdf,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-                  onChange={handleFileInputChange}
-                  className="hidden"
-                  disabled={isReadOnly || approvalStatus.isApproved || submitting || !editPermissions.canUploadFiles}
-                />
-
-                <div className="flex flex-col items-center justify-center text-center pointer-events-none">
-                  <svg xmlns="http://www.w3.org/2000/svg" width="48" height="40" viewBox="0 0 48 40" fill="none" className="mb-4">
-                    <path d="M31.9999 27.9951L23.9999 19.9951M23.9999 19.9951L15.9999 27.9951M23.9999 19.9951V37.9951M40.7799 32.7751C42.7306 31.7116 44.2716 30.0288 45.1597 27.9923C46.0477 25.9558 46.2323 23.6815 45.6843 21.5285C45.1363 19.3754 43.8869 17.4661 42.1333 16.102C40.3796 14.7378 38.2216 13.9966 35.9999 13.9951H33.4799C32.8746 11.6536 31.7462 9.47975 30.1798 7.63707C28.6134 5.79439 26.6496 4.33079 24.4361 3.3563C22.2226 2.38181 19.817 1.9218 17.4002 2.01085C14.9833 2.0999 12.6181 2.73569 10.4823 3.87042C8.34649 5.00515 6.49574 6.60929 5.06916 8.56225C3.64259 10.5152 2.6773 12.7662 2.24588 15.1459C1.81446 17.5256 1.92813 19.9721 2.57835 22.3016C3.22856 24.6311 4.3984 26.7828 5.99992 28.5951" stroke="#1E1E1E" strokeWidth="4" strokeLinecap="round" strokeLinejoin="round"/>
-                  </svg>
-                  <p className="text-[16px] text-black font-medium mb-1">點擊或拖放檔案暫存</p>
-                  <p className="text-[14px] text-gray-500">支援所有檔案格式，最大 10MB</p>
-                </div>
-              </div>
-
-              {/* 已上傳檔案列表（記憶體暫存） */}
-              <UploadedFileList
-                files={currentEditingGroup.memoryFiles}
-                onRemove={(index) => {
+                disabled={isReadOnly || submitting || approvalStatus.isApproved || !editPermissions.canUploadFiles}
+                readOnly={isReadOnly || submitting || approvalStatus.isApproved}
+                file={currentEditingGroup.memoryFiles[0] || null}
+                onRemove={() => {
                   setCurrentEditingGroup(prev => ({
                     ...prev,
-                    memoryFiles: prev.memoryFiles.filter((_, i) => i !== index)
+                    memoryFiles: []
                   }))
                 }}
+                showFileActions={!isReadOnly && !approvalStatus.isApproved && editPermissions.canUploadFiles}
                 onFileClick={(file) => {
-                  if (file.file.type.startsWith('image/')) {
-                    onPreviewImage(file.preview || URL.createObjectURL(file.file))
+                  if (file.preview) {
+                    onPreviewImage(file.preview)
                   }
                 }}
-                disabled={isReadOnly || approvalStatus.isApproved}
+                primaryText="點擊或拖放檔案暫存"
+                secondaryText="支援所有檔案格式，最大 10MB"
               />
 
               {/* 已儲存的佐證檔案（可刪除） */}
