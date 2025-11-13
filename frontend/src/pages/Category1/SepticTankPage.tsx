@@ -1,64 +1,149 @@
-import { useState, useMemo, useEffect } from 'react';
-import { useNavigate, useSearchParams } from 'react-router-dom';
-import { Loader2, AlertCircle, CheckCircle, X } from 'lucide-react';
-import EvidenceUpload from '../../components/EvidenceUpload';
-import { MemoryFile } from '../../components/EvidenceUpload';
-import BottomActionBar from '../../components/BottomActionBar';
+import { useState, useEffect, useMemo } from 'react';
 import { EntryStatus } from '../../components/StatusSwitcher';
-import ReviewSection from '../../components/ReviewSection';
+import ConfirmClearModal from '../../components/ConfirmClearModal'
+import SuccessModal from '../../components/SuccessModal'
+import SharedPageLayout from '../../layouts/SharedPageLayout'
 import { useEditPermissions } from '../../hooks/useEditPermissions';
-import { useGhostFileCleaner } from '../../hooks/useGhostFileCleaner';
 import { useFrontendStatus } from '../../hooks/useFrontendStatus';
-import { useStatusBanner, getBannerColorClasses } from '../../hooks/useStatusBanner';
-import { useEnergyData } from '../../hooks/useEnergyData';
-import { useEnergySubmit } from '../../hooks/useEnergySubmit';
-import { useEnergyClear } from '../../hooks/useEnergyClear';
 import { useApprovalStatus } from '../../hooks/useApprovalStatus';
+import { useReviewMode } from '../../hooks/useReviewMode'
+import { useEnergyData } from '../../hooks/useEnergyData'
+import { useMultiRecordSubmit } from '../../hooks/useMultiRecordSubmit'
+import { useEnergyClear } from '../../hooks/useEnergyClear'
+import { useSubmitGuard } from '../../hooks/useSubmitGuard'
+import { useGhostFileCleaner } from '../../hooks/useGhostFileCleaner'
+import { useRecordFileMapping } from '../../hooks/useRecordFileMapping'
 import { useRole } from '../../hooks/useRole'
-import { useAdminSave } from '../../hooks/useAdminSave';
-import { updateEntryStatus } from '../../api/entries';
-import { EvidenceFile } from '../../api/files';
-import { supabase } from '../../lib/supabaseClient';
-import { designTokens } from '../../utils/designTokens';
+import { useAdminSave } from '../../hooks/useAdminSave'
+import { getFileUrl } from '../../api/files';
+import Toast from '../../components/Toast';
+import { generateRecordId } from '../../utils/idGenerator';
+import { LAYOUT_CONSTANTS } from './shared/mobile/mobileEnergyConstants'
+import { SEPTIC_TANK_CONFIG } from './shared/mobileEnergyConfig'
+import { ImageLightbox } from './shared/mobile/components/ImageLightbox'
+import { SepticTankUsageSection, SepticTankRecord, SepticTankCurrentEditingGroup } from './shared/mobile/components/SepticTankUsageSection'
+import { SepticTankCalendarView } from './shared/mobile/components/SepticTankCalendarView'
+import type { MemoryFile } from '../../services/documentHandler';
 
-
-interface MonthData {
-  month: number;
-  hours: number;          // 當月總工時
+// ⭐ 創建空白記錄（預設 3 格）
+const createEmptyRecords = (): SepticTankRecord[] => {
+  return Array.from({ length: 3 }, () => ({
+    id: generateRecordId(),
+    month: 1,
+    hours: 0,
+    evidenceFiles: [],
+    memoryFiles: [],
+  }))
 }
 
-interface AnnualEvidence {
-  files: EvidenceFile[];  // 年度佐證資料
-  memoryFiles?: MemoryFile[];  // 記憶體暫存檔案
+// ⭐ 按 groupId 分組記錄
+const groupRecordsByGroupId = (records: SepticTankRecord[]): Map<string, SepticTankRecord[]> => {
+  const map = new Map<string, SepticTankRecord[]>()
+  records.forEach(record => {
+    if (!record.groupId) return
+    if (!map.has(record.groupId)) {
+      map.set(record.groupId, [])
+    }
+    map.get(record.groupId)!.push(record)
+  })
+  return map
 }
 
-const monthLabels = ["1月","2月","3月","4月","5月","6月","7月","8月","9月","10月","11月","12月"];
+// ⭐ 收集檔案用於上傳（審核模式專用）
+const collectFilesToUpload = (groupMap: Map<string, SepticTankRecord[]>): Array<{
+  file: File
+  metadata: {
+    recordIndex: number
+    allRecordIds: string[]
+    fileType?: 'msds' | 'usage_evidence' | 'other'
+  }
+}> => {
+  const filesToUpload: Array<{
+    file: File
+    metadata: {
+      recordIndex: number
+      allRecordIds: string[]
+      fileType?: 'msds' | 'usage_evidence' | 'other'
+    }
+  }> = []
+
+  groupMap.forEach((records) => {
+    const firstRecord = records[0]
+    if (firstRecord?.memoryFiles && firstRecord.memoryFiles.length > 0) {
+      firstRecord.memoryFiles.forEach((mf: MemoryFile) => {
+        filesToUpload.push({
+          file: mf.file,
+          metadata: {
+            recordIndex: 0,
+            allRecordIds: records.map(r => r.id),
+            fileType: 'other'
+          }
+        })
+      })
+    }
+  })
+
+  return filesToUpload
+}
+
+// ⭐ 準備提交資料的輔助函數
+const prepareSubmissionData = (records: SepticTankRecord[]) => {
+  // 計算總工時
+  const totalHours = records.reduce((sum, r) => sum + (r.hours || 0), 0)
+
+  // 清理資料（移除暫存檔案）
+  const cleanedData = records.map(r => ({
+    id: r.id,
+    month: r.month,
+    hours: r.hours,
+    groupId: r.groupId
+  }))
+
+  // 按 groupId 分組去重（避免重複上傳檔案）
+  const groupMap = groupRecordsByGroupId(records)
+
+  const deduplicatedRecordData: Array<{
+    id: string
+    memoryFiles: MemoryFile[]
+    allRecordIds: string[]
+  }> = []
+
+  groupMap.forEach((records) => {
+    const firstRecord = records[0]
+    if (firstRecord?.memoryFiles && firstRecord.memoryFiles.length > 0) {
+      deduplicatedRecordData.push({
+        id: firstRecord.id,
+        memoryFiles: firstRecord.memoryFiles,
+        allRecordIds: records.map(r => r.id)
+      })
+    }
+  })
+
+  return {
+    totalHours,
+    cleanedData,
+    deduplicatedRecordData
+  }
+}
 
 export default function SepticTankPage() {
-  const navigate = useNavigate()
-  const [searchParams] = useSearchParams()
-
   // 審核模式檢測
-  const isReviewMode = searchParams.get('mode') === 'review'
-  const reviewEntryId = searchParams.get('entryId')
-  const reviewUserId = searchParams.get('userId')
+  const { isReviewMode, reviewEntryId, reviewUserId } = useReviewMode()
 
-  const pageKey = 'septic_tank'
+  const pageKey = SEPTIC_TANK_CONFIG.pageKey
   const [year] = useState(new Date().getFullYear())
   const [initialStatus, setInitialStatus] = useState<EntryStatus>('submitted')
   const [currentEntryId, setCurrentEntryId] = useState<string | null>(null)
-  const [hasSubmittedBefore, setHasSubmittedBefore] = useState(false)
+  const { executeSubmit, submitting } = useSubmitGuard()
   const [showSuccessModal, setShowSuccessModal] = useState(false)
+  const [successModalType, setSuccessModalType] = useState<'save' | 'submit'>('submit')
   const [showClearConfirmModal, setShowClearConfirmModal] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-  const [success, setSuccess] = useState<string | null>(null)
-  const [monthlyData, setMonthlyData] = useState<MonthData[]>(
-    Array.from({ length: 12 }, (_, i) => ({
-      month: i + 1,
-      hours: 0
-    }))
-  );
-  const [annualEvidence, setAnnualEvidence] = useState<AnnualEvidence>({ files: [], memoryFiles: [] });
+
+  // 圖片放大 lightbox
+  const [lightboxSrc, setLightboxSrc] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [success, setSuccess] = useState<string | null>(null);
+  const [thumbnails, setThumbnails] = useState<{ [key: string]: string }>({});
 
   // 前端狀態管理 Hook
   const frontendStatus = useFrontendStatus({
@@ -69,7 +154,15 @@ export default function SepticTankPage() {
     onSuccess: (message) => setSuccess(message)
   })
 
-  const { currentStatus, setCurrentStatus, handleDataChanged, handleSubmitSuccess, isInitialLoad } = frontendStatus
+  const { currentStatus, setCurrentStatus, handleSubmitSuccess } = frontendStatus
+
+  // 角色檢查
+  const { role } = useRole()
+
+  // 審核模式下只有管理員可編輯
+  const isReadOnly = isReviewMode && role !== 'admin'
+
+  const editPermissions = useEditPermissions(currentStatus, isReadOnly, role ?? undefined)
 
   // 資料載入 Hook
   const entryIdToLoad = isReviewMode && reviewEntryId ? reviewEntryId : undefined
@@ -84,233 +177,349 @@ export default function SepticTankPage() {
   // 審核狀態 Hook
   const { reload: reloadApprovalStatus, ...approvalStatus } = useApprovalStatus(pageKey, year)
 
-  // 狀態橫幅 Hook
-  const banner = useStatusBanner(approvalStatus, isReviewMode)
+  // 管理員儲存 Hook
+  const { save: adminSave } = useAdminSave(pageKey, reviewEntryId)
 
-  // 提交 Hook
-  const { submit, save, submitting } = useEnergySubmit(pageKey, year, approvalStatus.status)  // ✅ 使用資料庫狀態
-
-  // 角色檢查
-  const { role } = useRole()
-
-  // 審核模式下只有管理員可編輯
-  const isReadOnly = isReviewMode && role !== 'admin'
-
-  const editPermissions = useEditPermissions(currentStatus, isReadOnly, role)
+  // 提交 Hook（多記錄專用）
+  const {
+    submit,
+    save,
+    submitting: submitLoading
+  } = useMultiRecordSubmit(pageKey, year)
 
   // 清除 Hook
   const {
     clear,
-    clearing: clearLoading,
-    error: clearError,
-    clearError: clearClearError
+    clearing: clearLoading
   } = useEnergyClear(currentEntryId, currentStatus)
 
   // 幽靈檔案清理 Hook
   const { cleanFiles } = useGhostFileCleaner()
 
-  // 管理員審核儲存 Hook
-  const { save: adminSave, saving: adminSaving } = useAdminSave(pageKey, reviewEntryId)
+  // 檔案映射 Hook
+  const {
+    uploadRecordFiles,
+    getRecordFiles,
+    loadFileMapping,
+    getFileMappingForPayload,
+    removeRecordMapping
+  } = useRecordFileMapping(pageKey, currentEntryId)
 
-  // 年總工時（自動計算）
-  const yearlyTotal = useMemo(
-    () => monthlyData.reduce((sum, data) => sum + (Number.isFinite(data.hours) ? data.hours : 0), 0),
-    [monthlyData]
-  );
+  // ⭐ 新架構：分離「當前編輯」和「已保存群組」
+  const [currentEditingGroup, setCurrentEditingGroup] = useState<SepticTankCurrentEditingGroup>({
+    groupId: null,
+    records: createEmptyRecords(),
+    memoryFiles: []
+  })
 
-  // 判斷是否有資料
-  const hasAnyData = useMemo(() => {
-    const hasMonthlyData = monthlyData.some(m => m.hours > 0)
-    const hasFiles = annualEvidence.files.length > 0
-    const hasMemoryFiles = (annualEvidence.memoryFiles || []).length > 0
-    return hasMonthlyData || hasFiles || hasMemoryFiles
-  }, [monthlyData, annualEvidence])
+  // 已保存的群組
+  const [savedGroups, setSavedGroups] = useState<SepticTankRecord[]>([])
+
+  // 保留舊的命名（提交時用）
+  const septicTankData = useMemo(() => {
+    return savedGroups
+  }, [savedGroups])
 
   // 第一步：載入記錄資料
   useEffect(() => {
     if (loadedEntry && !dataLoading) {
       const entryStatus = loadedEntry.status as EntryStatus
       setInitialStatus(entryStatus)
-      setCurrentStatus(entryStatus)  // 同步前端狀態
       setCurrentEntryId(loadedEntry.id)
-      setHasSubmittedBefore(true)
+      setCurrentStatus(entryStatus)
 
-      // 從 payload 載入月份數據
-      // ✅ 向後相容：同時支援新格式 septicTankData 和舊格式 monthly
-      if (loadedEntry.payload?.septicTankData) {
-        // 新格式：septicTankData
-        setMonthlyData(loadedEntry.payload.septicTankData)
-        console.log(`🔍 [SepticTankPage] Loaded ${loadedEntry.payload.septicTankData.length} months from septicTankData`)
-      } else if (loadedEntry.payload?.monthly) {
-        // 舊格式：monthly（向後相容）
-        const restoredData = Object.keys(loadedEntry.payload.monthly).map(month => ({
-          month: parseInt(month),
-          hours: loadedEntry.payload.monthly[month]
-        }))
+      // 從 payload 取得能源使用資料
+      const dataFieldName = SEPTIC_TANK_CONFIG.dataFieldName
+      if (loadedEntry.payload?.[dataFieldName]) {
+        const dataArray = Array.isArray(loadedEntry.payload[dataFieldName])
+          ? loadedEntry.payload[dataFieldName]
+          : []
 
-        const fullYearData = Array.from({ length: 12 }, (_, i) => {
-          const monthData = restoredData.find(d => d.month === i + 1)
-          return {
-            month: i + 1,
-            hours: monthData ? monthData.hours : 0
+        if (dataArray.length > 0) {
+          const updated = dataArray.map((item: any) => ({
+            ...item,
+            id: String(item.id || generateRecordId()),
+            evidenceFiles: [],
+            memoryFiles: [],
+          }))
+
+          // 載入到 savedGroups
+          setSavedGroups(updated)
+
+          // 載入檔案映射表
+          const payload = loadedEntry.payload || loadedEntry.extraPayload
+          if (payload) {
+            loadFileMapping(payload)
           }
-        })
-        setMonthlyData(fullYearData)
-        console.log(`🔍 [SepticTankPage] Loaded from monthly (backward compatibility)`)
+        }
       }
-
-      if (!isInitialLoad.current) {
-        handleDataChanged()
-      }
-      isInitialLoad.current = false
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loadedEntry, dataLoading])
 
-  // 第二步：檔案載入後分配（年度佐證資料）
+  // 第二步：檔案載入後分配到記錄
   useEffect(() => {
-    if (loadedFiles.length > 0) {
-      const cleanAndAssignFiles = async () => {
-        console.log('🔍 [SepticTankPage] Starting ghost file cleanup for', loadedFiles.length, 'files')
+    if (dataLoading || loadedFiles.length === 0) return
 
-        // 清理幽靈檔案
-        const validFiles = await cleanFiles(loadedFiles)
-        console.log('✅ [SepticTankPage] Cleanup complete. Valid files:', validFiles.length)
-
-        // 過濾年度佐證檔案（file_type='other'）
-        const annualFiles = validFiles.filter(f =>
+    const processFiles = async () => {
+      if (savedGroups.length > 0) {
+        const usageFiles = loadedFiles.filter(f =>
           f.file_type === 'other' && f.page_key === pageKey
         )
 
-        console.log(`✅ [SepticTankPage] Assigned ${annualFiles.length} annual evidence files`)
-        setAnnualEvidence({ files: annualFiles, memoryFiles: [] })
+        if (usageFiles.length > 0) {
+          const validFiles = await cleanFiles(usageFiles)
+          setSavedGroups(prev =>
+            prev.map(item => ({
+              ...item,
+              evidenceFiles: getRecordFiles(item.id, validFiles),
+              memoryFiles: []
+            }))
+          )
+        }
+      }
+    }
+
+    processFiles()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loadedFiles, pageKey, dataLoading, savedGroups.length])
+
+  // ⭐ Helper Functions
+
+  // 在當前編輯群組新增記錄
+  const addRecordToCurrentGroup = () => {
+    setCurrentEditingGroup(prev => ({
+      ...prev,
+      records: [...prev.records, {
+        id: generateRecordId(),
+        month: 1,
+        hours: 0,
+        evidenceFiles: [],
+        memoryFiles: [],
+        groupId: prev.groupId || undefined
+      }]
+    }))
+  }
+
+  // 更新當前編輯群組的記錄
+  const updateCurrentGroupRecord = (recordId: string, field: 'month' | 'hours', value: any) => {
+    setCurrentEditingGroup(prev => ({
+      ...prev,
+      records: prev.records.map(r =>
+        r.id === recordId ? { ...r, [field]: value } : r
+      )
+    }))
+  }
+
+  // 刪除當前編輯群組的記錄
+  const removeRecordFromCurrentGroup = (recordId: string) => {
+    setCurrentEditingGroup(prev => ({
+      ...prev,
+      records: prev.records.filter(r => r.id !== recordId)
+    }))
+  }
+
+  // 保存群組：新增或更新
+  const saveCurrentGroup = () => {
+    const { groupId, records, memoryFiles } = currentEditingGroup
+
+    const isEditMode = groupId !== null
+
+    // 只在新增模式驗證
+    if (!isEditMode) {
+      if (records.length === 0) {
+        setError('請至少新增一筆記錄')
+        return
       }
 
-      cleanAndAssignFiles()
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [loadedFiles, pageKey])
-
-  const updateMonthData = (index: number, field: keyof MonthData, value: any) => {
-    setMonthlyData(prev => {
-      const newData = [...prev];
-      newData[index] = { ...newData[index], [field]: value };
-      return newData;
-    });
-  };
-
-  const updateAnnualEvidence = (files: EvidenceFile[]) => {
-    setAnnualEvidence(prev => ({ ...prev, files }));
-  };
-
-  const validateData = () => {
-    const errors: string[] = [];
-
-    const hasHours = monthlyData.some(data => data.hours > 0);
-    const hasFiles = annualEvidence.files.length > 0;
-    const hasMemoryFiles = (annualEvidence.memoryFiles || []).length > 0;
-
-    if (hasHours && !hasFiles && !hasMemoryFiles) {
-      errors.push('已填入工時數據但未上傳年度佐證資料');
+      const hasValidData = records.some(r =>
+        r.month >= 1 && r.month <= 12 && r.hours > 0
+      )
+      if (!hasValidData) {
+        setError('請至少填寫一筆有效數據（月份和工時）')
+        return
+      }
     }
 
-    return errors;
-  };
+    const targetGroupId = isEditMode ? groupId : generateRecordId()
+
+    const recordsWithGroupId = records.map(r => ({
+      ...r,
+      groupId: targetGroupId,
+      memoryFiles: [...memoryFiles]
+    }))
+
+    // ⭐ 方案 B：自動覆蓋重複的月份
+    // 收集當前要保存的所有月份
+    const monthsToSave = recordsWithGroupId
+      .filter(r => r.month >= 1 && r.month <= 12 && r.hours > 0)
+      .map(r => r.month)
+
+    // 判斷是否保留舊記錄
+    const shouldKeepRecord = (r: SepticTankRecord): boolean => {
+      // 如果是當前編輯的群組，刪除（稍後會被新記錄替換）
+      if (isEditMode && r.groupId === groupId) return false
+      // 如果月份在新記錄中，刪除（覆蓋）
+      if (monthsToSave.includes(r.month)) return false
+      // 其他保留
+      return true
+    }
+
+    setSavedGroups(prev => {
+      const filtered = prev.filter(shouldKeepRecord)
+      return [...recordsWithGroupId, ...filtered]
+    })
+
+    if (isEditMode) {
+      setSuccess('群組已更新')
+    } else {
+      setSuccess('群組已新增')
+    }
+
+    // 清空編輯區
+    setCurrentEditingGroup({
+      groupId: null,
+      records: createEmptyRecords(),
+      memoryFiles: []
+    })
+  }
+
+  // 載入群組到編輯區（點「編輯群組」）
+  const loadGroupToEditor = (groupId: string) => {
+    // 檢查當前編輯區是否有未保存的資料
+    const currentHasData = currentEditingGroup.records.some(r =>
+      r.month >= 1 && r.month <= 12 && r.hours > 0
+    ) || currentEditingGroup.memoryFiles.length > 0
+
+    // 如果有未保存的資料，提示用戶
+    if (currentHasData && currentEditingGroup.groupId === null) {
+      // 當前是新增模式且有資料，先保存
+      if (!window.confirm('目前編輯區有未保存的資料，是否先保存後再載入其他群組？')) {
+        return
+      }
+      saveCurrentGroup()
+    }
+
+    // 從 savedGroups 找出該群組的所有記錄
+    const groupRecords = savedGroups.filter(r => r.groupId === groupId)
+
+    if (groupRecords.length === 0) return
+
+    // 不從列表移除，只複製到編輯區
+    setCurrentEditingGroup({
+      groupId,
+      records: groupRecords,
+      memoryFiles: groupRecords[0]?.memoryFiles || []
+    })
+
+    setSuccess('群組已載入到編輯區')
+  }
+
+  // 從月曆檢視編輯月份（找到月份所屬的群組並載入）
+  const handleEditMonth = (month: number) => {
+    // 找到包含此月份的記錄
+    const recordWithMonth = savedGroups.find(r => r.month === month)
+
+    if (!recordWithMonth || !recordWithMonth.groupId) {
+      setError('找不到此月份的群組')
+      return
+    }
+
+    // 載入整個群組
+    loadGroupToEditor(recordWithMonth.groupId)
+  }
+
+  // 刪除已保存的群組
+  const deleteSavedGroup = (groupId: string) => {
+    if (!window.confirm('確定要刪除此群組嗎？')) return
+
+    setSavedGroups(prev => prev.filter(r => r.groupId !== groupId))
+    removeRecordMapping(groupId)
+    setSuccess('群組已刪除')
+  }
 
   const handleSubmit = async () => {
-    const errors = validateData();
-    if (errors.length > 0) {
-      setError('請修正以下問題：\n' + errors.join('\n'));
-      return;
-    }
+    await executeSubmit(async () => {
+      const { totalHours, cleanedData, deduplicatedRecordData } = prepareSubmissionData(septicTankData)
 
-    try {
-      // 準備月份數據
-      const monthly: Record<string, number> = {}
-      monthlyData.forEach((data, index) => {
-        if (data.hours > 0) {
-          monthly[(index + 1).toString()] = data.hours
+      await submit({
+        entryInput: {
+          page_key: pageKey,
+          period_year: year,
+          unit: SEPTIC_TANK_CONFIG.unit,
+          monthly: { '1': totalHours },
+          notes: `${SEPTIC_TANK_CONFIG.title}使用共 ${septicTankData.length} 筆記錄`,
+          extraPayload: {
+            [SEPTIC_TANK_CONFIG.dataFieldName]: cleanedData,
+            fileMapping: getFileMappingForPayload()
+          }
+        },
+        recordData: deduplicatedRecordData,
+        uploadRecordFiles,
+        onSuccess: async (entry_id) => {
+          setCurrentEntryId(entry_id)
+          await reload()
         }
       })
 
-      // 使用 useEnergySubmit Hook 提交
-      const entry_id = await submit({
-        formData: {
-          unit: '小時',
-          monthly: monthly,
-          extraPayload: {
-            septicTankData: monthlyData,
-            yearlyTotal: yearlyTotal,
-            notes: `化糞池工時記錄，年總工時：${yearlyTotal.toFixed(1)} 小時`
-          }
-        },
-        msdsFiles: [],
-        monthlyFiles: [],
-        evidenceFiles: annualEvidence.memoryFiles || []
-      })
-
-      if (!currentEntryId) setCurrentEntryId(entry_id)
-
-      // 重新載入
-      await reload()
-
-      await handleSubmitSuccess()
-      setHasSubmittedBefore(true)
-
-      // 重新載入審核狀態，更新狀態橫幅
+      await handleSubmitSuccess();
       reloadApprovalStatus()
 
+      setSuccessModalType('submit')
       setShowSuccessModal(true)
-    } catch (error) {
+    }).catch(error => {
       setError(error instanceof Error ? error.message : '提交失敗，請重試');
-    }
+    })
   };
 
   const handleSave = async () => {
-    try {
-      // 準備月份數據（不驗證）
-      const monthly: Record<string, number> = {}
-      monthlyData.forEach((data, index) => {
-        if (data.hours > 0) {
-          monthly[(index + 1).toString()] = data.hours
-        }
-      })
-
-      const totalHours = Object.values(monthly).reduce((sum, val) => sum + val, 0)
+    await executeSubmit(async () => {
+      setError(null)
+      setSuccess(null)
 
       // 審核模式：使用 useAdminSave hook
       if (isReviewMode && reviewEntryId) {
         console.log('📝 管理員審核模式：使用 useAdminSave hook', reviewEntryId)
 
-        // 準備年度佐證檔案
-        const filesToUpload: Array<{
-          file: File
-          metadata: {
-            month?: number
-            fileType?: 'msds' | 'usage_evidence' | 'other'
-          }
-        }> = [];
+        // 準備完整資料集
+        let completeDataSet = [...savedGroups]
 
-        // 收集年度佐證檔案
-        (annualEvidence.memoryFiles || []).forEach((mf: { file: File }, index: number) => {
-          filesToUpload.push({
-            file: mf.file,
-            metadata: {
-              month: index + 1,
-              fileType: 'other' as const
-            }
-          })
-        })
+        const hasEditingData = currentEditingGroup.records.some(r =>
+          r.month >= 1 && r.month <= 12 && r.hours > 0
+        ) || currentEditingGroup.memoryFiles.length > 0
+
+        if (hasEditingData) {
+          const targetGroupId = currentEditingGroup.groupId || generateRecordId()
+          const recordsWithGroupId = currentEditingGroup.records.map(r => ({
+            ...r,
+            groupId: targetGroupId,
+            memoryFiles: [...currentEditingGroup.memoryFiles]
+          }))
+
+          if (currentEditingGroup.groupId) {
+            completeDataSet = [
+              ...recordsWithGroupId,
+              ...completeDataSet.filter(r => r.groupId !== currentEditingGroup.groupId)
+            ]
+          } else {
+            completeDataSet = [...recordsWithGroupId, ...completeDataSet]
+          }
+        }
+
+        const { totalHours, cleanedData } = prepareSubmissionData(completeDataSet)
+
+        // 收集檔案（使用統一函數）
+        const groupMap = groupRecordsByGroupId(completeDataSet)
+        const filesToUpload = collectFilesToUpload(groupMap)
 
         await adminSave({
           updateData: {
-            unit: '小時',
+            unit: SEPTIC_TANK_CONFIG.unit,
             amount: totalHours,
             payload: {
-              monthly,
-              septicTankData: monthlyData,
-              yearlyTotal: yearlyTotal,
-              notes: `化糞池工時記錄，年總工時：${yearlyTotal.toFixed(1)} 小時`
+              monthly: { '1': totalHours },
+              [SEPTIC_TANK_CONFIG.dataFieldName]: cleanedData,
+              fileMapping: getFileMappingForPayload()
             }
           },
           files: filesToUpload
@@ -318,501 +527,248 @@ export default function SepticTankPage() {
 
         await reload()
         reloadApprovalStatus()
-        // 清空記憶體檔案（在 reload 之後，避免檔案暫時消失）
-        setAnnualEvidence(prev => ({ ...prev, memoryFiles: [] }))
+        setCurrentEditingGroup({ groupId: null, records: createEmptyRecords(), memoryFiles: [] })
         setSuccess('✅ 儲存成功！資料已更新')
-        setShowSuccessModal(true)
         return
       }
 
-      // 非審核模式：原本的邏輯
-      // 使用 save Hook 暫存
-      const entry_id = await save({
-        formData: {
-          unit: '小時',
-          monthly: monthly,
+      // 非審核模式
+      const { totalHours, cleanedData, deduplicatedRecordData } = prepareSubmissionData(septicTankData)
+      await save({
+        entryInput: {
+          page_key: pageKey,
+          period_year: year,
+          unit: SEPTIC_TANK_CONFIG.unit,
+          monthly: { '1': totalHours },
+          notes: `${SEPTIC_TANK_CONFIG.title}使用共 ${septicTankData.length} 筆記錄`,
           extraPayload: {
-            septicTankData: monthlyData,
-            yearlyTotal: yearlyTotal,
-            notes: `化糞池工時記錄，年總工時：${yearlyTotal.toFixed(1)} 小時`
+            [SEPTIC_TANK_CONFIG.dataFieldName]: cleanedData,
+            fileMapping: getFileMappingForPayload()
           }
         },
-        msdsFiles: [],
-        monthlyFiles: [],
-        evidenceFiles: annualEvidence.memoryFiles || []
+        recordData: deduplicatedRecordData,
+        uploadRecordFiles,
+        onSuccess: async (entry_id) => {
+          setCurrentEntryId(entry_id)
+          await reload()
+        }
       })
 
-      if (!currentEntryId) setCurrentEntryId(entry_id)
-
-      // 清空記憶體檔案
-      setAnnualEvidence(prev => ({ ...prev, memoryFiles: [] }))
-
-      // 重新載入
-      await reload()
-
-      // 重新載入審核狀態，更新狀態橫幅
       reloadApprovalStatus()
-
-      setSuccess('資料已暫存')
+      setSuccess('暫存成功！資料已儲存')
+      setSuccessModalType('save')
       setShowSuccessModal(true)
-    } catch (error) {
-      setError(error instanceof Error ? error.message : '暫存失敗，請重試');
-    }
+    }).catch(error => {
+      console.error('❌ 暫存失敗:', error)
+      setError(error instanceof Error ? error.message : '暫存失敗')
+    })
   };
 
-  const handleClear = async () => {
-    setShowClearConfirmModal(true)
-  }
+  const handleClear = () => {
+    setShowClearConfirmModal(true);
+  };
 
-  const confirmClear = async () => {
-    setShowClearConfirmModal(false)
-
+  const handleClearConfirm = async () => {
     try {
+      const allFiles = [
+        ...currentEditingGroup.records.flatMap(r => r.evidenceFiles || []),
+        ...savedGroups.flatMap(r => r.evidenceFiles || [])
+      ]
+      const allMemoryFiles = [
+        currentEditingGroup.memoryFiles,
+        ...savedGroups.map(r => r.memoryFiles || [])
+      ]
+
       await clear({
-        filesToDelete: annualEvidence.files,
-        memoryFilesToClean: [annualEvidence.memoryFiles || []]
+        filesToDelete: allFiles,
+        memoryFilesToClean: allMemoryFiles
       })
 
-      // 清除前端狀態
-      setMonthlyData(Array.from({ length: 12 }, (_, i) => ({
-        month: i + 1,
-        hours: 0
-      })))
-      setAnnualEvidence({ files: [], memoryFiles: [] })
+      setCurrentEditingGroup({
+        groupId: null,
+        records: createEmptyRecords(),
+        memoryFiles: []
+      })
+      setSavedGroups([])
       setCurrentEntryId(null)
-      setHasSubmittedBefore(false)
-      setSuccess('資料已完全清除')
+      setShowClearConfirmModal(false)
 
-      console.log('✅ [SepticTankPage] All data cleared successfully')
+      await reload()
+      reloadApprovalStatus()
+
+      setSuccess('資料已完全清除')
     } catch (error) {
       setError(error instanceof Error ? error.message : '清除失敗，請重試')
     }
-  }
+  };
 
-  // Loading 狀態
-  if (dataLoading) {
-    return (
-      <div
-        className="min-h-screen flex items-center justify-center"
-        style={{ backgroundColor: designTokens.colors.background }}
-      >
-        <div className="text-center">
-          <Loader2
-            className="w-12 h-12 animate-spin mx-auto mb-4"
-            style={{ color: designTokens.colors.accentPrimary }}
-          />
-          <p style={{ color: designTokens.colors.textPrimary }}>載入中...</p>
-        </div>
-      </div>
-    )
-  }
+  // 生成縮圖
+  useEffect(() => {
+    const generateThumbnails = async () => {
+      const allFiles = [
+        ...currentEditingGroup.records.flatMap(r => r.evidenceFiles || []),
+        ...savedGroups.flatMap(r => r.evidenceFiles || [])
+      ]
+
+      for (const file of allFiles) {
+        if (file.mime_type?.startsWith('image/') && !thumbnails[file.id]) {
+          try {
+            const url = await getFileUrl(file.file_path)
+            setThumbnails(prev => ({
+              ...prev,
+              [file.id]: url
+            }))
+          } catch (error) {
+            console.warn('Failed to generate thumbnail for', file.file_name, error)
+          }
+        }
+      }
+    }
+
+    generateThumbnails()
+  }, [currentEditingGroup.records, savedGroups, thumbnails])
 
   return (
-    <div
-      className="min-h-screen bg-green-50"
-    >
-      {/* 主要內容區域 */}
-      <div className="max-w-4xl mx-auto px-6 py-8 space-y-6">
+    <>
+      {/* 隱藏數字輸入框的上下箭頭 */}
+      <style>{`
+        input[type="number"]::-webkit-inner-spin-button,
+        input[type="number"]::-webkit-outer-spin-button {
+          -webkit-appearance: none;
+          margin: 0;
+        }
+        input[type="number"] {
+          -moz-appearance: textfield;
+        }
+      `}</style>
 
-        {/* 頁面標題 - 無背景框 */}
-        <div className="text-center mb-8">
-          <h1 className="text-3xl font-bold text-center mb-2">
-            化糞池 使用數量填報
-          </h1>
-          <p className="text-lg text-center text-gray-600 mb-6">
-            請填入各月份工時數據並上傳年度佐證資料進行碳排放計算
-          </p>
-        </div>
-
-        {/* 審核狀態橫幅 - 統一管理 */}
-        {banner && (
-          <div className={`border-l-4 p-4 mb-6 rounded-r-lg ${getBannerColorClasses(banner.type)}`}>
-            <div className="flex items-center">
-              <div className="text-2xl mr-3">{banner.icon}</div>
-              <div className="flex-1">
-                <p className="font-bold text-lg">{banner.title}</p>
-                {banner.message && <p className="text-sm mt-1">{banner.message}</p>}
-                {banner.reason && (
-                  <div className="mt-3 p-3 bg-red-50 rounded-md border border-red-200">
-                    <p className="text-base font-bold text-red-800 mb-1">退回原因：</p>
-                    <p className="text-lg font-semibold text-red-900">{banner.reason}</p>
-                  </div>
-                )}
-                {banner.reviewedAt && (
-                  <p className="text-xs mt-2 opacity-75">
-                    {banner.type === 'rejected' ? '退回時間' : '審核完成時間'}：
-                    {new Date(banner.reviewedAt).toLocaleString()}
-                  </p>
-                )}
-              </div>
-            </div>
-          </div>
-        )}
-        
-                <div
-          className="rounded-lg border p-6"
-          style={{
-            backgroundColor: designTokens.colors.cardBg,
-            borderColor: designTokens.colors.border,
-            boxShadow: designTokens.shadows.sm
-          }}
-        >
-          <h2
-            className="text-2xl font-medium mb-6"
-            style={{ color: designTokens.colors.textPrimary }}
-          >
-            年度佐證資料
-          </h2>
-          <div className="bg-gray-50 rounded-lg p-4">
-            <EvidenceUpload
-              pageKey={pageKey}
-              files={annualEvidence.files}
-              onFilesChange={updateAnnualEvidence}
-              memoryFiles={annualEvidence.memoryFiles || []}
-              onMemoryFilesChange={(files) => setAnnualEvidence(prev => ({ ...prev, memoryFiles: files }))}
-              maxFiles={15}
-              disabled={submitting || isReadOnly || approvalStatus.isApproved}
-              kind="other"
-              mode={isReadOnly || approvalStatus.isApproved ? "view" : "edit"}
-                            isAdminReviewMode={isReviewMode && role === 'admin'}
-            />
-          </div>
-          <p className="text-sm text-gray-600 mt-3">
-            請上傳年度相關的佐證文件（如 MSDS 文件、使用紀錄、Excel統計表等），支援多檔案上傳。<br/>
-            支援所有檔案類型，最大 10MB
-          </p>
-        </div>
-
-        {/* 月份工時數據 */}
-        <div
-          className="rounded-lg border p-6"
-          style={{
-            backgroundColor: designTokens.colors.cardBg,
-            borderColor: designTokens.colors.border,
-            boxShadow: designTokens.shadows.sm
-          }}
-        >
-          <h2
-            className="text-2xl font-medium mb-6"
-            style={{ color: designTokens.colors.textPrimary }}
-          >
-            月份工時數據
-          </h2>
-
-          {/* 月份網格布局 */}
-          <div className="grid grid-cols-3 gap-4 mb-6">
-            {monthlyData.map((data, index) => (
-              <div
-                key={data.month}
-                className="border border-gray-200 rounded-lg p-4 bg-white hover:shadow-md transition-shadow flex flex-col items-center"
-              >
-                {/* 月份標題 */}
-                <span className="text-2xl font-bold text-gray-900 mb-3">
-                  {monthLabels[index]}
-                </span>
-
-                {/* 輸入框（已隱藏上下箭頭，刪掉「小時」） */}
-                <input
-                  type="number"
-                  min={0}
-                  step={0.1}
-                  value={data.hours === 0 ? "" : data.hours}
-                  onFocus={(e) => {
-                    if (e.target.value === "0") e.target.value = "";
-                  }}
-                  onBlur={(e) => {
-                    if (e.target.value === "") {
-                      updateMonthData(index, "hours", 0);
-                    }
-                  }}
-                  onChange={(e) => {
-                    const val = e.target.value;
-                    updateMonthData(
-                      index,
-                      "hours",
-                      val === "" ? 0 : parseFloat(val)
-                    );
-                  }}
-                  disabled={isReadOnly || approvalStatus.isApproved}
-                  className={`
-                    w-24 px-3 py-2 text-lg text-center
-                    border border-gray-300 rounded-lg
-                    focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500
-                    hover:border-brand-300 transition-colors duration-200
-
-                    [appearance:textfield]
-                    [&::-webkit-outer-spin-button]:appearance-none
-                    [&::-webkit-inner-spin-button]:appearance-none
-
-                    ${isReadOnly || approvalStatus.isApproved ? 'bg-gray-100 cursor-not-allowed' : ''}
-                  `}
-                  placeholder="工時"
-                  aria-label={`${monthLabels[index]} 總工時`}
-                />
-              </div>
-            ))}
-          </div>
-
-          {/* 年度合計 */}
-          <div className="bg-gradient-to-r from-brand-100 to-brand-50 rounded-lg p-4 border-2 border-brand-300">
-            <div className="flex items-center justify-center space-x-4">
-              <div className="flex items-center space-x-2">
-                <span className="text-lg font-bold text-brand-800">年度合計</span>
-              </div>
-              <div className="px-6 py-3 bg-gradient-to-r from-brand-600 to-brand-700 text-white font-bold text-xl rounded-lg shadow-lg">
-                {yearlyTotal.toFixed(1)} 小時
-              </div>
-            </div>
-          </div>
-        </div>
-
-        {/* 底部空間，避免內容被固定底部欄遮擋 */}
-        <div className="h-20"></div>
-      </div>
-
-      {/* 成功提交模態框 */}
-      {showSuccessModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50 p-4">
-          <div
-            className="bg-white rounded-lg shadow-lg max-w-md w-full"
-            style={{ borderRadius: designTokens.borderRadius?.lg || '0.5rem' }}
-          >
-            <div className="p-6">
-              <div className="flex justify-end mb-2">
-                <button
-                  onClick={() => setShowSuccessModal(false)}
-                  className="text-gray-400 hover:text-gray-600 transition-colors"
-                >
-                  <X className="w-5 h-5" />
-                </button>
-              </div>
-              <div className="text-center">
-                <div
-                  className="w-12 h-12 mx-auto rounded-full mb-4 flex items-center justify-center"
-                  style={{ backgroundColor: designTokens.colors.accentLight }}
-                >
-                  <CheckCircle
-                    className="h-6 w-6"
-                    style={{ color: designTokens.colors.accentPrimary }}
-                  />
-                </div>
-                <h3
-                  className="text-lg font-medium mb-2"
-                  style={{ color: designTokens.colors.textPrimary }}
-                >
-                  提交成功！
-                </h3>
-                <p
-                  className="mb-4"
-                  style={{ color: designTokens.colors.textSecondary }}
-                >
-                  {success}
-                </p>
-                <div
-                  className="rounded-lg p-4 mb-4 text-left"
-                  style={{ backgroundColor: '#f8f9fa' }}
-                >
-                  <p
-                    className="text-base mb-2 font-medium"
-                    style={{ color: designTokens.colors.textPrimary }}
-                  >
-                    您的資料已成功儲存，您可以：
-                  </p>
-                  <ul className="text-base space-y-1">
-                    <li style={{ color: designTokens.colors.textSecondary }}>
-                      • 隨時回來查看或修改資料
-                    </li>
-                    <li style={{ color: designTokens.colors.textSecondary }}>
-                      • 重新上傳新的證明文件
-                    </li>
-                    <li style={{ color: designTokens.colors.textSecondary }}>
-                      • 更新月份工時數據
-                    </li>
-                  </ul>
-                </div>
-                <button
-                  onClick={() => setShowSuccessModal(false)}
-                  className="px-6 py-2 text-white rounded-lg transition-colors font-medium"
-                  style={{ backgroundColor: designTokens.colors.accentPrimary }}
-                  onMouseEnter={(e) => {
-                    (e.target as HTMLButtonElement).style.backgroundColor = '#388e3c';
-                  }}
-                  onMouseLeave={(e) => {
-                    (e.target as HTMLButtonElement).style.backgroundColor = designTokens.colors.accentPrimary;
-                  }}
-                >
-                  確認
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* 錯誤訊息模態框 */}
-      {error && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50 p-4">
-          <div 
-            className="bg-white rounded-lg shadow-lg max-w-md w-full"
-            style={{ borderRadius: designTokens.borderRadius?.lg || '0.5rem' }}
-          >
-            <div className="p-6">
-              <div className="flex items-start space-x-3 mb-4">
-                <div 
-                  className="w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0"
-                  style={{ backgroundColor: `${designTokens.colors.error}15` }}
-                >
-                  <AlertCircle 
-                    className="h-5 w-5" 
-                    style={{ color: designTokens.colors.error }} 
-                  />
-                </div>
-                <div className="flex-1">
-                  <h3
-                    className="text-xl font-semibold mb-2"
-                    style={{ color: designTokens.colors.textPrimary }}
-                  >
-                    發生錯誤
-                  </h3>
-                  <div className="text-base space-y-1">
-                    {error.split('\n').map((line, index) => (
-                      <div key={index}>
-                        {line.startsWith('請修正以下問題：') ? (
-                          <div 
-                            className="font-medium mb-2 text-lg"
-                            style={{ color: designTokens.colors.error }}
-                          >
-                            {line}
-                          </div>
-                        ) : line ? (
-                          <div className="flex items-start space-x-2 py-1">
-                            <div
-                              className="w-1.5 h-1.5 rounded-full mt-2 flex-shrink-0"
-                              style={{ backgroundColor: designTokens.colors.error }}
-                            ></div>
-                            <span className="text-base" style={{ color: designTokens.colors.textSecondary }}>
-                              {line}
-                            </span>
-                          </div>
-                        ) : null}
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              </div>
-              <div className="flex justify-end">
-                <button
-                  onClick={() => setError(null)}
-                  className="px-4 py-2 rounded-lg transition-colors font-medium text-white"
-                  style={{ backgroundColor: designTokens.colors.error }}
-                >
-                  確定
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* 審核區塊 - 只在審核模式顯示 */}
-      {isReviewMode && currentEntryId && (
-        <ReviewSection
-          entryId={reviewEntryId || currentEntryId}
-          userId={reviewUserId || "current_user"}
-          category="化糞池"
-          userName={reviewUserId || "用戶"}
-          amount={monthlyData.reduce((sum, data) => sum + data.hours, 0)}
-          unit="小時"
-          role={role}
-          onSave={handleSave}
-          isSaving={submitting}
-          onApprove={() => {
-            console.log('✅ 化糞池填報審核通過 - 由 ReviewSection 處理')
-          }}
-          onReject={(reason) => {
-            console.log('❌ 化糞池填報已退回 - 由 ReviewSection 處理:', reason)
-          }}
-        />
-      )}
-
-      {/* 統一底部操作欄 - 唯讀模式下隱藏，審核通過時也隱藏 */}
-      {!isReadOnly && !approvalStatus.isApproved && !isReviewMode && (
-        <BottomActionBar
-          currentStatus={currentStatus}
-          currentEntryId={currentEntryId}
-          isUpdating={false}
-          hasSubmittedBefore={hasSubmittedBefore}
-          hasAnyData={hasAnyData}
-          banner={banner}
-          editPermissions={editPermissions}
+      <SharedPageLayout
+        pageHeader={{
+          category: SEPTIC_TANK_CONFIG.category,
+          title: SEPTIC_TANK_CONFIG.title,
+          subtitle: SEPTIC_TANK_CONFIG.subtitle,
+          iconColor: SEPTIC_TANK_CONFIG.iconColor,
+          categoryPosition: SEPTIC_TANK_CONFIG.categoryPosition
+        }}
+        statusBanner={{
+          approvalStatus,
+          isReviewMode,
+          accentColor: SEPTIC_TANK_CONFIG.iconColor
+        }}
+        instructionText={SEPTIC_TANK_CONFIG.instructionText}
+        bottomActionBar={{
+          currentStatus,
+          submitting,
+          onSubmit: handleSubmit,
+          onSave: handleSave,
+          onClear: handleClear,
+          show: !isReadOnly && !approvalStatus.isApproved && !isReviewMode,
+          accentColor: SEPTIC_TANK_CONFIG.iconColor
+        }}
+        reviewSection={{
+          isReviewMode,
+          reviewEntryId,
+          reviewUserId,
+          currentEntryId,
+          pageKey,
+          year,
+          category: SEPTIC_TANK_CONFIG.title,
+          amount: septicTankData.reduce((sum, item) => sum + item.hours, 0),
+          unit: SEPTIC_TANK_CONFIG.unit,
+          role,
+          onSave: handleSave,
+          isSaving: submitLoading
+        }}
+      >
+        {/* 使用數據區塊（套用模板） */}
+        <SepticTankUsageSection
+          isReadOnly={isReadOnly}
           submitting={submitting}
-          saving={submitting}
-          onSubmit={handleSubmit}
-          onSave={handleSave}
-          onClear={handleClear}
-          designTokens={designTokens}
+          approvalStatus={approvalStatus}
+          editPermissions={editPermissions}
+          currentEditingGroup={currentEditingGroup}
+          setCurrentEditingGroup={setCurrentEditingGroup}
+          addRecordToCurrentGroup={addRecordToCurrentGroup}
+          updateCurrentGroupRecord={updateCurrentGroupRecord}
+          removeRecordFromCurrentGroup={removeRecordFromCurrentGroup}
+          saveCurrentGroup={saveCurrentGroup}
+          thumbnails={thumbnails}
+          onPreviewImage={(src) => setLightboxSrc(src)}
+          onError={(msg) => setError(msg)}
+          iconColor={SEPTIC_TANK_CONFIG.iconColor}
         />
-      )}
 
-      {/* 清除確認模態框 */}
-      {showClearConfirmModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50 p-4">
-          <div
-            className="bg-white rounded-lg shadow-lg max-w-md w-full"
-            style={{ borderRadius: designTokens.borderRadius?.lg || '0.5rem' }}
-          >
-            <div className="p-6">
-              <div className="flex items-start space-x-3 mb-4">
-                <div
-                  className="w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0"
-                  style={{ backgroundColor: `${designTokens.colors.warning}15` }}
-                >
-                  <AlertCircle
-                    className="h-5 w-5"
-                    style={{ color: designTokens.colors.warning }}
-                  />
-                </div>
-                <div className="flex-1">
-                  <h3
-                    className="text-xl font-semibold mb-2"
-                    style={{ color: designTokens.colors.textPrimary }}
-                  >
-                    確認清除
-                  </h3>
-                  <p
-                    className="text-base"
-                    style={{ color: designTokens.colors.textSecondary }}
-                  >
-                    確定要清除所有化糞池使用資料嗎？此操作無法復原。
-                  </p>
-                </div>
-              </div>
-              <div className="flex flex-col sm:flex-row space-y-2 sm:space-y-0 sm:space-x-3">
-                <button
-                  onClick={confirmClear}
-                  disabled={clearLoading}
-                  className="flex-1 px-4 py-2 rounded-lg font-medium text-white transition-colors disabled:opacity-50"
-                  style={{ backgroundColor: designTokens.colors.error }}
-                >
-                  {clearLoading ? '清除中...' : '確認清除'}
-                </button>
-                <button
-                  onClick={() => setShowClearConfirmModal(false)}
-                  disabled={clearLoading}
-                  className="flex-1 px-4 py-2 rounded-lg font-medium transition-colors border disabled:opacity-50"
-                  style={{
-                    color: designTokens.colors.textPrimary,
-                    borderColor: designTokens.colors.border,
-                    backgroundColor: 'white'
-                  }}
-                >
-                  取消
-                </button>
-              </div>
+        {/* 資料列表標題 */}
+        <div style={{ marginTop: '116.75px', marginLeft: '367px' }}>
+          <div className="flex items-center gap-[29px]">
+            {/* List Icon */}
+            <div className="w-[42px] h-[42px] rounded-[10px] flex items-center justify-center flex-shrink-0" style={{ backgroundColor: SEPTIC_TANK_CONFIG.iconColor }}>
+              <svg width="29" height="29" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M4 6h16M4 12h16M4 18h16" />
+              </svg>
+            </div>
+
+            {/* 標題文字 */}
+            <div className="flex flex-col justify-center h-[86px]">
+              <h3 className="text-[28px] font-bold text-black">
+                資料列表
+              </h3>
             </div>
           </div>
         </div>
-      )}
-    </div>
+
+        {/* 月曆檢視 */}
+        <SepticTankCalendarView
+          savedGroups={savedGroups}
+          iconColor={SEPTIC_TANK_CONFIG.iconColor}
+          onEditMonth={handleEditMonth}
+          isReadOnly={isReadOnly}
+          approvalStatus={approvalStatus}
+        />
+
+        {/* 底部空間 */}
+        <div className="h-20"></div>
+
+        {/* 清除確認模態框 */}
+        <ConfirmClearModal
+          show={showClearConfirmModal}
+          onConfirm={handleClearConfirm}
+          onCancel={() => setShowClearConfirmModal(false)}
+          isClearing={clearLoading}
+        />
+
+        {/* Lightbox：點圖放大 */}
+        <ImageLightbox
+          src={lightboxSrc}
+          zIndex={LAYOUT_CONSTANTS.MODAL_Z_INDEX}
+          onClose={() => setLightboxSrc(null)}
+        />
+
+        {/* Toast 訊息 */}
+        {error && (
+          <Toast
+            message={error}
+            type="error"
+            onClose={() => setError(null)}
+          />
+        )}
+
+        {success && (
+          <Toast
+            message={success}
+            type="success"
+            onClose={() => setSuccess(null)}
+          />
+        )}
+
+        {/* 提交成功彈窗 */}
+        <SuccessModal
+          show={showSuccessModal}
+          message={success || ''}
+          type={successModalType}
+          onClose={() => setShowSuccessModal(false)}
+        />
+      </SharedPageLayout>
+    </>
   );
 }

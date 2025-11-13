@@ -44,7 +44,6 @@ export interface UserProfile {
   filling_config?: any // JSON field in database
   energy_categories?: string[]
   target_year?: number
-  diesel_generator_version?: 'refuel' | 'test'
 }
 
 export interface UserUpdateData {
@@ -59,11 +58,6 @@ export interface UserUpdateData {
   filling_config?: any // JSON field in database
   energy_categories?: string[]
   target_year?: number
-  diesel_generator_version?: 'refuel' | 'test'
-}
-
-export interface FillingConfig {
-  diesel_generator_mode: 'refuel' | 'test'
 }
 
 export interface CreateUserData {
@@ -74,10 +68,8 @@ export interface CreateUserData {
   job_title?: string
   phone?: string
   role?: string
-  filling_config?: FillingConfig
   energy_categories?: string[]
   target_year?: number
-  diesel_generator_version?: 'refuel' | 'test'
 }
 
 /**
@@ -335,9 +327,6 @@ export async function updateUser(userId: string, userData: UserUpdateData): Prom
       requestData.energy_categories = convertFrontendKeysToDb(userData.energy_categories)
     }
     if (userData.target_year !== undefined) requestData.target_year = userData.target_year
-    if (userData.diesel_generator_version !== undefined) {
-      requestData.diesel_generator_version = userData.diesel_generator_version
-    }
 
     // 呼叫後端 API
     const response = await fetch(`${API_BASE_URL}/api/admin/users/${userId}`, {
@@ -393,8 +382,7 @@ export async function createUser(userData: CreateUserData): Promise<UserProfile>
         job_title: userData.job_title,
         role: userData.role || 'user',
         energy_categories: convertedEnergyCategories,
-        target_year: userData.target_year || new Date().getFullYear(),
-        diesel_generator_version: userData.diesel_generator_version || 'refuel'
+        target_year: userData.target_year || new Date().getFullYear()
       })
     })
 
@@ -573,8 +561,7 @@ export async function getUserWithPermissions(userId: string): Promise<UserProfil
     return {
       ...user,
       energy_categories: frontendEnergyCategories,
-      target_year: fillingConfig.target_year || new Date().getFullYear(),
-      diesel_generator_version: fillingConfig.diesel_generator_mode || 'refuel'
+      target_year: fillingConfig.target_year || new Date().getFullYear()
     }
   } catch (error) {
     console.error('Error in getUserWithPermissions:', error)

@@ -65,7 +65,7 @@ export function RecordInputRow({
           value={date}
           onChange={(e) => onUpdate(recordId, 'date', e.target.value)}
           disabled={disabled}
-          className="rounded-[5px] focus:outline-none focus:ring-2 focus:ring-blue-500"
+          className="rounded-[5px] focus:outline-none focus:ring-2 focus:ring-blue-500 [&::-webkit-calendar-picker-indicator]:hidden [&::-webkit-inner-spin-button]:hidden [&::-webkit-clear-button]:hidden"
           style={{
             width: '199px',
             height: '52px',

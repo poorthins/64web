@@ -61,8 +61,8 @@ export function getCategoryFromPageKey(pageKey: string): string {
     'septic_tank': '化糞池', // Fixed: unified page_key to 'septic_tank'
     'natural_gas': '天然氣',
     'urea': '尿素',
-    'diesel_generator': '柴油(發電機)',
-    'diesel': '柴油',
+    'diesel_generator': '柴油(固定源)',
+    'diesel': '柴油(移動源)',
     'gasoline': '汽油',
     'lpg': '液化石油氣',
     'fire_extinguisher': '滅火器',

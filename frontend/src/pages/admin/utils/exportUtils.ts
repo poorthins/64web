@@ -40,8 +40,8 @@ function formatFileNames(
 // 類別中文名稱對照表
 export const categoryNameMap: Record<string, string> = {
   // 範疇一
-  'diesel': '柴油',
-  'diesel_generator': '柴油發電機',
+  'diesel': '柴油(移動源)',
+  'diesel_generator': '柴油(固定源)',
   'gasoline': '汽油',
   'natural_gas': '天然氣',
   'lpg': '液化石油氣',

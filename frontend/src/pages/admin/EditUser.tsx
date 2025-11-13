@@ -34,7 +34,6 @@ const EditUser: React.FC = () => {
     company: '',
     targetYear: new Date().getFullYear(),
     energyCategories: [],
-    dieselGeneratorVersion: undefined,
     isActive: true
   })
 
@@ -53,7 +52,6 @@ const EditUser: React.FC = () => {
       { key: 'department', label: '部門' },
       { key: 'targetYear', label: '目標年份' },
       { key: 'energyCategories', label: '能源類別' },
-      { key: 'dieselGeneratorVersion', label: '柴油發電機版本' },
       { key: 'isActive', label: '帳戶狀態' }
     ]
 
@@ -86,7 +84,6 @@ const EditUser: React.FC = () => {
       console.log('🔍 [診斷] 原始 user 資料:', user);
       const userData = apiUserToFormData(user)
       console.log('🔍 [診斷] 轉換後的 formData:', userData);
-      console.log('🔍 [診斷] dieselGeneratorVersion:', userData.dieselGeneratorVersion);
       setFormData(userData)
       setOriginalData(userData)
       // 用戶資料載入完成
@@ -124,19 +121,6 @@ const EditUser: React.FC = () => {
       : formData.energyCategories.filter(id => id !== categoryId)
 
     handleInputChange('energyCategories', newCategories)
-
-    // 處理柴油發電機版本選擇
-    if (categoryId === 'diesel_generator') {
-      if (checked) {
-        // 勾選柴油發電機時，如果沒有設置版本，預設為 'refuel'
-        if (!formData.dieselGeneratorVersion) {
-          handleInputChange('dieselGeneratorVersion', 'refuel')
-        }
-      } else {
-        // 取消勾選時清除版本選擇
-        handleInputChange('dieselGeneratorVersion', undefined)
-      }
-    }
   }
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -434,56 +418,6 @@ const EditUser: React.FC = () => {
                   ))}
                 </div>
               </div>
-
-          {/* 柴油發電機版本選擇 */}
-          {formData.energyCategories.includes('diesel_generator') && (
-            <div className="form-section">
-              <h3 className="form-section-title">柴油發電機版本</h3>
-
-                  <div className="space-y-3">
-                    {(() => {
-                      console.log('🔍 [診斷] 當前 dieselGeneratorVersion 狀態:', formData.dieselGeneratorVersion);
-                      return null;
-                    })()}
-                    <label className="flex items-center space-x-3 cursor-pointer">
-                      <input
-                        type="radio"
-                        name="dieselGeneratorVersion"
-                        value="refuel"
-                        checked={formData.dieselGeneratorVersion === 'refuel'}
-                        onChange={() => handleInputChange('dieselGeneratorVersion', 'refuel')}
-                        className="text-blue-600 focus:ring-blue-500"
-                      />
-                      <div>
-                        <div className="font-medium text-gray-900">加油版 ⛽</div>
-                        <div className="text-sm text-gray-600">需要手動記錄加油量</div>
-                      </div>
-                    </label>
-
-                    <label className="flex items-center space-x-3 cursor-pointer">
-                      <input
-                        type="radio"
-                        name="dieselGeneratorVersion"
-                        value="test"
-                        checked={formData.dieselGeneratorVersion === 'test'}
-                        onChange={() => handleInputChange('dieselGeneratorVersion', 'test')}
-                        className="text-blue-600 focus:ring-blue-500"
-                      />
-                      <div>
-                        <div className="font-medium text-gray-900">測試版 🧪</div>
-                        <div className="text-sm text-gray-600">自動計算運行時間</div>
-                      </div>
-                    </label>
-                  </div>
-
-                  {getFieldError(errors, 'dieselGeneratorVersion') && (
-                    <p className="mt-2 text-sm text-red-600 flex items-center">
-                      <span className="mr-1">⚠️</span>
-                      {getFieldError(errors, 'dieselGeneratorVersion')}
-                    </p>
-                  )}
-                </div>
-              )}
 
           {/* 表單操作按鈕 */}
           <div className="form-actions">

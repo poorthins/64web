@@ -106,7 +106,8 @@ const NewDashboard = () => {
     }
 
     visibleEntries.forEach(entry => {
-      const status = entry.status || 'pending'
+      // saved 和 null 都視為 pending（待填寫）
+      const status = (entry.status === 'saved' || !entry.status) ? 'pending' : entry.status
       if (status in statusCounts) {
         statusCounts[status as keyof typeof statusCounts]++
         itemsByStatus[status as keyof typeof itemsByStatus].push(entry)

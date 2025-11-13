@@ -1,25 +1,41 @@
 /**
- * MobileEnergyUsageSection - 移動源能源頁面使用數據編輯區
+ * SepticTankUsageSection - 化糞池頁面使用數據編輯區
  *
  * 包含：
  * - 使用數據標題
  * - 佐證文件上傳區（左側）
- * - 輸入表單（右側）
+ * - 輸入表單（右側）- 月份選擇 + 工時
  * - 新增數據按鈕
  * - 保存群組按鈕
+ *
+ * 類似 MobileEnergyUsageSection 但使用月份和工時輸入
  */
 
 import { Trash2 } from 'lucide-react'
 import { FileDropzone } from '../../../../../components/FileDropzone'
-import { RecordInputRow } from '../../../../../components/energy/RecordInputRow'
+import { MonthHoursInputRow } from '../../../../../components/energy/MonthHoursInputRow'
 import { FileTypeIcon } from '../../../../../components/energy/FileTypeIcon'
 import { getFileType } from '../../../../../utils/energy/fileTypeDetector'
 import type { MemoryFile } from '../../../../../services/documentHandler'
-import { CurrentEditingGroup } from '../mobileEnergyTypes'
 import { LAYOUT_CONSTANTS } from '../mobileEnergyConstants'
-import type { MobileEnergyConfig } from '../../mobileEnergyConfig'
 
-export interface MobileEnergyUsageSectionProps {
+// ⭐ 化糞池專用記錄類型
+export interface SepticTankRecord {
+  id: string
+  month: number          // 1-12 月份
+  hours: number          // 工時
+  evidenceFiles: any[]
+  memoryFiles: MemoryFile[]
+  groupId?: string
+}
+
+export interface SepticTankCurrentEditingGroup {
+  groupId: string | null
+  records: SepticTankRecord[]
+  memoryFiles: MemoryFile[]
+}
+
+export interface SepticTankUsageSectionProps {
   // 權限
   isReadOnly: boolean
   submitting: boolean
@@ -27,12 +43,12 @@ export interface MobileEnergyUsageSectionProps {
   editPermissions: { canUploadFiles: boolean }
 
   // 狀態
-  currentEditingGroup: CurrentEditingGroup
-  setCurrentEditingGroup: (value: CurrentEditingGroup | ((prev: CurrentEditingGroup) => CurrentEditingGroup)) => void
+  currentEditingGroup: SepticTankCurrentEditingGroup
+  setCurrentEditingGroup: (value: SepticTankCurrentEditingGroup | ((prev: SepticTankCurrentEditingGroup) => SepticTankCurrentEditingGroup)) => void
 
   // 操作
   addRecordToCurrentGroup: () => void
-  updateCurrentGroupRecord: (id: string, field: 'date' | 'quantity', value: any) => void
+  updateCurrentGroupRecord: (id: string, field: 'month' | 'hours', value: any) => void
   removeRecordFromCurrentGroup: (id: string) => void
   saveCurrentGroup: () => void
 
@@ -43,16 +59,9 @@ export interface MobileEnergyUsageSectionProps {
 
   // 樣式
   iconColor: string
-
-  // 柴油發電機專用：設備類型選單
-  config?: MobileEnergyConfig
-  deviceType?: string
-  customDeviceType?: string
-  onDeviceTypeChange?: (type: string) => void
-  onCustomDeviceTypeChange?: (value: string) => void
 }
 
-export function MobileEnergyUsageSection(props: MobileEnergyUsageSectionProps) {
+export function SepticTankUsageSection(props: SepticTankUsageSectionProps) {
   const {
     isReadOnly,
     submitting,
@@ -67,12 +76,7 @@ export function MobileEnergyUsageSection(props: MobileEnergyUsageSectionProps) {
     thumbnails,
     onPreviewImage,
     onError,
-    iconColor,
-    config,
-    deviceType,
-    customDeviceType,
-    onDeviceTypeChange,
-    onCustomDeviceTypeChange
+    iconColor
   } = props
 
   return (
@@ -96,91 +100,6 @@ export function MobileEnergyUsageSection(props: MobileEnergyUsageSectionProps) {
         </div>
       </div>
 
-      {/* ==================== 設備項目選單（柴油發電機專用）==================== */}
-      {config?.requiresDeviceType && (
-        <div style={{ marginTop: '20px' }} className="flex justify-center">
-          <div
-            style={{
-              width: '1226px',
-              minHeight: '174px',
-              flexShrink: 0,
-              borderRadius: '37px',
-              background: '#18C7A0',
-              paddingTop: '36px',
-              paddingLeft: '47px',
-              paddingRight: '49px',
-              paddingBottom: '45px',
-              display: 'flex',
-              flexDirection: 'column',
-              gap: '21px'
-            }}
-          >
-            {/* 標題 */}
-            <h4 style={{
-              width: '194px',
-              flexShrink: 0,
-              color: '#000',
-              fontFamily: 'Inter',
-              fontSize: '20px',
-              fontStyle: 'normal',
-              fontWeight: 400,
-              lineHeight: 'normal',
-              margin: 0
-            }}>
-              設備項目
-            </h4>
-
-            {/* 下拉選單 */}
-            <select
-              value={deviceType || ''}
-              onChange={(e) => onDeviceTypeChange?.(e.target.value)}
-              disabled={isReadOnly || submitting || approvalStatus.isApproved}
-              style={{
-                width: '1128px',
-                height: '52px',
-                flexShrink: 0,
-                border: '1px solid rgba(0, 0, 0, 0.25)',
-                background: '#FFF',
-                borderRadius: '8px',
-                padding: '0 16px',
-                fontSize: '18px',
-                fontFamily: 'Inter',
-                color: '#000'
-              }}
-            >
-              <option value="">請選擇設備類型</option>
-              <option value="發電機">發電機</option>
-              <option value="鍋爐">鍋爐</option>
-              <option value="蓄熱式焚化爐">蓄熱式焚化爐</option>
-              <option value="其他">其他項目</option>
-            </select>
-
-            {/* 其他項目自訂輸入框 */}
-            {deviceType === '其他' && (
-              <input
-                type="text"
-                value={customDeviceType || ''}
-                onChange={(e) => onCustomDeviceTypeChange?.(e.target.value)}
-                placeholder="請輸入設備類型"
-                disabled={isReadOnly || submitting || approvalStatus.isApproved}
-                style={{
-                  width: '1128px',
-                  height: '52px',
-                  flexShrink: 0,
-                  border: '1px solid rgba(0, 0, 0, 0.25)',
-                  background: '#FFF',
-                  borderRadius: '8px',
-                  padding: '0 16px',
-                  fontSize: '18px',
-                  fontFamily: 'Inter',
-                  color: '#000'
-                }}
-              />
-            )}
-          </div>
-        </div>
-      )}
-
       {/* ==================== 使用數據區塊 - 標題底部往下 34px，頁面置中 ==================== */}
       <div style={{ marginTop: `${LAYOUT_CONSTANTS.SECTION_BOTTOM_MARGIN}px`, marginBottom: '32px' }} className="flex justify-center">
         <div
@@ -203,7 +122,7 @@ export function MobileEnergyUsageSection(props: MobileEnergyUsageSectionProps) {
             alignItems: 'flex-start'
           }}>
             <h4 className="text-[24px] font-bold" style={{ lineHeight: '1.2', marginBottom: '8px', color: '#000' }}>佐證文件</h4>
-            <p className="text-[18px] text-gray-500" style={{ lineHeight: '1.2' }}>* 加油單據上需註明 年、月、日</p>
+            <p className="text-[18px] text-gray-500" style={{ lineHeight: '1.2' }}>* 年度人員出勤月報表</p>
           </div>
 
           {/* 框框容器 */}
@@ -232,7 +151,7 @@ export function MobileEnergyUsageSection(props: MobileEnergyUsageSectionProps) {
                     }
 
                     const memoryFile: MemoryFile = {
-                      id: `memory-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+                      id: `memory-${Date.now()}-${Math.random().toString(36).substring(2, 11)}`,
                       file,
                       preview,
                       file_name: file.name,
@@ -269,7 +188,7 @@ export function MobileEnergyUsageSection(props: MobileEnergyUsageSectionProps) {
               {/* 已儲存的佐證檔案（可刪除） */}
               {currentEditingGroup.records[0]?.evidenceFiles && currentEditingGroup.records[0].evidenceFiles.length > 0 && (
                 <div style={{ marginTop: '19px', width: '358px' }}>
-                  {currentEditingGroup.records[0].evidenceFiles.map((file) => {
+                  {currentEditingGroup.records[0].evidenceFiles.map((file: any) => {
                     const isImage = file.mime_type.startsWith('image/')
                     const thumbnailUrl = thumbnails[file.id]
 
@@ -338,7 +257,7 @@ export function MobileEnergyUsageSection(props: MobileEnergyUsageSectionProps) {
                                 if (idx === 0) {
                                   return {
                                     ...record,
-                                    evidenceFiles: record.evidenceFiles?.filter(f => f.id !== file.id) || []
+                                    evidenceFiles: record.evidenceFiles?.filter((f: any) => f.id !== file.id) || []
                                   }
                                 }
                                 return record
@@ -372,11 +291,11 @@ export function MobileEnergyUsageSection(props: MobileEnergyUsageSectionProps) {
               {/* 表頭 - 藍色區域 58px */}
               <div className="flex items-center" style={{ backgroundColor: iconColor, height: `${LAYOUT_CONSTANTS.EDITOR_FORM_HEADER_HEIGHT}px`, paddingLeft: '43px', paddingRight: '16px' }}>
                 <div style={{ width: '199px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                  <span className="text-white text-[20px] font-medium">加油日期</span>
+                  <span className="text-white text-[20px] font-medium">月份</span>
                 </div>
                 <div style={{ width: '27px' }}></div>
                 <div style={{ width: '230px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                  <span className="text-white text-[20px] font-medium">加油量 (L)</span>
+                  <span className="text-white text-[20px] font-medium">工時 (小時)</span>
                 </div>
                 <div style={{ width: '40px' }}></div> {/* 刪除按鈕空間 */}
               </div>
@@ -385,11 +304,11 @@ export function MobileEnergyUsageSection(props: MobileEnergyUsageSectionProps) {
               <div className="bg-white" style={{ minHeight: '250px', paddingLeft: '43px', paddingRight: '16px', paddingTop: '16px', paddingBottom: '16px' }}>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '22px' }}>
                 {currentEditingGroup.records.map((record) => (
-                  <RecordInputRow
+                  <MonthHoursInputRow
                     key={record.id}
                     recordId={record.id}
-                    date={record.date}
-                    quantity={record.quantity}
+                    month={record.month}
+                    hours={record.hours}
                     onUpdate={updateCurrentGroupRecord}
                     onDelete={removeRecordFromCurrentGroup}
                     showDelete={currentEditingGroup.records.length > 1}

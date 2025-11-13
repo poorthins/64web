@@ -38,6 +38,5 @@ export interface UserFormData {
   company: string
   targetYear: number
   energyCategories: string[]
-  dieselGeneratorVersion?: 'refuel' | 'test'
   isActive?: boolean
 }

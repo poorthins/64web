@@ -7,7 +7,6 @@ export interface ValidationErrors {
   company?: string
   targetYear?: string
   energyCategories?: string
-  dieselGeneratorVersion?: string
 }
 
 export const validateUserForm = (data: Partial<UserFormData>, isEditMode: boolean = false): ValidationErrors => {
@@ -54,11 +53,6 @@ export const validateUserForm = (data: Partial<UserFormData>, isEditMode: boolea
   // 能源類別驗證
   if (!data.energyCategories || data.energyCategories.length === 0) {
     errors.energyCategories = '請至少選擇一個能源類別'
-  }
-
-  // 柴油發電機版本驗證
-  if (data.energyCategories?.includes('diesel_generator') && !data.dieselGeneratorVersion) {
-    errors.dieselGeneratorVersion = '選擇柴油發電機時必須選擇版本'
   }
 
   return errors

@@ -19,7 +19,7 @@ import NaturalGasPage from '../pages/Category1/NaturalGasPage'
 import UreaPage from '../pages/Category1/UreaPage'
 import GasolinePage from '../pages/Category1/GasolinePage'
 import DieselPage from '../pages/Category1/DieselPage'
-import DieselGeneratorPage from '../pages/Category1/DieselGeneratorPage'
+import DieselStationarySourcesPage from '../pages/Category1/DieselStationarySourcesPage'
 import LPGPage from '../pages/Category1/LPGPage'
 import WeldingRodPage from '../pages/Category1/WeldingRodPage'
 import FireExtinguisherPage from '../pages/Category1/FireExtinguisherPage'
@@ -137,7 +137,7 @@ function AppRouter() {
               } />
               <Route path="diesel_generator" element={
                 <UserRoute energyCategory="diesel_generator">
-                  <DieselGeneratorPage />
+                  <DieselStationarySourcesPage />
                 </UserRoute>
               } />
               <Route path="lpg" element={

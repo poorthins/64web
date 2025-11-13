@@ -12,6 +12,8 @@ export interface MobileEnergyRecord {
   evidenceFiles?: EvidenceFile[]
   memoryFiles?: MemoryFile[]
   groupId?: string
+  deviceType?: string  // 柴油發電機專用
+  deviceName?: string  // 設備名稱
 }
 
 export interface CurrentEditingGroup {

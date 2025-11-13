@@ -58,7 +58,7 @@ export interface AllEntry {
   title: string            // 項目名稱
   category: string         // 範疇分類 (範疇一/範疇二/範疇三)
   scope: string           // 排放範圍描述
-  status: 'pending' | 'submitted' | 'approved' | 'rejected' | null  // 項目狀態
+  status: 'pending' | 'saved' | 'submitted' | 'approved' | 'rejected' | null  // 項目狀態（saved 視為待填寫）
   updatedAt?: string      // 最後更新時間
   rejectionReason?: string // 退回原因 (狀態為 rejected 時)
   entryId?: string        // 填報記錄 ID (用於取得退回原因)
@@ -77,8 +77,8 @@ const allCategories = [
   { pageKey: 'septic_tank', title: '化糞池', category: '範疇一', scope: '直接排放' }, // Fixed: unified page_key to 'septic_tank'
   { pageKey: 'natural_gas', title: '天然氣', category: '範疇一', scope: '直接排放' },
   { pageKey: 'urea', title: '尿素', category: '範疇一', scope: '直接排放' },
-  { pageKey: 'diesel_generator', title: '柴油(發電機)', category: '範疇一', scope: '直接排放' },
-  { pageKey: 'diesel', title: '柴油', category: '範疇一', scope: '直接排放' },
+  { pageKey: 'diesel_generator', title: '柴油(固定源)', category: '範疇一', scope: '直接排放' },
+  { pageKey: 'diesel', title: '柴油(移動源)', category: '範疇一', scope: '直接排放' },
   { pageKey: 'gasoline', title: '汽油', category: '範疇一', scope: '直接排放' },
   { pageKey: 'lpg', title: '液化石油氣', category: '範疇一', scope: '直接排放' },
   { pageKey: 'fire_extinguisher', title: '滅火器', category: '範疇一', scope: '直接排放' },
@@ -94,8 +94,8 @@ const titleMap: Record<string, string> = {
   'septic_tank': '化糞池', // Fixed: unified page_key to 'septic_tank'
   'natural_gas': '天然氣',
   'urea': '尿素',
-  'diesel_generator': '柴油(發電機)',
-  'diesel': '柴油',
+  'diesel_generator': '柴油(固定源)',
+  'diesel': '柴油(移動源)',
   'gasoline': '汽油',
   'lpg': '液化石油氣',
   'fire_extinguisher': '滅火器',
@@ -345,7 +345,7 @@ export async function getAllEntries(): Promise<AllEntry[]> {
     })
 
     // 結合 allCategories 與實際狀態
-    return allCategories.map(category => {
+    const result = allCategories.map(category => {
       const entryData = entryStatusMap.get(category.pageKey)
       return {
         pageKey: category.pageKey,
@@ -358,6 +358,8 @@ export async function getAllEntries(): Promise<AllEntry[]> {
         entryId: entryData?.entryId
       }
     })
+
+    return result
   } catch (error) {
     console.error('Error in getAllEntries:', error)
     if (error instanceof Error) {

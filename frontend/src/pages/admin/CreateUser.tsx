@@ -26,7 +26,6 @@ const CreateUser: React.FC = () => {
     company: '',
     targetYear: new Date().getFullYear(),
     energyCategories: [],
-    dieselGeneratorVersion: undefined,
     isActive: true
   }
 
@@ -71,10 +70,6 @@ const CreateUser: React.FC = () => {
       : formData.energyCategories.filter(id => id !== categoryId)
 
     handleInputChange('energyCategories', newCategories)
-
-    if (categoryId === 'diesel_generator' && !checked) {
-      handleInputChange('dieselGeneratorVersion', undefined)
-    }
   }
 
   // 全選/取消全選功能
@@ -373,55 +368,6 @@ const CreateUser: React.FC = () => {
               })}
             </div>
           </div>
-
-          {/* 柴油發電機版本選擇 */}
-          {formData.energyCategories.includes('diesel_generator') && (
-            <div className="border-b border-gray-200 pb-6">
-              <h2 className="text-xl font-semibold text-gray-900 mb-4 flex items-center">
-                <span className="mr-2">🔧</span>
-                柴油發電機版本
-              </h2>
-
-              <div className="space-y-3">
-                <label className="flex items-center space-x-3 cursor-pointer">
-                  <input
-                    type="radio"
-                    name="dieselGeneratorVersion"
-                    value="refuel"
-                    checked={formData.dieselGeneratorVersion === 'refuel'}
-                    onChange={() => handleInputChange('dieselGeneratorVersion', 'refuel')}
-                    className="text-blue-600 focus:ring-blue-500"
-                  />
-                  <div>
-                    <div className="font-medium text-gray-900">加油版 ⛽</div>
-                    <div className="text-sm text-gray-600">需要手動記錄加油量</div>
-                  </div>
-                </label>
-
-                <label className="flex items-center space-x-3 cursor-pointer">
-                  <input
-                    type="radio"
-                    name="dieselGeneratorVersion"
-                    value="test"
-                    checked={formData.dieselGeneratorVersion === 'test'}
-                    onChange={() => handleInputChange('dieselGeneratorVersion', 'test')}
-                    className="text-blue-600 focus:ring-blue-500"
-                  />
-                  <div>
-                    <div className="font-medium text-gray-900">測試版 🧪</div>
-                    <div className="text-sm text-gray-600">自動計算運行時間</div>
-                  </div>
-                </label>
-              </div>
-
-              {errors.dieselGeneratorVersion && (
-                <p className="mt-2 text-sm text-red-600 flex items-center">
-                  <span className="mr-1">⚠️</span>
-                  {errors.dieselGeneratorVersion}
-                </p>
-              )}
-            </div>
-          )}
 
           {/* 提交按鈕 */}
           <div className="flex items-center justify-between pt-6">

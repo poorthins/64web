@@ -55,7 +55,9 @@
       "mcp__figma-remote-mcp__get_screenshot",
       "mcp__figma-remote-mcp__get_design_context",
       "Bash(sed:*)",
-      "Bash(mkdir:*)"
+      "Bash(mkdir:*)",
+      "Bash(Stop-Process -Id 18684 -Force)",
+      "Bash(dir:*)"
     ],
     "deny": [],
     "ask": []

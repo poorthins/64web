@@ -46,7 +46,6 @@ export function apiUserToFormData(apiUser: UserProfile): UserFormData {
     company: apiUser.company || '',
     targetYear: fillingConfig.target_year || new Date().getFullYear(),
     energyCategories: fillingConfig.energy_categories || [],
-    dieselGeneratorVersion: fillingConfig.diesel_generator_mode || undefined,
     isActive: apiUser.is_active ?? true
   }
 }
@@ -64,12 +63,8 @@ export function formDataToCreateUserData(formData: UserFormData): CreateUserData
     job_title: '', // 不使用部門資訊
     phone: '', // 這個表單沒有電話欄位
     role: 'user', // 預設為一般用戶
-    filling_config: {
-      diesel_generator_mode: formData.dieselGeneratorVersion || 'refuel'
-    },
     energy_categories: formData.energyCategories,
-    target_year: formData.targetYear,
-    diesel_generator_version: formData.dieselGeneratorVersion
+    target_year: formData.targetYear
   }
 }
 
@@ -85,8 +80,7 @@ export function formDataToUpdateUserData(formData: UserFormData): UserUpdateData
     job_title: '',
     is_active: formData.isActive ?? true,
     energy_categories: formData.energyCategories,
-    target_year: formData.targetYear,
-    diesel_generator_version: formData.dieselGeneratorVersion
+    target_year: formData.targetYear
   }
 
   // 如果有密碼，加入更新資料

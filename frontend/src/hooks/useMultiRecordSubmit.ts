@@ -49,7 +49,7 @@ export interface UseMultiRecordSubmitReturn {
  * - DieselPage（柴油）
  * - GasolinePage（汽油）
  * - RefrigerantPage（冷媒）
- * - DieselGeneratorRefuelPage（柴油發電機）
+ * - DieselStationarySourcesPage（柴油固定源）
  *
  * @param pageKey - 能源類別識別碼（如 'diesel'）
  * @param year - 填報年度

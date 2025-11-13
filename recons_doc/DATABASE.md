@@ -154,9 +154,14 @@ erDiagram
     "gasoline", "lpg", "welding_rod", "fire_extinguisher",
     "electricity", "employee_commute"
   ],
-  "diesel_generator_mode": "refuel"
+  "target_year": 2024
 }
 ```
+
+**注意**:
+- `energy_categories` 列表為用戶可存取的能源類別
+- `target_year` 為用戶的目標盤查年份
+- 柴油發電機 (`diesel_generator`) 現已統一為標準能源類別，不再需要特殊的版本配置
 
 **外鍵**:
 - `locked_by` → `profiles(id)` (自我參照)

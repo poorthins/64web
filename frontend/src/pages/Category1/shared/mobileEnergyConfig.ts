@@ -7,7 +7,7 @@
 
 export interface MobileEnergyConfig {
   /** 頁面 key（用於 API） */
-  pageKey: 'diesel' | 'gasoline' | 'urea'
+  pageKey: 'diesel' | 'gasoline' | 'urea' | 'septic_tank' | 'diesel_generator'
   /** 類別標籤（顯示在標題左側） */
   category: string
   /** 主標題 */
@@ -26,6 +26,8 @@ export interface MobileEnergyConfig {
   dataFieldName: string
   /** 是否需要 SDS 上傳（選填） */
   requiresSDS?: boolean
+  /** 是否需要設備類型選單（柴油發電機專用） */
+  requiresDeviceType?: boolean
 }
 
 // 柴油配置
@@ -66,4 +68,31 @@ export const UREA_CONFIG: MobileEnergyConfig = {
   instructionText: '請先上傳 SDS 安全資料表；再上傳添加紀錄佐證，請使用 「+新增數據到此群組」，讓一份佐證可對應多筆數據；<br />當同一份佐證的所有數據新增完成後，請點選 「+新增群組」，以填寫下一份佐證的數據。',
   dataFieldName: 'ureaData',
   requiresSDS: true
+}
+
+// 化糞池配置
+export const SEPTIC_TANK_CONFIG: MobileEnergyConfig = {
+  pageKey: 'septic_tank',
+  category: 'S',
+  title: '化糞池(人員工時)',
+  subtitle: 'Septic Tank (Man-hours)',
+  iconColor: '#060761',
+  categoryPosition: { left: 599, top: 39 },
+  unit: '小時',
+  instructionText: '請上傳盤查年度人員出勤月報表；選擇月份，並輸入該月人員工時，點選 「+新增數據到此群組」新增下一月份數據',
+  dataFieldName: 'septicTankData'
+}
+
+// 柴油發電機配置
+export const DIESEL_GENERATOR_CONFIG: MobileEnergyConfig = {
+  pageKey: 'diesel_generator',
+  category: 'D',
+  title: '柴油(固定源)',
+  subtitle: 'Diesel (Stationary Sources)',
+  iconColor: '#18C7A0',
+  categoryPosition: { left: 646, top: 39 },
+  unit: 'L',
+  instructionText: '請先選擇設備項目；接著上傳加油單據作為佐證，若同一份佐證文件內含多筆加油紀錄，請使用 「+新增數據到此群組」，<br />讓一份佐證可對應多筆加油數據；當同一份佐證的所有數據新增完成後，點選 「+新增群組」，以填寫下一份佐證的數據。',
+  dataFieldName: 'dieselGeneratorData',
+  requiresDeviceType: true
 }

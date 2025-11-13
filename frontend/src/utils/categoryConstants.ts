@@ -13,8 +13,8 @@ export const ENERGY_CATEGORIES = {
     'septic_tank': { category: '化糞池', unit: 'person', scope: 1 }, // Fixed: unified page_key to 'septic_tank'
     'natural_gas': { category: '天然氣', unit: 'm³', scope: 1 },
     'urea': { category: '尿素', unit: 'kg', scope: 1 },
-    'diesel_generator': { category: '柴油(發電機)', unit: 'L', scope: 1 },
-    'diesel': { category: '柴油', unit: 'L', scope: 1 },
+    'diesel_generator': { category: '柴油(固定源)', unit: 'L', scope: 1 },
+    'diesel': { category: '柴油(移動源)', unit: 'L', scope: 1 },
     'gasoline': { category: '汽油', unit: 'L', scope: 1 },
     'lpg': { category: '液化石油氣', unit: 'kg', scope: 1 },
     'fire_extinguisher': { category: '滅火器', unit: 'kg', scope: 1 },
