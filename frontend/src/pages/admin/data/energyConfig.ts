@@ -23,6 +23,7 @@ export const ENERGY_CONFIG: readonly EnergyCategory[] = [
   { id: 'natural_gas', name: '天然氣', scope: 1, route: '/app/natural_gas' },
   { id: 'urea', name: '尿素', scope: 1, route: '/app/urea' },
   { id: 'diesel_generator', name: '柴油(固定源)', scope: 1, route: '/app/diesel_generator' },
+  { id: 'generator_test', name: '發電機測試資料', scope: 1, route: '/app/generator_test' },
   { id: 'diesel', name: '柴油(移動源)', scope: 1, route: '/app/diesel' },
   { id: 'gasoline', name: '汽油', scope: 1, route: '/app/gasoline' },
   { id: 'lpg', name: '液化石油氣', scope: 1, route: '/app/lpg' },

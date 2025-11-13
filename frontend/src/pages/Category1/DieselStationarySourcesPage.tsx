@@ -2,6 +2,7 @@ import { useState, useEffect, useMemo } from 'react';
 import { EntryStatus } from '../../components/StatusSwitcher';
 import ConfirmClearModal from '../../components/ConfirmClearModal'
 import SuccessModal from '../../components/SuccessModal'
+import ErrorModal from '../../components/ErrorModal'
 import SharedPageLayout from '../../layouts/SharedPageLayout'
 import { useEditPermissions } from '../../hooks/useEditPermissions';
 import { useFrontendStatus } from '../../hooks/useFrontendStatus';
@@ -19,8 +20,7 @@ import { useAdminSave } from '../../hooks/useAdminSave'
 import { EvidenceFile, getFileUrl } from '../../api/files';
 import Toast from '../../components/Toast';
 import { generateRecordId } from '../../utils/idGenerator';
-import { MobileEnergyRecord as DieselGeneratorRecord, CurrentEditingGroup, EvidenceGroup } from './shared/mobile/mobileEnergyTypes'
-import { LAYOUT_CONSTANTS } from './shared/mobile/mobileEnergyConstants'
+import { MobileEnergyRecord as DieselGeneratorRecord } from './shared/mobile/mobileEnergyTypes'
 import { createEmptyRecords, prepareSubmissionData } from './shared/mobile/mobileEnergyUtils'
 import { DIESEL_GENERATOR_CONFIG } from './shared/mobileEnergyConfig'
 import { MobileEnergyUsageSection } from './shared/mobile/components/MobileEnergyUsageSection'
@@ -30,8 +30,7 @@ import type { MemoryFile } from '../../services/documentHandler';
 
 
 export default function DieselStationarySourcesPage() {
-  // 審核模式檢測
-  const { isReviewMode, reviewEntryId, reviewUserId } = useReviewMode()
+  const { isReviewMode, reviewEntryId } = useReviewMode()
 
   const pageKey = DIESEL_GENERATOR_CONFIG.pageKey
   const [year] = useState(new Date().getFullYear())
@@ -61,7 +60,7 @@ export default function DieselStationarySourcesPage() {
     onSuccess: (message) => setSuccess(message)
   })
 
-  const { currentStatus, setCurrentStatus, handleSubmitSuccess, handleDataChanged, isInitialLoad } = frontendStatus
+  const { currentStatus, setCurrentStatus, handleSubmitSuccess } = frontendStatus
 
   // 角色檢查
   const { role } = useRole()
@@ -77,42 +76,29 @@ export default function DieselStationarySourcesPage() {
     entry: loadedEntry,
     files: loadedFiles,
     loading: dataLoading,
-    error: dataError,
     reload
   } = useEnergyData(pageKey, year, entryIdToLoad)
 
   // 審核狀態 Hook
   const { reload: reloadApprovalStatus, ...approvalStatus } = useApprovalStatus(pageKey, year)
 
-  // 審核 API hook
-  const { reviewSubmission } = useSubmissions()
-
   // 管理員儲存 Hook
   const { save: adminSave, saving: adminSaving } = useAdminSave(pageKey, reviewEntryId)
 
-  // 提交 Hook（多記錄專用）
   const {
     submit,
     save,
     submitting: submitLoading,
-    error: submitError,
-    success: submitSuccess,
-    clearError: clearSubmitError,
-    clearSuccess: clearSubmitSuccess
+    clearError: clearSubmitError
   } = useMultiRecordSubmit(pageKey, year)
 
-  // 清除 Hook
   const {
     clear,
     clearing: clearLoading,
-    error: clearError,
     clearError: clearClearError
   } = useEnergyClear(currentEntryId, currentStatus)
 
-  // 幽靈檔案清理 Hook
   const { cleanFiles } = useGhostFileCleaner()
-
-  // 檔案映射 Hook
   const {
     uploadRecordFiles,
     getRecordFiles,
@@ -132,13 +118,7 @@ export default function DieselStationarySourcesPage() {
     memoryFiles: []
   })
 
-  // 已保存的群組
   const [savedGroups, setSavedGroups] = useState<DieselGeneratorRecord[]>([])
-
-  // 提交時用的資料
-  const dieselGeneratorData = useMemo(() => {
-    return savedGroups
-  }, [savedGroups])
 
   // 載入記錄資料
   useEffect(() => {
@@ -343,15 +323,13 @@ export default function DieselStationarySourcesPage() {
     setSuccess(isEditMode ? '群組已更新' : '群組已新增')
   }
 
-  // 編輯群組
   const handleEditGroup = (groupId: string) => {
     const groupRecords = savedGroups.filter(r => r.groupId === groupId)
     if (groupRecords.length === 0) return
 
-    // 載入設備類型
     const firstRecord = groupRecords[0]
+
     if (firstRecord.deviceType) {
-      // 檢查是否為預設選項
       const isStandardType = ['發電機', '鍋爐', '蓄熱式焚化爐'].includes(firstRecord.deviceType)
       if (isStandardType) {
         setDeviceType(firstRecord.deviceType)
@@ -365,7 +343,7 @@ export default function DieselStationarySourcesPage() {
     setCurrentEditingGroup({
       groupId,
       records: groupRecords.map(r => ({ ...r, memoryFiles: [] })),
-      memoryFiles: []
+      memoryFiles: firstRecord.memoryFiles || []
     })
   }
 
@@ -376,7 +354,6 @@ export default function DieselStationarySourcesPage() {
     setSuccess('群組已刪除')
   }
 
-  // 儲存（草稿）
   const handleSave = async () => {
     if (savedGroups.length === 0) {
       setError('請先新增至少一個群組')
@@ -384,26 +361,70 @@ export default function DieselStationarySourcesPage() {
     }
 
     await executeSubmit(async () => {
-      const { cleanedRecords, filesToUpload, fileMapping } = prepareSubmissionData(savedGroups, pageKey)
+      setError(null)
+      setSuccess(null)
 
-      if (filesToUpload.length > 0) {
-        await uploadRecordFiles(filesToUpload, fileMapping)
+      const { totalQuantity, cleanedEnergyData, deduplicatedRecordData } = prepareSubmissionData(savedGroups)
+
+      if (isReviewMode && reviewEntryId) {
+        const filesToUpload = currentEditingGroup.memoryFiles.map((mf: MemoryFile) => ({
+          file: mf.file,
+          metadata: {
+            recordIndex: 0,
+            allRecordIds: currentEditingGroup.records.map(r => r.id)
+          }
+        }))
+
+        await adminSave({
+          updateData: {
+            unit: DIESEL_GENERATOR_CONFIG.unit,
+            amount: totalQuantity,
+            payload: {
+              monthly: { '1': totalQuantity },
+              [DIESEL_GENERATOR_CONFIG.dataFieldName]: cleanedEnergyData,
+              fileMapping: getFileMappingForPayload()
+            }
+          },
+          files: filesToUpload
+        })
+
+        await reload()
+        reloadApprovalStatus()
+        setCurrentEditingGroup(prev => ({ ...prev, memoryFiles: [] }))
+        setSuccess('儲存成功！資料已更新')
+        return
       }
 
-      const entry_id = await save(cleanedRecords, fileMapping)
+      await save({
+        entryInput: {
+          page_key: pageKey,
+          period_year: year,
+          unit: DIESEL_GENERATOR_CONFIG.unit,
+          monthly: { '1': totalQuantity },
+          notes: `${DIESEL_GENERATOR_CONFIG.title}使用共 ${savedGroups.length} 筆記錄`,
+          extraPayload: {
+            [DIESEL_GENERATOR_CONFIG.dataFieldName]: cleanedEnergyData,
+            fileMapping: getFileMappingForPayload()
+          }
+        },
+        recordData: deduplicatedRecordData,
+        uploadRecordFiles,
+        onSuccess: async (entry_id) => {
+          setCurrentEntryId(entry_id)
+          await reload()
+        }
+      })
 
-      if (!currentEntryId) {
-        setCurrentEntryId(entry_id)
-      }
-
+      reloadApprovalStatus()
+      setSuccess('暫存成功！資料已儲存')
       setSuccessModalType('save')
       setShowSuccessModal(true)
-      reload()
-      reloadApprovalStatus()
+    }).catch(error => {
+      console.error('暫存失敗:', error)
+      setError(error instanceof Error ? error.message : '暫存失敗')
     })
   }
 
-  // 提交審核
   const handleSubmit = async () => {
     if (savedGroups.length === 0) {
       setError('請先新增至少一個群組')
@@ -411,23 +432,31 @@ export default function DieselStationarySourcesPage() {
     }
 
     await executeSubmit(async () => {
-      const { cleanedRecords, filesToUpload, fileMapping } = prepareSubmissionData(savedGroups, pageKey)
+      const { totalQuantity, cleanedEnergyData, deduplicatedRecordData } = prepareSubmissionData(savedGroups)
 
-      if (filesToUpload.length > 0) {
-        await uploadRecordFiles(filesToUpload, fileMapping)
-      }
-
-      const entry_id = await submit(cleanedRecords, fileMapping)
-
-      if (!currentEntryId) {
-        setCurrentEntryId(entry_id)
-      }
+      await submit({
+        entryInput: {
+          page_key: pageKey,
+          period_year: year,
+          unit: DIESEL_GENERATOR_CONFIG.unit,
+          monthly: { '1': totalQuantity },
+          notes: `${DIESEL_GENERATOR_CONFIG.title}使用共 ${savedGroups.length} 筆記錄`,
+          extraPayload: {
+            [DIESEL_GENERATOR_CONFIG.dataFieldName]: cleanedEnergyData,
+            fileMapping: getFileMappingForPayload()
+          }
+        },
+        recordData: deduplicatedRecordData,
+        uploadRecordFiles,
+        onSuccess: async (entry_id) => {
+          setCurrentEntryId(entry_id)
+          await reload()
+        }
+      })
 
       await handleSubmitSuccess()
-
       setSuccessModalType('submit')
       setShowSuccessModal(true)
-      reload()
       reloadApprovalStatus()
     })
   }
@@ -448,18 +477,32 @@ export default function DieselStationarySourcesPage() {
     reloadApprovalStatus()
   }
 
-  // 管理員儲存
   const handleAdminSave = async () => {
     if (!reviewEntryId || role !== 'admin') return
 
     await executeSubmit(async () => {
-      const { cleanedRecords, filesToUpload, fileMapping } = prepareSubmissionData(savedGroups, pageKey)
+      const { totalQuantity, cleanedEnergyData } = prepareSubmissionData(savedGroups)
 
-      if (filesToUpload.length > 0) {
-        await uploadRecordFiles(filesToUpload, fileMapping)
-      }
+      const filesToUpload = currentEditingGroup.memoryFiles.map((mf: MemoryFile) => ({
+        file: mf.file,
+        metadata: {
+          recordIndex: 0,
+          allRecordIds: currentEditingGroup.records.map(r => r.id)
+        }
+      }))
 
-      await adminSave(cleanedRecords, fileMapping)
+      await adminSave({
+        updateData: {
+          unit: DIESEL_GENERATOR_CONFIG.unit,
+          amount: totalQuantity,
+          payload: {
+            monthly: { '1': totalQuantity },
+            [DIESEL_GENERATOR_CONFIG.dataFieldName]: cleanedEnergyData,
+            fileMapping: getFileMappingForPayload()
+          }
+        },
+        files: filesToUpload
+      })
 
       setSuccess('資料已更新')
       reload()
@@ -531,17 +574,15 @@ export default function DieselStationarySourcesPage() {
       />
 
       {/* Toast 訊息 */}
-      {error && (
-        <Toast
-          message={error}
-          type="error"
-          onClose={() => {
-            setError(null)
-            clearSubmitError()
-            clearClearError()
-          }}
-        />
-      )}
+      <ErrorModal
+        show={!!error}
+        message={error || ''}
+        onClose={() => {
+          setError(null)
+          clearSubmitError()
+          clearClearError()
+        }}
+      />
       {success && (
         <Toast
           message={success}

@@ -22,6 +22,8 @@ export interface GroupListItemProps {
   memoryFile?: MemoryFile | null
   /** 群組內記錄數量 */
   recordCount: number
+  /** 設備類型（可選，柴油固定源專用） */
+  deviceType?: string
   /** 檔案縮圖 URL（圖片檔案用） */
   thumbnailUrl?: string | null
   /** 編輯回調 */
@@ -61,6 +63,7 @@ export function GroupListItem({
   evidenceFile,
   memoryFile,
   recordCount,
+  deviceType,
   thumbnailUrl,
   onEdit,
   onDelete,
@@ -136,19 +139,21 @@ export function GroupListItem({
       </div>
 
       {/* 檔名 */}
-      <div className="flex-1" style={{ maxWidth: '300px' }}>
+      <div className="flex-1" style={{ maxWidth: '180px' }}>
         <p className="text-[16px] text-black font-medium truncate">{fileName || '無佐證'}</p>
         <p className="text-[15px] text-gray-500">{fileSize ? `${(fileSize / 1024).toFixed(1)} KB` : ''}</p>
       </div>
 
-      {/* 使用數據 */}
-      <div className="text-center">
-        <p className="text-[24px] text-black">/ 使用數據</p>
+      {/* 設備類型 / 使用數據 */}
+      <div className="text-center flex-shrink-0" style={{ width: '220px' }}>
+        <p className="text-[24px] text-black">
+          {deviceType ? `${deviceType} / ` : '/ '}使用數據
+        </p>
       </div>
 
       {/* 筆數 */}
-      <div className="text-center">
-        <p className="text-[28px] font-medium text-black">{recordCount} 筆</p>
+      <div className="text-center flex-shrink-0" style={{ width: '80px' }}>
+        <p className="text-[24px] font-medium text-black">{recordCount} 筆</p>
       </div>
 
       {/* 操作按鈕組 */}

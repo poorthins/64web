@@ -1,25 +1,23 @@
 /**
- * MobileEnergyUsageSection - 移動源能源頁面使用數據編輯區
+ * GeneratorTestUsageSection - 發電機測試資料編輯區
  *
  * 包含：
  * - 使用數據標題
  * - 佐證文件上傳區（左側）
- * - 輸入表單（右側）
+ * - 輸入表單（右側）- 位置、功率、頻率、時間
  * - 新增數據按鈕
  * - 保存群組按鈕
  */
 
 import { Trash2 } from 'lucide-react'
 import { FileDropzone } from '../../../../../components/FileDropzone'
-import { RecordInputRow } from '../../../../../components/energy/RecordInputRow'
 import { FileTypeIcon } from '../../../../../components/energy/FileTypeIcon'
 import { getFileType } from '../../../../../utils/energy/fileTypeDetector'
 import type { MemoryFile } from '../../../../../services/documentHandler'
-import { CurrentEditingGroup } from '../mobileEnergyTypes'
+import { GeneratorTestEditingGroup } from '../mobileEnergyTypes'
 import { LAYOUT_CONSTANTS } from '../mobileEnergyConstants'
-import type { MobileEnergyConfig } from '../../mobileEnergyConfig'
 
-export interface MobileEnergyUsageSectionProps {
+export interface GeneratorTestUsageSectionProps {
   // 權限
   isReadOnly: boolean
   submitting: boolean
@@ -27,13 +25,11 @@ export interface MobileEnergyUsageSectionProps {
   editPermissions: { canUploadFiles: boolean }
 
   // 狀態
-  currentEditingGroup: CurrentEditingGroup
-  setCurrentEditingGroup: (value: CurrentEditingGroup | ((prev: CurrentEditingGroup) => CurrentEditingGroup)) => void
+  currentEditingGroup: GeneratorTestEditingGroup
+  setCurrentEditingGroup: (value: GeneratorTestEditingGroup | ((prev: GeneratorTestEditingGroup) => GeneratorTestEditingGroup)) => void
 
   // 操作
-  addRecordToCurrentGroup: () => void
-  updateCurrentGroupRecord: (id: string, field: 'date' | 'quantity', value: any) => void
-  removeRecordFromCurrentGroup: (id: string) => void
+  updateCurrentGroupRecord: (id: string, field: 'location' | 'generatorPower' | 'testFrequency' | 'testDuration', value: any) => void
   saveCurrentGroup: () => void
 
   // 檔案相關
@@ -43,16 +39,9 @@ export interface MobileEnergyUsageSectionProps {
 
   // 樣式
   iconColor: string
-
-  // 柴油發電機專用：設備類型選單
-  config?: MobileEnergyConfig
-  deviceType?: string
-  customDeviceType?: string
-  onDeviceTypeChange?: (type: string) => void
-  onCustomDeviceTypeChange?: (value: string) => void
 }
 
-export function MobileEnergyUsageSection(props: MobileEnergyUsageSectionProps) {
+export function GeneratorTestUsageSection(props: GeneratorTestUsageSectionProps) {
   const {
     isReadOnly,
     submitting,
@@ -60,19 +49,12 @@ export function MobileEnergyUsageSection(props: MobileEnergyUsageSectionProps) {
     editPermissions,
     currentEditingGroup,
     setCurrentEditingGroup,
-    addRecordToCurrentGroup,
     updateCurrentGroupRecord,
-    removeRecordFromCurrentGroup,
     saveCurrentGroup,
     thumbnails,
     onPreviewImage,
     onError,
-    iconColor,
-    config,
-    deviceType,
-    customDeviceType,
-    onDeviceTypeChange,
-    onCustomDeviceTypeChange
+    iconColor
   } = props
 
   return (
@@ -90,130 +72,158 @@ export function MobileEnergyUsageSection(props: MobileEnergyUsageSectionProps) {
           {/* 標題文字 */}
           <div className="flex flex-col justify-center h-[86px]">
             <h3 className="text-[28px] font-bold text-black">
-              使用數據
+              發電機測試資料
             </h3>
           </div>
         </div>
       </div>
-
-      {/* ==================== 設備項目選單（柴油發電機專用）==================== */}
-      {config?.requiresDeviceType && (
-        <div style={{ marginTop: '20px' }} className="flex justify-center">
-          <div
-            style={{
-              width: `${LAYOUT_CONSTANTS.CONTAINER_WIDTH}px`,
-              minHeight: '174px',
-              flexShrink: 0,
-              borderRadius: '37px',
-              background: '#18C7A0',
-              paddingTop: '36px',
-              paddingLeft: '47px',
-              paddingRight: '49px',
-              paddingBottom: '45px',
-              display: 'flex',
-              flexDirection: 'column',
-              gap: '21px'
-            }}
-          >
-            {/* 標題 */}
-            <h4 style={{
-              width: '194px',
-              flexShrink: 0,
-              color: '#000',
-              fontFamily: 'Inter',
-              fontSize: '20px',
-              fontStyle: 'normal',
-              fontWeight: 400,
-              lineHeight: 'normal',
-              margin: 0
-            }}>
-              設備項目
-            </h4>
-
-            {/* 下拉選單 */}
-            <select
-              value={deviceType || ''}
-              onChange={(e) => onDeviceTypeChange?.(e.target.value)}
-              disabled={isReadOnly || submitting || approvalStatus.isApproved}
-              style={{
-                width: `${LAYOUT_CONSTANTS.CONTAINER_WIDTH - 96}px`,
-                height: '52px',
-                flexShrink: 0,
-                border: '1px solid rgba(0, 0, 0, 0.25)',
-                background: '#FFF',
-                borderRadius: '8px',
-                padding: '0 16px',
-                fontSize: '18px',
-                fontFamily: 'Inter',
-                color: '#000'
-              }}
-            >
-              <option value="">請選擇設備類型</option>
-              <option value="發電機">發電機</option>
-              <option value="鍋爐">鍋爐</option>
-              <option value="蓄熱式焚化爐">蓄熱式焚化爐</option>
-              <option value="其他">其他項目</option>
-            </select>
-
-            {/* 其他項目自訂輸入框 */}
-            {deviceType === '其他' && (
-              <input
-                type="text"
-                value={customDeviceType || ''}
-                onChange={(e) => onCustomDeviceTypeChange?.(e.target.value)}
-                placeholder="請輸入設備類型"
-                disabled={isReadOnly || submitting || approvalStatus.isApproved}
-                style={{
-                  width: `${LAYOUT_CONSTANTS.CONTAINER_WIDTH - 96}px`,
-                  height: '52px',
-                  flexShrink: 0,
-                  border: '1px solid rgba(0, 0, 0, 0.25)',
-                  background: '#FFF',
-                  borderRadius: '8px',
-                  padding: '0 16px',
-                  fontSize: '18px',
-                  fontFamily: 'Inter',
-                  color: '#000'
-                }}
-              />
-            )}
-          </div>
-        </div>
-      )}
 
       {/* ==================== 使用數據區塊 - 標題底部往下 34px，頁面置中 ==================== */}
       <div style={{ marginTop: `${LAYOUT_CONSTANTS.SECTION_BOTTOM_MARGIN}px`, marginBottom: '32px' }} className="flex justify-center">
         <div
           className="bg-[#ebedf0] rounded-[37px]"
           style={{
-            width: `${LAYOUT_CONSTANTS.CONTAINER_WIDTH}px`,
-            minHeight: `${LAYOUT_CONSTANTS.CONTAINER_MIN_HEIGHT}px`,
+            width: '1005px',
+            height: '500px',
             flexShrink: 0,
-            padding: '38px 0 38px 49px'
+            padding: '38px 49px'
           }}
         >
-          {/* 標題區 - 358px × 73px，文字靠左上對齊 */}
-          <div style={{
-            width: `${LAYOUT_CONSTANTS.EDITOR_UPLOAD_WIDTH}px`,
-            height: '73px',
-            marginBottom: '0',
-            display: 'flex',
-            flexDirection: 'column',
-            justifyContent: 'flex-start',
-            alignItems: 'flex-start'
-          }}>
-            <h4 className="text-[24px] font-bold" style={{ lineHeight: '1.2', marginBottom: '8px', color: '#000' }}>佐證文件</h4>
-            <p className="text-[18px] text-gray-500" style={{ lineHeight: '1.2' }}>* 加油單據上需註明 年、月、日</p>
-          </div>
+          {/* 框框容器 - 左右分欄 */}
+          <div className="flex" style={{ gap: '91px', alignItems: 'flex-start' }}>
+            {/* 左側：輸入欄位垂直排列 */}
+            <div style={{ width: '352px' }} className="flex-shrink-0">
+              {currentEditingGroup.records.map((record) => (
+                <div key={record.id} style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
+                  {/* 發電機位置 */}
+                  <div>
+                    <label className="block text-[18px] font-medium mb-2" style={{ color: '#000' }}>
+                      發電機位置
+                    </label>
+                    <input
+                      type="text"
+                      value={record.location}
+                      onChange={(e) => updateCurrentGroupRecord(record.id, 'location', e.target.value)}
+                      disabled={isReadOnly || approvalStatus.isApproved}
+                      placeholder="例：一樓機房、地下室"
+                      style={{
+                        width: '352px',
+                        height: '52px',
+                        flexShrink: 0,
+                        borderRadius: '10px',
+                        border: '1px solid rgba(0, 0, 0, 0.25)',
+                        background: '#FFF',
+                        padding: '0 16px',
+                        fontSize: '16px',
+                        fontFamily: 'Inter',
+                        color: '#000'
+                      }}
+                    />
+                  </div>
 
-          {/* 框框容器 */}
-          <div className="flex" style={{ gap: `${LAYOUT_CONSTANTS.EDITOR_GAP}px`, alignItems: 'flex-start' }}>
-            {/* 左側：佐證上傳區 */}
-            <div style={{ width: `${LAYOUT_CONSTANTS.EDITOR_UPLOAD_WIDTH}px` }} className="flex-shrink-0">
+                  {/* 發電功率 */}
+                  <div>
+                    <label className="block text-[18px] font-medium mb-2" style={{ color: '#000' }}>
+                      發電功率 (kW)
+                    </label>
+                    <input
+                      type="number"
+                      value={record.generatorPower || ''}
+                      onChange={(e) => updateCurrentGroupRecord(record.id, 'generatorPower', parseFloat(e.target.value) || 0)}
+                      disabled={isReadOnly || approvalStatus.isApproved}
+                      placeholder="輸入功率"
+                      min="0"
+                      step="0.1"
+                      style={{
+                        width: '352px',
+                        height: '52px',
+                        flexShrink: 0,
+                        borderRadius: '10px',
+                        border: '1px solid rgba(0, 0, 0, 0.25)',
+                        background: '#FFF',
+                        padding: '0 16px',
+                        fontSize: '16px',
+                        fontFamily: 'Inter',
+                        color: '#000'
+                      }}
+                    />
+                  </div>
+
+                  {/* 發動測試頻率 */}
+                  <div>
+                    <label className="block text-[18px] font-medium mb-2" style={{ color: '#000' }}>
+                      發動測試頻率 (次/年)
+                    </label>
+                    <input
+                      type="number"
+                      value={record.testFrequency || ''}
+                      onChange={(e) => updateCurrentGroupRecord(record.id, 'testFrequency', parseFloat(e.target.value) || 0)}
+                      disabled={isReadOnly || approvalStatus.isApproved}
+                      placeholder="輸入頻率"
+                      min="0"
+                      step="1"
+                      style={{
+                        width: '352px',
+                        height: '52px',
+                        flexShrink: 0,
+                        borderRadius: '10px',
+                        border: '1px solid rgba(0, 0, 0, 0.25)',
+                        background: '#FFF',
+                        padding: '0 16px',
+                        fontSize: '16px',
+                        fontFamily: 'Inter',
+                        color: '#000'
+                      }}
+                    />
+                  </div>
+
+                  {/* 測試時間 */}
+                  <div>
+                    <label className="block text-[18px] font-medium mb-2" style={{ color: '#000' }}>
+                      測試時間 (分/次)
+                    </label>
+                    <input
+                      type="number"
+                      value={record.testDuration || ''}
+                      onChange={(e) => updateCurrentGroupRecord(record.id, 'testDuration', parseFloat(e.target.value) || 0)}
+                      disabled={isReadOnly || approvalStatus.isApproved}
+                      placeholder="輸入時間"
+                      min="0"
+                      step="1"
+                      style={{
+                        width: '352px',
+                        height: '52px',
+                        flexShrink: 0,
+                        borderRadius: '10px',
+                        border: '1px solid rgba(0, 0, 0, 0.25)',
+                        background: '#FFF',
+                        padding: '0 16px',
+                        fontSize: '16px',
+                        fontFamily: 'Inter',
+                        color: '#000'
+                      }}
+                    />
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            {/* 右側：佐證上傳區 */}
+            <div style={{ flex: 1 }} className="flex-shrink-0">
+              <div style={{
+                marginBottom: '16px',
+                display: 'flex',
+                flexDirection: 'column',
+                justifyContent: 'flex-start',
+                alignItems: 'flex-start'
+              }}>
+                <h4 className="text-[20px] font-bold" style={{ lineHeight: '1.2', marginBottom: '4px', color: '#000' }}>發電機銘牌照片</h4>
+                <p className="text-[16px] text-gray-500" style={{ lineHeight: '1.2' }}>(或組關檔規格文件)</p>
+              </div>
               {/* 使用 FileDropzone 元件 */}
               <FileDropzone
-                width={`${LAYOUT_CONSTANTS.EDITOR_UPLOAD_WIDTH}px`}
-                height={`${LAYOUT_CONSTANTS.EDITOR_UPLOAD_HEIGHT}px`}
+                width="461px"
+                height="262px"
                 accept=".xlsx,.xls,.pdf,.jpg,.jpeg,.png,.gif,.webp,.bmp,.svg,image/*,application/pdf,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
                 multiple={false}
                 onFileSelect={(files) => {
@@ -235,7 +245,7 @@ export function MobileEnergyUsageSection(props: MobileEnergyUsageSectionProps) {
                     }
 
                     const memoryFile: MemoryFile = {
-                      id: `memory-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+                      id: `memory-${Date.now()}-${Math.random().toString(36).slice(2, 11)}`,
                       file,
                       preview,
                       file_name: file.name,
@@ -367,80 +377,6 @@ export function MobileEnergyUsageSection(props: MobileEnergyUsageSectionProps) {
                 </div>
               )}
             </div>
-
-            {/* 右側：輸入表單區域（含按鈕） */}
-            <div style={{ display: 'flex', flexDirection: 'column' }}>
-              {/* 輸入表單 - 完整框框 - 動態高度 */}
-              <div
-                style={{
-                  width: `${LAYOUT_CONSTANTS.EDITOR_FORM_WIDTH}px`,
-                  minHeight: `${LAYOUT_CONSTANTS.EDITOR_UPLOAD_HEIGHT}px`,
-                  borderRadius: '30px',
-                  overflow: 'hidden'
-                }}
-              >
-              {/* 表頭 - 藍色區域 58px */}
-              <div className="flex items-center" style={{ backgroundColor: iconColor, height: `${LAYOUT_CONSTANTS.EDITOR_FORM_HEADER_HEIGHT}px`, paddingLeft: '43px', paddingRight: '16px' }}>
-                <div style={{ width: '199px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                  <span className="text-white text-[20px] font-medium">加油日期</span>
-                </div>
-                <div style={{ width: '27px' }}></div>
-                <div style={{ width: '230px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                  <span className="text-white text-[20px] font-medium">加油量 (L)</span>
-                </div>
-                <div style={{ width: '40px' }}></div> {/* 刪除按鈕空間 */}
-              </div>
-
-              {/* 輸入行 - 白色區域 - 動態高度 */}
-              <div className="bg-white" style={{ minHeight: '250px', paddingLeft: '43px', paddingRight: '16px', paddingTop: '16px', paddingBottom: '16px' }}>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '22px' }}>
-                {currentEditingGroup.records.map((record) => (
-                  <RecordInputRow
-                    key={record.id}
-                    recordId={record.id}
-                    date={record.date}
-                    quantity={record.quantity}
-                    onUpdate={updateCurrentGroupRecord}
-                    onDelete={removeRecordFromCurrentGroup}
-                    showDelete={currentEditingGroup.records.length > 1}
-                    disabled={isReadOnly || approvalStatus.isApproved}
-                  />
-                ))}
-                </div>
-              </div>
-            </div>
-
-            {/* 新增數據按鈕 */}
-            <button
-              onClick={addRecordToCurrentGroup}
-              disabled={isReadOnly || approvalStatus.isApproved}
-              style={{
-                marginTop: '35px',
-                width: '599px',
-                height: '46px',
-                flexShrink: 0,
-                background: iconColor,
-                border: 'none',
-                borderRadius: '5px',
-                display: 'flex',
-                flexDirection: 'column',
-                justifyContent: 'center',
-                alignItems: 'center',
-                color: '#FFF',
-                textAlign: 'center',
-                fontFamily: 'var(--sds-typography-body-font-family)',
-                fontSize: '20px',
-                fontStyle: 'normal',
-                fontWeight: 400,
-                lineHeight: '100%',
-                cursor: 'pointer',
-                transition: 'all 0.2s'
-              }}
-              className="hover:opacity-90"
-            >
-              + 新增數據到此群組
-            </button>
-          </div>
           </div>
         </div>
       </div>

@@ -67,6 +67,7 @@ export function MobileEnergyGroupListSection(props: MobileEnergyGroupListSection
           const evidenceFile = firstRecord?.evidenceFiles?.[0]
           const memoryFile = firstRecord?.memoryFiles?.[0]
           const thumbnailUrl = evidenceFile ? thumbnails[evidenceFile.id] : null
+          const deviceType = firstRecord?.deviceType // 取得設備類型（柴油固定源專用）
 
           return (
             <GroupListItem
@@ -76,6 +77,7 @@ export function MobileEnergyGroupListSection(props: MobileEnergyGroupListSection
               evidenceFile={evidenceFile}
               memoryFile={memoryFile}
               recordCount={groupRecords.length}
+              deviceType={deviceType}
               thumbnailUrl={thumbnailUrl}
               onEdit={(id) => onEditGroup(id)}
               onDelete={(id) => onDeleteGroup(id)}
@@ -99,6 +101,9 @@ export function MobileEnergyGroupListSection(props: MobileEnergyGroupListSection
           </div>
         )}
       </div>
+
+      {/* 底部佔位空間，避免被工具列擋住 */}
+      <div className="h-20"></div>
     </>
   )
 }

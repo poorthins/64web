@@ -7,7 +7,7 @@
 
 export interface MobileEnergyConfig {
   /** 頁面 key（用於 API） */
-  pageKey: 'diesel' | 'gasoline' | 'urea' | 'septic_tank' | 'diesel_generator'
+  pageKey: 'diesel' | 'gasoline' | 'urea' | 'septic_tank' | 'diesel_generator' | 'generator_test'
   /** 類別標籤（顯示在標題左側） */
   category: string
   /** 主標題 */
@@ -95,4 +95,17 @@ export const DIESEL_GENERATOR_CONFIG: MobileEnergyConfig = {
   instructionText: '請先選擇設備項目；接著上傳加油單據作為佐證，若同一份佐證文件內含多筆加油紀錄，請使用 「+新增數據到此群組」，<br />讓一份佐證可對應多筆加油數據；當同一份佐證的所有數據新增完成後，點選 「+新增群組」，以填寫下一份佐證的數據。',
   dataFieldName: 'dieselGeneratorData',
   requiresDeviceType: true
+}
+
+// 發電機測試配置
+export const GENERATOR_TEST_CONFIG: MobileEnergyConfig = {
+  pageKey: 'generator_test',
+  category: 'G',
+  title: '發電機測試資料',
+  subtitle: 'Generator Test Data',
+  iconColor: '#01E083',
+  categoryPosition: { left: 632, top: 39 },
+  unit: '次',
+  instructionText: '請填寫發電機測試資料，並上傳發電機銘牌照片。',
+  dataFieldName: 'generatorTestData'
 }

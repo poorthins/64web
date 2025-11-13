@@ -27,3 +27,26 @@ export interface EvidenceGroup {
   evidence: EvidenceFile | null
   records: MobileEnergyRecord[]
 }
+
+/**
+ * 發電機測試記錄型別
+ */
+export interface GeneratorTestRecord {
+  id: string
+  location: string              // 發電機位置
+  generatorPower: number         // 發電功率（kW）
+  testFrequency: number          // 測試頻率（次/年）
+  testDuration: number           // 測試時間（分/次）
+  groupId?: string
+  evidenceFiles?: EvidenceFile[]
+  memoryFiles?: MemoryFile[]
+}
+
+/**
+ * 發電機測試編輯區狀態
+ */
+export interface GeneratorTestEditingGroup {
+  groupId: string | null
+  records: GeneratorTestRecord[]
+  memoryFiles: MemoryFile[]
+}

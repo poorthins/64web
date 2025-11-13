@@ -789,8 +789,6 @@ export default function UreaPage() {
         iconColor={UREA_CONFIG.iconColor}
       />
 
-      <div className="h-20"></div>
-
       {/* 清除確認模態框 */}
       <ConfirmClearModal
         show={showClearConfirmModal}

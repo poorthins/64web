@@ -11,6 +11,36 @@
 export type FileType = 'image' | 'pdf' | 'excel' | 'word' | 'other' | 'none'
 
 /**
+ * 根據檔案類型取得 icon 顏色
+ *
+ * @param fileType - 檔案類型
+ * @returns string - icon 顏色（hex）
+ *
+ * @example
+ * ```typescript
+ * getFileIconColor('excel') // '#10B981' (綠色)
+ * getFileIconColor('pdf') // '#EF4444' (紅色)
+ * getFileIconColor('word') // '#3B82F6' (藍色)
+ * getFileIconColor('other') // '#666' (灰色)
+ * ```
+ */
+export function getFileIconColor(fileType: FileType): string {
+  switch (fileType) {
+    case 'excel':
+      return '#10B981' // 綠色
+    case 'pdf':
+      return '#EF4444' // 紅色
+    case 'word':
+      return '#3B82F6' // 藍色
+    case 'image':
+    case 'other':
+    case 'none':
+    default:
+      return '#666' // 灰色
+  }
+}
+
+/**
  * 判斷檔案類型
  *
  * @param mimeType - MIME 類型 (例如: 'image/jpeg', 'application/pdf')

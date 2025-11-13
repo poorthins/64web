@@ -19,21 +19,67 @@ import { useAdminSave } from '../../hooks/useAdminSave'
 import { EvidenceFile, getFileUrl } from '../../api/files';
 import Toast from '../../components/Toast';
 import { generateRecordId } from '../../utils/idGenerator';
-import { MobileEnergyRecord as GasolineRecord, CurrentEditingGroup, EvidenceGroup } from './shared/mobile/mobileEnergyTypes'
+import { GeneratorTestRecord, GeneratorTestEditingGroup } from './shared/mobile/mobileEnergyTypes'
 import { LAYOUT_CONSTANTS } from './shared/mobile/mobileEnergyConstants'
-import { createEmptyRecords, prepareSubmissionData } from './shared/mobile/mobileEnergyUtils'
-import { GASOLINE_CONFIG } from './shared/mobileEnergyConfig'
-import { MobileEnergyUsageSection } from './shared/mobile/components/MobileEnergyUsageSection'
-import { MobileEnergyGroupListSection } from './shared/mobile/components/MobileEnergyGroupListSection'
+import { GENERATOR_TEST_CONFIG } from './shared/mobileEnergyConfig'
+import { GeneratorTestUsageSection } from './shared/mobile/components/GeneratorTestUsageSection'
+import { GeneratorTestGroupListSection } from './shared/mobile/components/GeneratorTestGroupListSection'
 import { ImageLightbox } from './shared/mobile/components/ImageLightbox'
 import type { MemoryFile } from '../../services/documentHandler';
 
+/**
+ * 準備發電機測試資料的提交格式
+ */
+const prepareGeneratorTestSubmissionData = (testData: GeneratorTestRecord[]) => {
+  const totalQuantity = testData.length  // 發電機測試以記錄數量計
 
-export default function GasolinePage() {
+  // 清理 payload：只送基本資料，移除 File 物件
+  const cleanedTestData = testData.map((r: GeneratorTestRecord) => ({
+    id: r.id,
+    location: r.location,
+    generatorPower: r.generatorPower,
+    testFrequency: r.testFrequency,
+    testDuration: r.testDuration,
+    groupId: r.groupId
+  }))
+
+  // 建立群組 → recordIds 映射表
+  const groupRecordIds = new Map<string, string[]>()
+  testData.forEach(record => {
+    if (record.groupId) {
+      if (!groupRecordIds.has(record.groupId)) {
+        groupRecordIds.set(record.groupId, [])
+      }
+      groupRecordIds.get(record.groupId)!.push(record.id)
+    }
+  })
+
+  // 去重：每個群組只保留第一個 record 的 memoryFiles
+  const seenGroupIds = new Set<string>()
+  const deduplicatedRecordData = testData.map(record => {
+    const allRecordIds = record.groupId ? groupRecordIds.get(record.groupId) : [record.id]
+
+    if (record.groupId && seenGroupIds.has(record.groupId)) {
+      return { ...record, memoryFiles: [], allRecordIds }
+    }
+    if (record.groupId) {
+      seenGroupIds.add(record.groupId)
+    }
+    return { ...record, allRecordIds }
+  })
+
+  return {
+    totalQuantity,
+    cleanedEnergyData: cleanedTestData,
+    deduplicatedRecordData
+  }
+}
+
+export default function GeneratorTestPage() {
   // 審核模式檢測
   const { isReviewMode, reviewEntryId, reviewUserId } = useReviewMode()
 
-  const pageKey = GASOLINE_CONFIG.pageKey
+  const pageKey = GENERATOR_TEST_CONFIG.pageKey
   const [year] = useState(new Date().getFullYear())
   const [initialStatus, setInitialStatus] = useState<EntryStatus>('submitted')
   const [currentEntryId, setCurrentEntryId] = useState<string | null>(null)
@@ -117,23 +163,30 @@ export default function GasolinePage() {
     removeRecordMapping
   } = useRecordFileMapping(pageKey, currentEntryId)
 
+  // 建立發電機測試的空記錄
+  const createEmptyGeneratorTestRecords = (): GeneratorTestRecord[] => [{
+    id: generateRecordId(),
+    location: '',
+    generatorPower: 0,
+    testFrequency: 0,
+    testDuration: 0,
+    evidenceFiles: [],
+    memoryFiles: []
+  }]
+
   // ⭐ 新架構：分離「當前編輯」和「已保存群組」
-  // 當前正在編輯的群組（對應 Figma 上方「使用數據」區）
-  const [currentEditingGroup, setCurrentEditingGroup] = useState<{
-    groupId: string | null      // null = 新增模式，有值 = 編輯模式
-    records: GasolineRecord[]     // 該群組的記錄
-    memoryFiles: MemoryFile[]   // 暫存佐證
-  }>({
+  // 當前正在編輯的群組（對應 Figma 上方「發電機測試資料」區）
+  const [currentEditingGroup, setCurrentEditingGroup] = useState<GeneratorTestEditingGroup>({
     groupId: null,
-    records: createEmptyRecords(),
+    records: createEmptyGeneratorTestRecords(),
     memoryFiles: []
   })
 
   // 已保存的群組（對應 Figma 下方「資料列表」區）
-  const [savedGroups, setSavedGroups] = useState<GasolineRecord[]>([])
+  const [savedGroups, setSavedGroups] = useState<GeneratorTestRecord[]>([])
 
-  // ⭐ 保留舊的 gasolineData（提交時用）
-  const gasolineData = useMemo(() => {
+  // ⭐ 保留舊的 generatorTestData（提交時用）
+  const generatorTestData = useMemo(() => {
     return savedGroups
   }, [savedGroups])
 
@@ -147,8 +200,8 @@ export default function GasolinePage() {
       setCurrentEntryId(loadedEntry.id)
       setCurrentStatus(entryStatus)
 
-      // 從 payload 取得能源使用資料
-      const dataFieldName = GASOLINE_CONFIG.dataFieldName
+      // 從 payload 取得發電機測試資料
+      const dataFieldName = GENERATOR_TEST_CONFIG.dataFieldName
       if (loadedEntry.payload?.[dataFieldName]) {
         const dataArray = Array.isArray(loadedEntry.payload[dataFieldName])
           ? loadedEntry.payload[dataFieldName]
@@ -216,8 +269,10 @@ export default function GasolinePage() {
       ...prev,
       records: [...prev.records, {
         id: generateRecordId(),
-        date: '',
-        quantity: 0,
+        location: '',
+        generatorPower: 0,
+        testFrequency: 0,
+        testDuration: 0,
         evidenceFiles: [],
         memoryFiles: [],
         groupId: prev.groupId || undefined
@@ -226,7 +281,7 @@ export default function GasolinePage() {
   }
 
   // 更新當前編輯群組的記錄
-  const updateCurrentGroupRecord = (recordId: string, field: keyof GasolineRecord, value: any) => {
+  const updateCurrentGroupRecord = (recordId: string, field: 'location' | 'generatorPower' | 'testFrequency' | 'testDuration', value: any) => {
     setCurrentEditingGroup(prev => ({
       ...prev,
       records: prev.records.map(r =>
@@ -258,12 +313,12 @@ export default function GasolinePage() {
         return
       }
 
-      // 驗證：至少有一筆「有效」記錄（有日期或數量）
+      // 驗證：至少有一筆「有效」記錄（所有欄位都填寫）
       const hasValidData = records.some(r =>
-        r.date.trim() !== '' || r.quantity > 0
+        r.location.trim() !== '' && r.generatorPower > 0 && r.testFrequency > 0 && r.testDuration > 0
       )
       if (!hasValidData) {
-        setError('請至少填寫一筆有效數據（日期或數量）')
+        setError('請至少填寫一筆完整的測試數據（位置、功率、頻率、時間）')
         return
       }
     }
@@ -290,10 +345,10 @@ export default function GasolinePage() {
       setSuccess('群組已新增')
     }
 
-    // 清空編輯區（準備下一個群組），預設 3 格
+    // 清空編輯區（準備下一個群組）
     setCurrentEditingGroup({
       groupId: null,
-      records: createEmptyRecords(),
+      records: createEmptyGeneratorTestRecords(),
       memoryFiles: []
     })
   }
@@ -302,7 +357,7 @@ export default function GasolinePage() {
   const loadGroupToEditor = (groupId: string) => {
     // 檢查當前編輯區是否有未保存的資料
     const currentHasData = currentEditingGroup.records.some(r =>
-      r.date.trim() !== '' || r.quantity > 0
+      r.location.trim() !== '' || r.generatorPower > 0 || r.testFrequency > 0 || r.testDuration > 0
     ) || currentEditingGroup.memoryFiles.length > 0
 
     // 如果有未保存的資料，提示用戶
@@ -341,18 +396,18 @@ export default function GasolinePage() {
   const handleSubmit = async () => {
     await executeSubmit(async () => {
       // ✅ 使用統一的資料準備函數
-      const { totalQuantity, cleanedEnergyData, deduplicatedRecordData } = prepareSubmissionData(gasolineData)
+      const { totalQuantity, cleanedEnergyData, deduplicatedRecordData } = prepareGeneratorTestSubmissionData(generatorTestData)
 
       // ⭐ 使用 hook 的 submit 函數
       await submit({
         entryInput: {
           page_key: pageKey,
           period_year: year,
-          unit: GASOLINE_CONFIG.unit,
+          unit: GENERATOR_TEST_CONFIG.unit,
           monthly: { '1': totalQuantity },
-          notes: `${GASOLINE_CONFIG.title}使用共 ${gasolineData.length} 筆記錄`,
+          notes: `${GENERATOR_TEST_CONFIG.title}共 ${generatorTestData.length} 筆記錄`,
           extraPayload: {
-            [GASOLINE_CONFIG.dataFieldName]: cleanedEnergyData,
+            [GENERATOR_TEST_CONFIG.dataFieldName]: cleanedEnergyData,
             fileMapping: getFileMappingForPayload()
           }
         },
@@ -383,7 +438,7 @@ export default function GasolinePage() {
       setSuccess(null)
 
       // ✅ 使用統一的資料準備函數
-      const { totalQuantity, cleanedEnergyData, deduplicatedRecordData } = prepareSubmissionData(gasolineData)
+      const { totalQuantity, cleanedEnergyData, deduplicatedRecordData } = prepareGeneratorTestSubmissionData(generatorTestData)
 
       // 審核模式：使用 useAdminSave hook
       if (isReviewMode && reviewEntryId) {
@@ -400,11 +455,11 @@ export default function GasolinePage() {
 
         await adminSave({
           updateData: {
-            unit: GASOLINE_CONFIG.unit,
+            unit: GENERATOR_TEST_CONFIG.unit,
             amount: totalQuantity,
             payload: {
               monthly: { '1': totalQuantity },
-              [GASOLINE_CONFIG.dataFieldName]: cleanedEnergyData,
+              [GENERATOR_TEST_CONFIG.dataFieldName]: cleanedEnergyData,
               fileMapping: getFileMappingForPayload()
             }
           },
@@ -425,11 +480,11 @@ export default function GasolinePage() {
         entryInput: {
           page_key: pageKey,
           period_year: year,
-          unit: GASOLINE_CONFIG.unit,
+          unit: GENERATOR_TEST_CONFIG.unit,
           monthly: { '1': totalQuantity },
-          notes: `${GASOLINE_CONFIG.title}使用共 ${gasolineData.length} 筆記錄`,
+          notes: `${GENERATOR_TEST_CONFIG.title}共 ${generatorTestData.length} 筆記錄`,
           extraPayload: {
-            [GASOLINE_CONFIG.dataFieldName]: cleanedEnergyData,
+            [GENERATOR_TEST_CONFIG.dataFieldName]: cleanedEnergyData,
             fileMapping: getFileMappingForPayload()
           }
         },
@@ -479,7 +534,7 @@ export default function GasolinePage() {
       // 重置前端狀態（新架構），預設 3 格
       setCurrentEditingGroup({
         groupId: null,
-        records: createEmptyRecords(),
+        records: createEmptyGeneratorTestRecords(),
         memoryFiles: []
       })
       setSavedGroups([])
@@ -499,12 +554,12 @@ export default function GasolinePage() {
 
   // ✅ 群組分組邏輯：按 groupId 分組
 
-  const evidenceGroups = useMemo((): EvidenceGroup[] => {
-    // ⭐ 按 gasolineData 順序收集唯一的 groupId（保持順序）
+  const evidenceGroups = useMemo(() => {
+    // ⭐ 按 generatorTestData 順序收集唯一的 groupId（保持順序）
     const seenGroupIds = new Set<string>()
     const groupIds: string[] = []
 
-    gasolineData.forEach(record => {
+    generatorTestData.forEach(record => {
       if (record.groupId && !seenGroupIds.has(record.groupId)) {
         seenGroupIds.add(record.groupId)
         groupIds.push(record.groupId)
@@ -512,25 +567,33 @@ export default function GasolinePage() {
     })
 
     // ⭐ 按收集到的順序建立 groups（所有群組平等）
-    const result: EvidenceGroup[] = []
+    const result: Array<{
+      groupId: string
+      evidence: EvidenceFile | null
+      records: GeneratorTestRecord[]
+    }> = []
 
     groupIds.forEach(groupId => {
-      const records = gasolineData.filter((r: GasolineRecord) => r.groupId === groupId)
-      const evidence = records.find((r: GasolineRecord) => r.evidenceFiles && r.evidenceFiles.length > 0)?.evidenceFiles?.[0]
+      const records = generatorTestData.filter((r: GeneratorTestRecord) => r.groupId === groupId)
+      const evidence = records.find((r: GeneratorTestRecord) => r.evidenceFiles && r.evidenceFiles.length > 0)?.evidenceFiles?.[0]
       result.push({ groupId, evidence: evidence || null, records })
     })
 
     // ✅ 排序：空白群組置頂，其他按時間新→舊
     return result.sort((a, b) => {
-      const aIsEmpty = a.records.every((r: GasolineRecord) =>
-        !r.date.trim() &&
-        r.quantity === 0 &&
+      const aIsEmpty = a.records.every((r: GeneratorTestRecord) =>
+        !r.location.trim() &&
+        r.generatorPower === 0 &&
+        r.testFrequency === 0 &&
+        r.testDuration === 0 &&
         (!r.memoryFiles || r.memoryFiles.length === 0)
       ) && !a.evidence
 
-      const bIsEmpty = b.records.every((r: GasolineRecord) =>
-        !r.date.trim() &&
-        r.quantity === 0 &&
+      const bIsEmpty = b.records.every((r: GeneratorTestRecord) =>
+        !r.location.trim() &&
+        r.generatorPower === 0 &&
+        r.testFrequency === 0 &&
+        r.testDuration === 0 &&
         (!r.memoryFiles || r.memoryFiles.length === 0)
       ) && !b.evidence
 
@@ -538,7 +601,7 @@ export default function GasolinePage() {
       if (!aIsEmpty && bIsEmpty) return 1
       return 0  // 保持原順序（新的在前）
     })
-  }, [gasolineData])
+  }, [generatorTestData])
 
   // ⭐ 只為圖片檔案生成縮圖（PDF 不需要）
   useEffect(() => {
@@ -583,18 +646,18 @@ export default function GasolinePage() {
 
       <SharedPageLayout
         pageHeader={{
-          category: GASOLINE_CONFIG.category,
-          title: GASOLINE_CONFIG.title,
-          subtitle: GASOLINE_CONFIG.subtitle,
-          iconColor: GASOLINE_CONFIG.iconColor,
-          categoryPosition: GASOLINE_CONFIG.categoryPosition
+          category: GENERATOR_TEST_CONFIG.category,
+          title: GENERATOR_TEST_CONFIG.title,
+          subtitle: GENERATOR_TEST_CONFIG.subtitle,
+          iconColor: GENERATOR_TEST_CONFIG.iconColor,
+          categoryPosition: GENERATOR_TEST_CONFIG.categoryPosition
         }}
         statusBanner={{
           approvalStatus,
           isReviewMode,
-          accentColor: GASOLINE_CONFIG.iconColor
+          accentColor: GENERATOR_TEST_CONFIG.iconColor
         }}
-        instructionText={GASOLINE_CONFIG.instructionText}
+        instructionText={GENERATOR_TEST_CONFIG.instructionText}
       bottomActionBar={{
         currentStatus,
         submitting,
@@ -602,7 +665,7 @@ export default function GasolinePage() {
         onSave: handleSave,
         onClear: handleClear,
         show: !isReadOnly && !approvalStatus.isApproved && !isReviewMode,
-        accentColor: GASOLINE_CONFIG.iconColor
+        accentColor: GENERATOR_TEST_CONFIG.iconColor
       }}
       reviewSection={{
         isReviewMode,
@@ -611,16 +674,16 @@ export default function GasolinePage() {
         currentEntryId,
         pageKey,
         year,
-        category: GASOLINE_CONFIG.title,
-        amount: gasolineData.reduce((sum, item) => sum + item.quantity, 0),
-        unit: GASOLINE_CONFIG.unit,
+        category: GENERATOR_TEST_CONFIG.title,
+        amount: generatorTestData.length,
+        unit: GENERATOR_TEST_CONFIG.unit,
         role,
         onSave: handleSave,
         isSaving: submitLoading
       }}
     >
-      {/* 使用數據區塊 */}
-      <MobileEnergyUsageSection
+      {/* 發電機測試資料區塊 */}
+      <GeneratorTestUsageSection
         isReadOnly={isReadOnly}
         submitting={submitting}
         approvalStatus={approvalStatus}
@@ -634,11 +697,11 @@ export default function GasolinePage() {
         thumbnails={thumbnails}
         onPreviewImage={(src) => setLightboxSrc(src)}
         onError={(msg) => setError(msg)}
-        iconColor={GASOLINE_CONFIG.iconColor}
+        iconColor={GENERATOR_TEST_CONFIG.iconColor}
       />
 
       {/* 資料列表區塊 */}
-      <MobileEnergyGroupListSection
+      <GeneratorTestGroupListSection
         savedGroups={savedGroups}
         thumbnails={thumbnails}
         isReadOnly={isReadOnly}
@@ -646,7 +709,7 @@ export default function GasolinePage() {
         onEditGroup={loadGroupToEditor}
         onDeleteGroup={deleteSavedGroup}
         onPreviewImage={(src) => setLightboxSrc(src)}
-        iconColor={GASOLINE_CONFIG.iconColor}
+        iconColor={GENERATOR_TEST_CONFIG.iconColor}
       />
 
       {/* 清除確認模態框 */}

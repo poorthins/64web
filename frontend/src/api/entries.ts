@@ -50,19 +50,23 @@ export function sumMonthly(monthly: Record<string, number>): number {
 
 /**
  * 根據 page_key 推斷 category 名稱
+ *
+ * ⚠️ 資料庫約束 energy_entries_category_check 要求使用中文名稱
+ * 必須與資料庫 CHECK 約束中的名稱完全一致
  */
 export function getCategoryFromPageKey(pageKey: string): string {
   console.log('🔍 [5] getCategoryFromPageKey 收到:', pageKey)
 
+  // ⚠️ 資料庫約束要求使用中文名稱（與實際資料完全一致）
   const categoryMap: Record<string, string> = {
     'wd40': 'WD-40',
     'acetylene': '乙炔',
     'refrigerant': '冷媒',
-    'septic_tank': '化糞池', // Fixed: unified page_key to 'septic_tank'
+    'septic_tank': '化糞池',
     'natural_gas': '天然氣',
     'urea': '尿素',
-    'diesel_generator': '柴油(固定源)',
-    'diesel': '柴油(移動源)',
+    'diesel_generator': '柴油(發電機)',
+    'diesel': '柴油',
     'gasoline': '汽油',
     'lpg': '液化石油氣',
     'fire_extinguisher': '滅火器',
@@ -71,9 +75,13 @@ export function getCategoryFromPageKey(pageKey: string): string {
     'employee_commute': '員工通勤'
   }
 
-  const result = categoryMap[pageKey] || String(pageKey || '').toUpperCase()
+  const result = categoryMap[pageKey]
+  if (!result) {
+    console.error('❌ [getCategoryFromPageKey] 未知的 page_key:', pageKey)
+    throw new Error(`未知的能源類別: ${pageKey}`)
+  }
+
   console.log('🔍 [6] 對應結果:', pageKey, '->', result)
-  console.log('🔍 [7] categoryMap 是否包含 urea:', 'urea' in categoryMap)
 
   return result
 }

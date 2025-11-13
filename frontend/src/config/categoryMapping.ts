@@ -32,6 +32,7 @@ export const CATEGORY_GROUPS: CategoryGroup[] = [
       'natural_gas',
       'urea',
       'diesel_generator',
+      'generator_test',
       'diesel',
       'gasoline',
       'lpg',

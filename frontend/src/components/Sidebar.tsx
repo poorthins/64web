@@ -18,6 +18,7 @@ const ENERGY_CATEGORY_LABELS: Record<string, string> = {
   natural_gas: '天然氣',
   urea: '尿素',
   diesel_generator: '柴油(固定源)',
+  generator_test: '發電機測試資料',
   diesel: '柴油(移動源)',
   gasoline: '汽油',
   lpg: '液化石油氣',

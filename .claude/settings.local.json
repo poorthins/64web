@@ -57,7 +57,8 @@
       "Bash(sed:*)",
       "Bash(mkdir:*)",
       "Bash(Stop-Process -Id 18684 -Force)",
-      "Bash(dir:*)"
+      "Bash(dir:*)",
+      "Bash(npm --prefix frontend run build)"
     ],
     "deny": [],
     "ask": []
