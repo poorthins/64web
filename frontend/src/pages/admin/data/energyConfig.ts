@@ -26,6 +26,7 @@ export const ENERGY_CONFIG: readonly EnergyCategory[] = [
   { id: 'generator_test', name: '發電機測試資料', scope: 1, route: '/app/generator_test' },
   { id: 'diesel', name: '柴油(移動源)', scope: 1, route: '/app/diesel' },
   { id: 'gasoline', name: '汽油', scope: 1, route: '/app/gasoline' },
+  { id: 'sf6', name: '六氟化硫', scope: 1, route: '/app/sf6' },
   { id: 'lpg', name: '液化石油氣', scope: 1, route: '/app/lpg' },
   { id: 'fire_extinguisher', name: '滅火器', scope: 1, route: '/app/fire_extinguisher' },
   { id: 'welding_rod', name: '焊條', scope: 1, route: '/app/welding_rod' },

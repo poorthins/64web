@@ -10,6 +10,8 @@ import StatusBanner from '../components/StatusBanner'
 import InstructionText from '../components/InstructionText'
 import { ApprovalStatus } from '../hooks/useApprovalStatus'
 import ReviewSection from '../components/ReviewSection'
+import Toast from '../components/Toast'
+import SuccessModal from '../components/SuccessModal'
 
 interface SharedPageLayoutProps {
   children: React.ReactNode
@@ -41,11 +43,16 @@ interface SharedPageLayoutProps {
   bottomActionBar?: {
     currentStatus: EntryStatus
     submitting: boolean
-    onSubmit: () => void
-    onSave?: () => void
+    onSubmit: () => Promise<void> | void
+    onSave?: () => Promise<void> | void
     onClear: () => void
     show?: boolean  // 是否顯示（預設 true）
     accentColor?: string
+    // 成功訊息（可以是字串或函數）
+    submitSuccessMessage?: string | (() => string)
+    saveSuccessMessage?: string | (() => string)
+    // 是否由頁面自己處理通知（預設 false，母版統一處理）
+    customNotifications?: boolean
   }
 
   // ReviewSection 配置 - 審核區塊（統一處理，消除重複程式碼）
@@ -87,6 +94,11 @@ const SharedPageLayout: React.FC<SharedPageLayoutProps> = ({
   const [scale, setScale] = useState(1)
   const [hoveredCategory, setHoveredCategory] = useState<string | null>(null)
 
+  // 統一通知管理
+  const [showSuccessModal, setShowSuccessModal] = useState(false)
+  const [successMessage, setSuccessMessage] = useState('')
+  const [error, setError] = useState<string | null>(null)
+
   // 響應式縮放
   useEffect(() => {
     const updateScale = () => {
@@ -120,6 +132,54 @@ const SharedPageLayout: React.FC<SharedPageLayoutProps> = ({
       navigate('/login')
     } catch (error) {
       console.error('登出失敗:', error)
+    }
+  }
+
+  // 攔截並統一處理 onSubmit
+  const handleSubmitClick = async () => {
+    if (!bottomActionBar?.onSubmit) return
+
+    // 如果頁面自己處理通知，直接執行
+    if (bottomActionBar.customNotifications) {
+      await bottomActionBar.onSubmit()
+      return
+    }
+
+    // 母版統一處理通知
+    try {
+      await bottomActionBar.onSubmit()
+      const message = typeof bottomActionBar.submitSuccessMessage === 'function'
+        ? bottomActionBar.submitSuccessMessage()
+        : (bottomActionBar.submitSuccessMessage || '提交成功')
+      setSuccessMessage(message)
+      setShowSuccessModal(true)
+    } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : '提交失敗'
+      setError(errorMessage)
+    }
+  }
+
+  // 攔截並統一處理 onSave
+  const handleSaveClick = async () => {
+    if (!bottomActionBar?.onSave) return
+
+    // 如果頁面自己處理通知，直接執行
+    if (bottomActionBar.customNotifications) {
+      await bottomActionBar.onSave()
+      return
+    }
+
+    // 母版統一處理通知
+    try {
+      await bottomActionBar.onSave()
+      const message = typeof bottomActionBar.saveSuccessMessage === 'function'
+        ? bottomActionBar.saveSuccessMessage()
+        : (bottomActionBar.saveSuccessMessage || '暫存成功')
+      setSuccessMessage(message)
+      setShowSuccessModal(true)
+    } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : '暫存失敗'
+      setError(errorMessage)
     }
   }
 
@@ -313,7 +373,8 @@ const SharedPageLayout: React.FC<SharedPageLayoutProps> = ({
             position: 'relative',
             width: '1920px',
             minHeight: 'calc(100vh - 96px)',
-            backgroundColor: '#FFFFFF'
+            backgroundColor: '#FFFFFF',
+            paddingBottom: (bottomActionBar && bottomActionBar.show !== false) ? '120px' : '0'
           }}
         >
           {/* 頁面標題 */}
@@ -380,8 +441,8 @@ const SharedPageLayout: React.FC<SharedPageLayoutProps> = ({
             <BottomActionBar
               currentStatus={bottomActionBar.currentStatus}
               submitting={bottomActionBar.submitting}
-              onSubmit={bottomActionBar.onSubmit}
-              onSave={bottomActionBar.onSave}
+              onSubmit={handleSubmitClick}
+              onSave={bottomActionBar.onSave ? handleSaveClick : undefined}
               onClear={bottomActionBar.onClear}
               containerMode={true}
               accentColor={bottomActionBar.accentColor}
@@ -389,6 +450,21 @@ const SharedPageLayout: React.FC<SharedPageLayoutProps> = ({
           </div>
         </div>
       )}
+
+      {/* 統一通知元件 */}
+      {error && (
+        <Toast
+          message={error}
+          type="error"
+          onClose={() => setError(null)}
+        />
+      )}
+
+      <SuccessModal
+        show={showSuccessModal}
+        message={successMessage}
+        onClose={() => setShowSuccessModal(false)}
+      />
     </div>
   )
 }

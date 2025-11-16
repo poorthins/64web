@@ -406,21 +406,16 @@ def force_logout_user(user_id):
 
         supabase = get_supabase_admin()
 
-        # 調用 Supabase function 清除 sessions
-        result = supabase.rpc('admin_clear_user_sessions_by_id', {
-            'target_user_id': user_id
-        }).execute()
+        # 直接刪除 auth.sessions 表中的記錄
+        result = supabase.table('auth.sessions').delete().eq('user_id', user_id).execute()
 
-        if result.data and result.data.get('success'):
-            return jsonify({
-                "success": True,
-                "message": "User sessions cleared successfully",
-                "deleted_sessions": result.data.get('deleted_sessions', 0)
-            })
-        else:
-            return jsonify({
-                "error": result.data.get('message', 'Failed to clear sessions')
-            }), 500
+        deleted_count = len(result.data) if result.data else 0
+
+        return jsonify({
+            "success": True,
+            "message": "User sessions cleared successfully",
+            "deleted_sessions": deleted_count
+        })
 
     except Exception as e:
         print(f"Error in force_logout_user: {str(e)}")

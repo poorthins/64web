@@ -10,6 +10,7 @@ export const ALL_ENERGY_CATEGORIES = [
   'generator_test',
   'diesel',
   'gasoline',
+  'sf6',
   'lpg',
   'fire_extinguisher',
   'welding_rod',
@@ -21,7 +22,7 @@ export const ALL_ENERGY_CATEGORIES = [
 export const ENERGY_CATEGORIES_BY_SCOPE = {
   scope1: [
     'wd40', 'acetylene', 'refrigerant', 'septic_tank', 'natural_gas', 'urea',
-    'diesel_generator', 'generator_test', 'diesel', 'gasoline', 'lpg', 'fire_extinguisher', 'welding_rod'
+    'diesel_generator', 'generator_test', 'diesel', 'gasoline', 'sf6', 'lpg', 'fire_extinguisher', 'welding_rod'
   ],
   scope2: ['electricity'],
   scope3: ['employee_commute']
@@ -47,6 +48,7 @@ export const CATEGORY_TO_SCOPE_MAP: Record<string, keyof typeof ENERGY_CATEGORIE
   generator_test: 'scope1',
   diesel: 'scope1',
   gasoline: 'scope1',
+  sf6: 'scope1',
   lpg: 'scope1',
   fire_extinguisher: 'scope1',
   welding_rod: 'scope1',

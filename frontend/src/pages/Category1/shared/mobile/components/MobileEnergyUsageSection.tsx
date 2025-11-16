@@ -50,7 +50,30 @@ export interface MobileEnergyUsageSectionProps {
   customDeviceType?: string
   onDeviceTypeChange?: (type: string) => void
   onCustomDeviceTypeChange?: (value: string) => void
+
+  // ⭐ FileDropzone 尺寸配置（可選，預設使用 LAYOUT_CONSTANTS）
+  dropzoneWidth?: number   // 預設 358px
+  dropzoneHeight?: number  // 預設 308px
+
+  // ⭐ 可配置外觀（可選）
+  title?: string           // 標題文字，預設「使用數據」
+  icon?: React.ReactNode   // 標題 icon，預設 Database icon
+  renderInputFields?: (props: {
+    currentGroup: CurrentEditingGroup
+    onUpdate: (id: string, field: 'date' | 'quantity', value: any) => void
+    onDelete: (id: string) => void
+    isReadOnly: boolean
+  }) => React.ReactNode     // 自訂輸入欄位，預設 RecordInputRow
 }
+
+// ==================== 預設值定義 ====================
+const DEFAULT_TITLE = '使用數據'
+
+const DEFAULT_ICON = (
+  <svg xmlns="http://www.w3.org/2000/svg" width="29" height="29" viewBox="0 0 29 29" fill="none">
+    <path d="M25.375 6.04163C25.375 8.04366 20.5061 9.66663 14.5 9.66663C8.4939 9.66663 3.625 8.04366 3.625 6.04163M25.375 6.04163C25.375 4.03959 20.5061 2.41663 14.5 2.41663C8.4939 2.41663 3.625 4.03959 3.625 6.04163M25.375 6.04163V22.9583C25.375 24.9641 20.5417 26.5833 14.5 26.5833C8.45833 26.5833 3.625 24.9641 3.625 22.9583V6.04163M25.375 14.5C25.375 16.5058 20.5417 18.125 14.5 18.125C8.45833 18.125 3.625 16.5058 3.625 14.5" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+  </svg>
+)
 
 export function MobileEnergyUsageSection(props: MobileEnergyUsageSectionProps) {
   const {
@@ -72,7 +95,12 @@ export function MobileEnergyUsageSection(props: MobileEnergyUsageSectionProps) {
     deviceType,
     customDeviceType,
     onDeviceTypeChange,
-    onCustomDeviceTypeChange
+    onCustomDeviceTypeChange,
+    dropzoneWidth = LAYOUT_CONSTANTS.EDITOR_UPLOAD_WIDTH,   // ⭐ 預設 358
+    dropzoneHeight = LAYOUT_CONSTANTS.EDITOR_UPLOAD_HEIGHT,  // ⭐ 預設 308
+    title = DEFAULT_TITLE,                                  // ⭐ 預設「使用數據」
+    icon = DEFAULT_ICON,                                    // ⭐ 預設 Database icon
+    renderInputFields                                       // ⭐ 預設為 undefined，後面處理
   } = props
 
   return (
@@ -80,17 +108,15 @@ export function MobileEnergyUsageSection(props: MobileEnergyUsageSectionProps) {
       {/* 使用數據標題 - icon 距離左邊界 367px，在說明文字下方 103px */}
       <div style={{ marginTop: '103px', marginLeft: '367px' }}>
         <div className="flex items-center gap-[29px]">
-          {/* Database Icon */}
+          {/* Icon（可配置） */}
           <div className="w-[42px] h-[42px] rounded-[10px] flex items-center justify-center flex-shrink-0" style={{ backgroundColor: iconColor }}>
-            <svg xmlns="http://www.w3.org/2000/svg" width="29" height="29" viewBox="0 0 29 29" fill="none">
-              <path d="M25.375 6.04163C25.375 8.04366 20.5061 9.66663 14.5 9.66663C8.4939 9.66663 3.625 8.04366 3.625 6.04163M25.375 6.04163C25.375 4.03959 20.5061 2.41663 14.5 2.41663C8.4939 2.41663 3.625 4.03959 3.625 6.04163M25.375 6.04163V22.9583C25.375 24.9641 20.5417 26.5833 14.5 26.5833C8.45833 26.5833 3.625 24.9641 3.625 22.9583V6.04163M25.375 14.5C25.375 16.5058 20.5417 18.125 14.5 18.125C8.45833 18.125 3.625 16.5058 3.625 14.5" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
-            </svg>
+            {icon}
           </div>
 
-          {/* 標題文字 */}
+          {/* 標題文字（可配置） */}
           <div className="flex flex-col justify-center h-[86px]">
             <h3 className="text-[28px] font-bold text-black">
-              使用數據
+              {title}
             </h3>
           </div>
         </div>
@@ -184,49 +210,41 @@ export function MobileEnergyUsageSection(props: MobileEnergyUsageSectionProps) {
       {/* ==================== 使用數據區塊 - 標題底部往下 34px，頁面置中 ==================== */}
       <div style={{ marginTop: `${LAYOUT_CONSTANTS.SECTION_BOTTOM_MARGIN}px`, marginBottom: '32px' }} className="flex justify-center">
         <div
-          className="bg-[#ebedf0] rounded-[37px]"
+          className={renderInputFields ? '' : 'bg-[#ebedf0] rounded-[37px]'}
           style={{
-            width: `${LAYOUT_CONSTANTS.CONTAINER_WIDTH}px`,
-            minHeight: `${LAYOUT_CONSTANTS.CONTAINER_MIN_HEIGHT}px`,
+            width: renderInputFields ? 'auto' : `${LAYOUT_CONSTANTS.CONTAINER_WIDTH}px`,
+            minHeight: renderInputFields ? 'auto' : `${LAYOUT_CONSTANTS.CONTAINER_MIN_HEIGHT}px`,
             flexShrink: 0,
-            padding: '38px 0 38px 49px'
+            padding: renderInputFields ? '0' : '38px 0 38px 49px'
           }}
         >
-          {/* 標題區 - 358px × 73px，文字靠左上對齊 */}
-          <div style={{
-            width: `${LAYOUT_CONSTANTS.EDITOR_UPLOAD_WIDTH}px`,
-            height: '73px',
-            marginBottom: '0',
-            display: 'flex',
-            flexDirection: 'column',
-            justifyContent: 'flex-start',
-            alignItems: 'flex-start'
-          }}>
-            <h4 className="text-[24px] font-bold" style={{ lineHeight: '1.2', marginBottom: '8px', color: '#000' }}>佐證文件</h4>
-            <p className="text-[18px] text-gray-500" style={{ lineHeight: '1.2' }}>* 加油單據上需註明 年、月、日</p>
-          </div>
+          {/* 標題區 - 文字靠左上對齊 - 只在非自訂模式下顯示 */}
+          {!renderInputFields && (
+            <div style={{
+              width: `${dropzoneWidth}px`,
+              height: '73px',
+              marginBottom: '0',
+              display: 'flex',
+              flexDirection: 'column',
+              justifyContent: 'flex-start',
+              alignItems: 'flex-start'
+            }}>
+            </div>
+          )}
 
           {/* 框框容器 */}
           <div className="flex" style={{ gap: `${LAYOUT_CONSTANTS.EDITOR_GAP}px`, alignItems: 'flex-start' }}>
-            {/* 左側：佐證上傳區 */}
-            <div style={{ width: `${LAYOUT_CONSTANTS.EDITOR_UPLOAD_WIDTH}px` }} className="flex-shrink-0">
+            {/* 左側：佐證上傳區 - 只在非自訂模式下顯示 */}
+            {!renderInputFields && (
+              <div style={{ width: `${dropzoneWidth}px` }} className="flex-shrink-0">
               {/* 使用 FileDropzone 元件 */}
               <FileDropzone
-                width={`${LAYOUT_CONSTANTS.EDITOR_UPLOAD_WIDTH}px`}
-                height={`${LAYOUT_CONSTANTS.EDITOR_UPLOAD_HEIGHT}px`}
+                width={`${dropzoneWidth}px`}
+                height={`${dropzoneHeight}px`}
                 accept=".xlsx,.xls,.pdf,.jpg,.jpeg,.png,.gif,.webp,.bmp,.svg,image/*,application/pdf,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
                 multiple={false}
                 onFileSelect={(files) => {
                   if (!isReadOnly && !submitting && !approvalStatus.isApproved && editPermissions.canUploadFiles) {
-                    // 檢查總檔案數（包含已儲存和暫存）
-                    const totalFiles = currentEditingGroup.memoryFiles.length +
-                      (currentEditingGroup.records[0]?.evidenceFiles?.length || 0)
-
-                    if (totalFiles >= 1) {
-                      onError('已有檔案存在，請先刪除現有檔案再上傳新檔案')
-                      return
-                    }
-
                     // 建立 MemoryFile
                     const file = files[0]
                     let preview = ''
@@ -254,9 +272,7 @@ export function MobileEnergyUsageSection(props: MobileEnergyUsageSectionProps) {
                   isReadOnly ||
                   submitting ||
                   approvalStatus.isApproved ||
-                  !editPermissions.canUploadFiles ||
-                  // 達到檔案數量上限時也 disable
-                  (currentEditingGroup.memoryFiles.length + (currentEditingGroup.records[0]?.evidenceFiles?.length || 0)) >= 1
+                  !editPermissions.canUploadFiles
                 }
                 readOnly={isReadOnly || submitting || approvalStatus.isApproved}
                 file={currentEditingGroup.memoryFiles[0] || null}
@@ -278,7 +294,7 @@ export function MobileEnergyUsageSection(props: MobileEnergyUsageSectionProps) {
 
               {/* 已儲存的佐證檔案（可刪除） */}
               {currentEditingGroup.records[0]?.evidenceFiles && currentEditingGroup.records[0].evidenceFiles.length > 0 && (
-                <div style={{ marginTop: '19px', width: '358px' }}>
+                <div style={{ marginTop: '19px', width: `${dropzoneWidth}px` }}>
                   {currentEditingGroup.records[0].evidenceFiles.map((file) => {
                     const isImage = file.mime_type.startsWith('image/')
                     const thumbnailUrl = thumbnails[file.id]
@@ -359,7 +375,7 @@ export function MobileEnergyUsageSection(props: MobileEnergyUsageSectionProps) {
                           className="p-2 text-black hover:text-red-600 hover:bg-red-50 rounded transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                           title="刪除檔案"
                         >
-                          <Trash2 style={{ width: '32px', height: '28px' }} />
+                          <Trash2 style={{ width: '32px', height: '32px' }} />
                         </button>
                       </div>
                     )
@@ -367,79 +383,95 @@ export function MobileEnergyUsageSection(props: MobileEnergyUsageSectionProps) {
                 </div>
               )}
             </div>
+            )}
 
             {/* 右側：輸入表單區域（含按鈕） */}
             <div style={{ display: 'flex', flexDirection: 'column' }}>
               {/* 輸入表單 - 完整框框 - 動態高度 */}
               <div
                 style={{
-                  width: `${LAYOUT_CONSTANTS.EDITOR_FORM_WIDTH}px`,
-                  minHeight: `${LAYOUT_CONSTANTS.EDITOR_UPLOAD_HEIGHT}px`,
-                  borderRadius: '30px',
-                  overflow: 'hidden'
+                  width: renderInputFields ? 'auto' : `${LAYOUT_CONSTANTS.EDITOR_FORM_WIDTH}px`,
+                  minHeight: renderInputFields ? 'auto' : `${LAYOUT_CONSTANTS.EDITOR_UPLOAD_HEIGHT}px`,
+                  borderRadius: renderInputFields ? '0' : '30px',
+                  overflow: renderInputFields ? 'visible' : 'hidden'
                 }}
               >
-              {/* 表頭 - 藍色區域 58px */}
-              <div className="flex items-center" style={{ backgroundColor: iconColor, height: `${LAYOUT_CONSTANTS.EDITOR_FORM_HEADER_HEIGHT}px`, paddingLeft: '43px', paddingRight: '16px' }}>
-                <div style={{ width: '199px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                  <span className="text-white text-[20px] font-medium">加油日期</span>
-                </div>
-                <div style={{ width: '27px' }}></div>
-                <div style={{ width: '230px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                  <span className="text-white text-[20px] font-medium">加油量 (L)</span>
-                </div>
-                <div style={{ width: '40px' }}></div> {/* 刪除按鈕空間 */}
-              </div>
+              {/* 預設模式：表頭 + RecordInputRow */}
+              {!renderInputFields && (
+                <>
+                  {/* 表頭 - 藍色區域 58px */}
+                  <div className="flex items-center" style={{ backgroundColor: iconColor, height: `${LAYOUT_CONSTANTS.EDITOR_FORM_HEADER_HEIGHT}px`, paddingLeft: '43px', paddingRight: '16px' }}>
+                    <div style={{ width: '199px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                      <span className="text-white text-[20px] font-medium">加油日期</span>
+                    </div>
+                    <div style={{ width: '27px' }}></div>
+                    <div style={{ width: '230px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                      <span className="text-white text-[20px] font-medium">加油量 (L)</span>
+                    </div>
+                    <div style={{ width: '40px' }}></div> {/* 刪除按鈕空間 */}
+                  </div>
 
-              {/* 輸入行 - 白色區域 - 動態高度 */}
-              <div className="bg-white" style={{ minHeight: '250px', paddingLeft: '43px', paddingRight: '16px', paddingTop: '16px', paddingBottom: '16px' }}>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '22px' }}>
-                {currentEditingGroup.records.map((record) => (
-                  <RecordInputRow
-                    key={record.id}
-                    recordId={record.id}
-                    date={record.date}
-                    quantity={record.quantity}
-                    onUpdate={updateCurrentGroupRecord}
-                    onDelete={removeRecordFromCurrentGroup}
-                    showDelete={currentEditingGroup.records.length > 1}
-                    disabled={isReadOnly || approvalStatus.isApproved}
-                  />
-                ))}
-                </div>
-              </div>
+                  {/* 輸入行 - 白色區域 - 動態高度 */}
+                  <div className="bg-white" style={{ minHeight: '250px', paddingLeft: '43px', paddingRight: '16px', paddingTop: '16px', paddingBottom: '16px' }}>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '22px' }}>
+                    {currentEditingGroup.records.map((record) => (
+                      <RecordInputRow
+                        key={record.id}
+                        recordId={record.id}
+                        date={record.date}
+                        quantity={record.quantity}
+                        onUpdate={updateCurrentGroupRecord}
+                        onDelete={removeRecordFromCurrentGroup}
+                        showDelete={currentEditingGroup.records.length > 1}
+                        disabled={isReadOnly || approvalStatus.isApproved}
+                      />
+                    ))}
+                    </div>
+                  </div>
+                </>
+              )}
+
+              {/* 自訂模式：使用 renderInputFields */}
+              {renderInputFields && renderInputFields({
+                currentGroup: currentEditingGroup,
+                onUpdate: updateCurrentGroupRecord,
+                onDelete: removeRecordFromCurrentGroup,
+                isReadOnly: isReadOnly || approvalStatus.isApproved
+              })}
             </div>
 
-            {/* 新增數據按鈕 */}
-            <button
-              onClick={addRecordToCurrentGroup}
-              disabled={isReadOnly || approvalStatus.isApproved}
-              style={{
-                marginTop: '35px',
-                width: '599px',
-                height: '46px',
-                flexShrink: 0,
-                background: iconColor,
-                border: 'none',
-                borderRadius: '5px',
-                display: 'flex',
-                flexDirection: 'column',
-                justifyContent: 'center',
-                alignItems: 'center',
-                color: '#FFF',
-                textAlign: 'center',
-                fontFamily: 'var(--sds-typography-body-font-family)',
-                fontSize: '20px',
-                fontStyle: 'normal',
-                fontWeight: 400,
-                lineHeight: '100%',
-                cursor: 'pointer',
-                transition: 'all 0.2s'
-              }}
-              className="hover:opacity-90"
-            >
-              + 新增數據到此群組
-            </button>
+            {/* 新增數據按鈕 - 只在非自訂模式下顯示 */}
+            {!renderInputFields && (
+              <button
+                onClick={addRecordToCurrentGroup}
+                disabled={isReadOnly || approvalStatus.isApproved}
+                style={{
+                  marginTop: '35px',
+                  width: '599px',
+                  height: '46px',
+                  flexShrink: 0,
+                  background: iconColor,
+                  border: 'none',
+                  borderRadius: '5px',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  justifyContent: 'center',
+                  alignItems: 'center',
+                  color: '#FFF',
+                  textAlign: 'center',
+                  fontFamily: 'var(--sds-typography-body-font-family)',
+                  fontSize: '20px',
+                  fontStyle: 'normal',
+                  fontWeight: 400,
+                  lineHeight: '100%',
+                  cursor: 'pointer',
+                  transition: 'all 0.2s'
+                }}
+                className="hover:opacity-90"
+              >
+                + 新增數據到此群組
+              </button>
+            )}
           </div>
           </div>
         </div>

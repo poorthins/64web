@@ -7,7 +7,7 @@
 
 export interface MobileEnergyConfig {
   /** 頁面 key（用於 API） */
-  pageKey: 'diesel' | 'gasoline' | 'urea' | 'septic_tank' | 'diesel_generator' | 'generator_test'
+  pageKey: 'diesel' | 'gasoline' | 'urea' | 'septic_tank' | 'diesel_generator' | 'generator_test' | 'sf6'
   /** 類別標籤（顯示在標題左側） */
   category: string
   /** 主標題 */
@@ -108,4 +108,17 @@ export const GENERATOR_TEST_CONFIG: MobileEnergyConfig = {
   unit: '次',
   instructionText: '請填寫發電機測試資料，並上傳發電機銘牌照片。',
   dataFieldName: 'generatorTestData'
+}
+
+// 六氟化硫配置
+export const SF6_CONFIG: MobileEnergyConfig = {
+  pageKey: 'sf6',
+  category: 'S',
+  title: '六氟化硫',
+  subtitle: 'SF6',
+  iconColor: '#35E3BD',
+  categoryPosition: { left: 701, top: 39 },
+  unit: 'g',
+  instructionText: '請填寫設備資訊，並上傳GCB 氣體斷路氣銘牌照片、SF6 氣體重量/ 年洩漏率證明文件，點選「+新增設備」，填寫至所有設備資料皆登錄完成。系統會自動將資料彙整至下方列表。',
+  dataFieldName: 'sf6Data'
 }

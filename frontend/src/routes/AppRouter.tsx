@@ -21,6 +21,7 @@ import GasolinePage from '../pages/Category1/GasolinePage'
 import DieselPage from '../pages/Category1/DieselPage'
 import DieselStationarySourcesPage from '../pages/Category1/DieselStationarySourcesPage'
 import GeneratorTestPage from '../pages/Category1/GeneratorTestPage'
+import SF6Page from '../pages/Category1/SF6Page'
 import LPGPage from '../pages/Category1/LPGPage'
 import WeldingRodPage from '../pages/Category1/WeldingRodPage'
 import FireExtinguisherPage from '../pages/Category1/FireExtinguisherPage'
@@ -144,6 +145,11 @@ function AppRouter() {
               <Route path="generator_test" element={
                 <UserRoute energyCategory="generator_test">
                   <GeneratorTestPage />
+                </UserRoute>
+              } />
+              <Route path="sf6" element={
+                <UserRoute energyCategory="sf6">
+                  <SF6Page />
                 </UserRoute>
               } />
               <Route path="lpg" element={

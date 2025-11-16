@@ -50,3 +50,29 @@ export interface GeneratorTestEditingGroup {
   records: GeneratorTestRecord[]
   memoryFiles: MemoryFile[]
 }
+
+/**
+ * SF6 記錄型別
+ */
+export interface SF6Record {
+  id: string
+  location: string              // 設備位置
+  sf6Weight: number             // SF6氣體重量（g）
+  model: string                 // 型號
+  leakageRate: number           // 年洩漏率（%）
+  groupId?: string
+  nameplateFiles?: EvidenceFile[]      // GCB 氣體斷路器銘牌照片
+  certificateFiles?: EvidenceFile[]    // SF6 氣體重量/ 年洩漏率證明文件
+  memoryNameplateFiles?: MemoryFile[]
+  memoryCertificateFiles?: MemoryFile[]
+}
+
+/**
+ * SF6 編輯區狀態
+ */
+export interface SF6EditingGroup {
+  groupId: string | null
+  record: SF6Record  // ⭐ 注意：單一記錄，不是陣列
+  memoryNameplateFiles: MemoryFile[]
+  memoryCertificateFiles: MemoryFile[]
+}

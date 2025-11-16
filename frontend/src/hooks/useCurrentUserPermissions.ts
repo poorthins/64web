@@ -31,7 +31,7 @@ export interface UseCurrentUserPermissionsActions {
   getVisibleScopes: () => Array<keyof typeof ENERGY_CATEGORIES_BY_SCOPE>
 }
 
-const CACHE_DURATION = 5 * 60 * 1000 // 5分鐘快取
+const CACHE_DURATION = 0 // 管理員改權限需立即生效，關閉快取
 
 export function useCurrentUserPermissions(): UseCurrentUserPermissionsState & UseCurrentUserPermissionsActions {
   const { isAdmin, loadingRole } = useAuth()
@@ -232,7 +232,8 @@ export function useCurrentUserPermissions(): UseCurrentUserPermissionsState & Us
   // 初始載入
   useEffect(() => {
     fetchPermissions()
-  }, [fetchPermissions])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isAdmin, loadingRole])
 
   // 實際的 permissions 狀態（管理員使用管理員權限，一般用戶使用 API 權限）
   const actualPermissions = isAdmin ? adminPermissions : state.permissions

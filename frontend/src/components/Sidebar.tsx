@@ -21,6 +21,7 @@ const ENERGY_CATEGORY_LABELS: Record<string, string> = {
   generator_test: '發電機測試資料',
   diesel: '柴油(移動源)',
   gasoline: '汽油',
+  sf6: '六氟化硫',
   lpg: '液化石油氣',
   fire_extinguisher: '滅火器',
   welding_rod: '焊條',

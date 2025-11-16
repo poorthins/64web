@@ -369,7 +369,7 @@ export function GeneratorTestUsageSection(props: GeneratorTestUsageSectionProps)
                           className="p-2 text-black hover:text-red-600 hover:bg-red-50 rounded transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                           title="刪除檔案"
                         >
-                          <Trash2 style={{ width: '32px', height: '28px' }} />
+                          <Trash2 style={{ width: '32px', height: '32px' }} />
                         </button>
                       </div>
                     )

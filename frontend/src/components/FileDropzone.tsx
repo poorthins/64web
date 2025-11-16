@@ -117,9 +117,13 @@ export function FileDropzone({
   const isDragging = externalIsDragging ?? internalIsDragging
   const setIsDragging = onDragStateChange ?? setInternalIsDragging
 
+  // 自動鎖定邏輯：當 multiple=false 且已有檔案時，自動禁用
+  const isAutoDisabled = !multiple && file !== null
+  const effectiveDisabled = disabled || isAutoDisabled
+
   const handleClick = (e: React.MouseEvent) => {
     e.stopPropagation()
-    if (!disabled) {
+    if (!effectiveDisabled) {
       fileInputRef.current?.click()
     }
   }
@@ -138,7 +142,7 @@ export function FileDropzone({
   const handleDragOver = (e: React.DragEvent) => {
     e.preventDefault()
     e.stopPropagation()
-    if (!disabled) {
+    if (!effectiveDisabled) {
       setIsDragging(true)
     }
   }
@@ -154,7 +158,7 @@ export function FileDropzone({
     e.stopPropagation()
     setIsDragging(false)
 
-    if (disabled) return
+    if (effectiveDisabled) return
 
     const files = e.dataTransfer.files
     if (files && files.length > 0) {
@@ -238,7 +242,7 @@ export function FileDropzone({
     <>
     <div
       className={`bg-white flex flex-col items-center justify-center cursor-pointer hover:bg-blue-50 transition-colors ${
-        disabled ? 'opacity-50 cursor-not-allowed' : ''
+        effectiveDisabled ? 'opacity-50 cursor-not-allowed' : ''
       } ${isDragging ? 'bg-blue-50 border-blue-400' : ''} ${className}`}
       style={{
         width,
@@ -262,7 +266,7 @@ export function FileDropzone({
         multiple={multiple}
         onChange={handleFileChange}
         className="hidden"
-        disabled={disabled}
+        disabled={effectiveDisabled}
       />
 
       <div className="flex flex-col items-center justify-center text-center pointer-events-none">
@@ -344,7 +348,7 @@ export function FileDropzone({
             className="p-2 text-black hover:text-red-600 hover:bg-red-50 rounded transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
             title="刪除檔案"
           >
-            <Trash2 style={{ width: '32px', height: '28px' }} />
+            <Trash2 style={{ width: '32px', height: '32px' }} />
           </button>
         )}
       </div>

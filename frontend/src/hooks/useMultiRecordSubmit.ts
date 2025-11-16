@@ -24,6 +24,15 @@ export interface MultiRecordSubmitParams {
 }
 
 /**
+ * Hook 選項介面（用於處理通知回調）
+ */
+export interface UseMultiRecordSubmitOptions {
+  onSubmitSuccess?: () => void  // 提交成功回調
+  onSaveSuccess?: () => void    // 儲存成功回調
+  onError?: (error: Error) => void  // 錯誤回調
+}
+
+/**
  * Hook 回傳值介面
  */
 export interface UseMultiRecordSubmitReturn {
@@ -44,19 +53,32 @@ export interface UseMultiRecordSubmitReturn {
  * - 支援 submit（提交）和 save（暫存）
  * - 與 useRecordFileMapping 無縫配合
  * - 訊息格式與 useEnergySubmit 統一
+ * - 支持回調通知（避免抽象洩漏）
  *
  * 適用頁面：
  * - DieselPage（柴油）
  * - GasolinePage（汽油）
  * - RefrigerantPage（冷媒）
  * - DieselStationarySourcesPage（柴油固定源）
+ * - SF6Page（六氟化硫）
+ * - UreaPage（尿素）
  *
  * @param pageKey - 能源類別識別碼（如 'diesel'）
  * @param year - 填報年度
+ * @param options - 可選的回調選項（onSubmitSuccess, onSaveSuccess, onError）
  * @returns UseMultiRecordSubmitReturn
  *
  * @example
- * const { submit, save, submitting } = useMultiRecordSubmit('diesel', 2025)
+ * const { submit, save, submitting } = useMultiRecordSubmit('diesel', 2025, {
+ *   onSubmitSuccess: () => {
+ *     setSuccessModalType('submit')
+ *     setShowSuccessModal(true)
+ *   },
+ *   onSaveSuccess: () => {
+ *     setSuccessModalType('save')
+ *     setShowSuccessModal(true)
+ *   }
+ * })
  *
  * await submit({
  *   entryInput: { page_key, period_year, unit, monthly, extraPayload },
@@ -70,7 +92,8 @@ export interface UseMultiRecordSubmitReturn {
  */
 export function useMultiRecordSubmit(
   pageKey: string,
-  year: number
+  year: number,
+  options?: UseMultiRecordSubmitOptions
 ): UseMultiRecordSubmitReturn {
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -128,12 +151,25 @@ export function useMultiRecordSubmit(
         setSuccess(`提交成功！共 ${recordCount} 筆記錄`)
       }
 
+      // 步驟 5：觸發成功回調（避免抽象洩漏）
+      if (isDraft) {
+        options?.onSaveSuccess?.()
+      } else {
+        options?.onSubmitSuccess?.()
+      }
+
       return entry_id
 
     } catch (err) {
       console.error('❌ [useMultiRecordSubmit] 失敗:', err)
       const errorMessage = err instanceof Error ? err.message : '操作失敗'
       setError(errorMessage)
+
+      // 觸發錯誤回調
+      if (err instanceof Error) {
+        options?.onError?.(err)
+      }
+
       throw err
 
     } finally {

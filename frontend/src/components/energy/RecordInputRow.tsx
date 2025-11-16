@@ -147,7 +147,7 @@ export function RecordInputRow({
           className="p-2 text-black hover:text-red-600 hover:bg-red-50 rounded transition-colors"
           title="刪除此記錄"
         >
-          <Trash2 style={{ width: '32px', height: '28px' }} />
+          <Trash2 style={{ width: '32px', height: '32px' }} />
         </button>
       ) : (
         // 佔位空間（維持對齊）

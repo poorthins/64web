@@ -12,10 +12,10 @@ describe('categoryMapping', () => {
       expect(CATEGORY_GROUPS).toHaveLength(6)
     })
 
-    it('類別一應該有 12 個項目', () => {
+    it('類別一應該有 14 個項目', () => {
       const category1 = CATEGORY_GROUPS.find(cat => cat.id === 'category1')
       expect(category1).toBeDefined()
-      expect(category1!.items).toHaveLength(12)
+      expect(category1!.items).toHaveLength(14)
     })
 
     it('類別二應該有 1 個項目（外購電力）', () => {
@@ -56,13 +56,13 @@ describe('categoryMapping', () => {
       })
     })
 
-    it('應該包含所有 14 個能源項目', () => {
+    it('應該包含所有 16 個能源項目', () => {
       const allItems = CATEGORY_GROUPS.flatMap(cat => cat.items)
-      expect(allItems).toHaveLength(14)
+      expect(allItems).toHaveLength(16)
 
       const expectedIds = [
         'wd40', 'acetylene', 'refrigerant', 'septic_tank', 'natural_gas', 'urea',
-        'diesel_generator', 'diesel', 'gasoline', 'lpg', 'fire_extinguisher', 'welding_rod',
+        'diesel_generator', 'diesel', 'gasoline', 'sf6', 'generator_test', 'lpg', 'fire_extinguisher', 'welding_rod',
         'electricity', 'employee_commute'
       ]
 
@@ -102,7 +102,7 @@ describe('categoryMapping', () => {
   describe('getCategoryItems()', () => {
     it('應該返回指定分類的項目', () => {
       const items = getCategoryItems('category1')
-      expect(items).toHaveLength(12)
+      expect(items).toHaveLength(14)
     })
 
     it('對於不存在的分類應該返回空陣列', () => {

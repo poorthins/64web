@@ -5,8 +5,8 @@
  * 適用於：所有有群組概念的多記錄能源頁面
  */
 
-import { Pencil, Trash2 } from 'lucide-react'
 import { FileTypeIcon } from './FileTypeIcon'
+import { ActionButtons } from './ActionButtons'
 import { getFileType } from '../../utils/energy/fileTypeDetector'
 import { EvidenceFile } from '../../api/files'
 import { MemoryFile } from '../../services/documentHandler'
@@ -157,27 +157,13 @@ export function GroupListItem({
       </div>
 
       {/* 操作按鈕組 */}
-      <div className="flex items-center" style={{ gap: '8px', marginRight: '20px' }}>
-        {/* 編輯按鈕 */}
-        <button
-          onClick={() => onEdit(groupId)}
-          disabled={disabled}
-          className="p-2 text-black hover:text-gray-700 hover:bg-gray-100 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-          title="編輯群組"
-        >
-          <Pencil className="w-6 h-6" />
-        </button>
-
-        {/* 刪除按鈕 */}
-        <button
-          onClick={() => onDelete(groupId)}
-          disabled={disabled}
-          className="p-2 hover:bg-red-50 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-          title="刪除群組"
-        >
-          <Trash2 style={{ width: '32px', height: '28px', color: '#000' }} />
-        </button>
-      </div>
+      <ActionButtons
+        onEdit={() => onEdit(groupId)}
+        onDelete={() => onDelete(groupId)}
+        disabled={disabled}
+        editTitle="編輯群組"
+        deleteTitle="刪除群組"
+      />
     </div>
   )
 }

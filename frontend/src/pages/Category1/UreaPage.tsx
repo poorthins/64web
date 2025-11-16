@@ -91,7 +91,16 @@ export default function UreaPage() {
     submit,
     save,
     submitting: submitLoading
-  } = useMultiRecordSubmit(pageKey, year)
+  } = useMultiRecordSubmit(pageKey, year, {
+    onSubmitSuccess: () => {
+      setSuccessModalType('submit')
+      setShowSuccessModal(true)
+    },
+    onSaveSuccess: () => {
+      setSuccessModalType('save')
+      setShowSuccessModal(true)
+    }
+  })
 
   // 清除 Hook
   const {
@@ -419,9 +428,6 @@ export default function UreaPage() {
 
       // 重新載入審核狀態，更新狀態橫幅
       reloadApprovalStatus()
-
-      setSuccessModalType('submit')
-      setShowSuccessModal(true)
     }).catch(error => {
       setError(error instanceof Error ? error.message : '提交失敗，請重試');
     })
@@ -567,10 +573,6 @@ export default function UreaPage() {
 
       // 重新載入審核狀態，更新狀態橫幅
       reloadApprovalStatus()
-
-      setSuccess('暫存成功！資料已儲存')
-      setSuccessModalType('save')
-      setShowSuccessModal(true)
     }).catch(error => {
       console.error('❌ 暫存失敗:', error)
       setError(error instanceof Error ? error.message : '暫存失敗')

@@ -12,7 +12,10 @@
 4. [StatusBanner - 審核狀態橫幅](#statusbanner---審核狀態橫幅)
 5. [ConfirmClearModal - 清除確認彈窗](#confirmclearmodal---清除確認彈窗)
 6. [SuccessModal - 成功提示彈窗](#successmodal---成功提示彈窗)
-7. [重構成果](#重構成果)
+7. [SectionHeader - 區塊標題](#sectionheader---區塊標題)
+8. [ActionButtons - 編輯/刪除操作按鈕](#actionbuttons---編輯刪除操作按鈕)
+9. [MobileEnergyUsageSection - 移動源能源問卷組件](#mobileenergyusagesection---移動源能源問卷組件)
+10. [重構成果](#重構成果)
 
 ---
 
@@ -289,8 +292,7 @@ return (
 📋 套用母版配置清單
 
 【頁面基本資訊】
-- pageKey: _______（例如：diesel, gas, electricity）
-- 頁面文件路徑: _______（例如：frontend/src/pages/Category1/DieselPage.tsx）
+
 
 【PageHeader 配置】
 - category: _______（大寫字母，例如：D, G, E, LPG）
@@ -303,10 +305,7 @@ return (
 - instructionText: _______（說明文字，可用 <br /> 換行）
 
 【色票確認】
-- Category 字母顏色：#3996FE（藍色）✓
-- StatusBanner 陰影：#3996FE（藍色）✓
-- BottomActionBar 背景：#3996FE（藍色）✓
-- 需要改顏色？是 / 否
+- 頁面色票: _______
 ```
 
 **填完後回傳，我會直接套用到指定頁面。**
@@ -1468,6 +1467,852 @@ const handleApprove = async () => {
 
 ---
 
+## SectionHeader - 區塊標題
+
+### 用途
+
+統一的區塊標題組件，用於能源頁面的各個功能區塊（使用數據、資料列表、設備資料等）。
+
+### 為什麼需要這個組件？
+
+**問題：**
+- 每個頁面都需要「icon + 標題」的區塊標題
+- 每個頁面手寫樣式，字體大小、間距不一致
+- 修改樣式需要改 14 個頁面
+
+**解決方案：**
+- 統一區塊標題 UI
+- icon + 標題自動對齊
+- 支援自訂 icon 和顏色
+
+### 文件位置
+
+```
+frontend/src/components/SectionHeader.tsx
+```
+
+### Props
+
+```typescript
+interface SectionHeaderProps {
+  /** Icon 組件（從 lucide-react 引入） */
+  icon: LucideIcon
+
+  /** 區塊標題文字 */
+  title: string
+
+  /** Icon 顏色（16 進位色碼） */
+  iconColor: string
+
+  /** 可選：自訂容器樣式 */
+  className?: string
+}
+```
+
+### UI 結構
+
+```
+┌────────────────────────────────┐
+│ 📊 使用數據                    │ ← icon 左對齊，標題緊鄰
+└────────────────────────────────┘
+   ↑           ↑
+  icon       title
+(w-6 h-6)  (text-2xl)
+(mr-3)     (font-semibold)
+```
+
+**樣式細節：**
+- Icon 尺寸：w-6 h-6 (24px × 24px)
+- Icon 與標題間距：mr-3 (12px)
+- 標題字體：text-2xl (24px), font-semibold
+- Icon 和標題顏色：使用相同的 iconColor
+- 底部間距：mb-6 (24px)
+
+### 使用方式
+
+#### 基本用法
+
+```tsx
+import SectionHeader from '../../components/SectionHeader'
+import { Database } from 'lucide-react'
+
+function DieselPage() {
+  return (
+    <div>
+      <SectionHeader
+        icon={Database}
+        title="使用數據"
+        iconColor="#3996FE"
+      />
+      {/* 區塊內容 */}
+    </div>
+  )
+}
+```
+
+#### 常見 icon 選擇
+
+```tsx
+import { Database, List, FileText, Settings, Zap } from 'lucide-react'
+
+// 使用數據區塊
+<SectionHeader icon={Database} title="使用數據" iconColor="#3996FE" />
+
+// 資料列表區塊
+<SectionHeader icon={List} title="資料列表" iconColor="#3996FE" />
+
+// 設備資料區塊
+<SectionHeader icon={Settings} title="設備資料" iconColor="#6197C5" />
+
+// 佐證文件區塊
+<SectionHeader icon={FileText} title="佐證文件" iconColor="#10b981" />
+```
+
+#### 完整使用範例（柴油頁面）
+
+```tsx
+import SectionHeader from '../../components/SectionHeader'
+import { Database, List } from 'lucide-react'
+import { MobileEnergyUsageSection } from './shared/mobile/components/MobileEnergyUsageSection'
+import { MobileEnergyGroupListSection } from './shared/mobile/components/MobileEnergyGroupListSection'
+
+function DieselPage() {
+  return (
+    <SharedPageLayout {...layoutProps}>
+      {/* 使用數據區塊 */}
+      <SectionHeader
+        icon={Database}
+        title="使用數據"
+        iconColor="#3996FE"
+      />
+      <MobileEnergyUsageSection {...usageProps} />
+
+      {/* 資料列表區塊 */}
+      <SectionHeader
+        icon={List}
+        title="資料列表"
+        iconColor="#3996FE"
+      />
+      <MobileEnergyGroupListSection {...listProps} />
+    </SharedPageLayout>
+  )
+}
+```
+
+#### 完整使用範例（冷媒頁面）
+
+```tsx
+import SectionHeader from '../../components/SectionHeader'
+import { Database } from 'lucide-react'
+
+function RefrigerantPage() {
+  return (
+    <SharedPageLayout {...layoutProps}>
+      {/* 設備資料區塊 */}
+      <SectionHeader
+        icon={Database}
+        title="冷媒設備資料"
+        iconColor="#6197C5"
+      />
+      <table>
+        {/* 設備表格 */}
+      </table>
+    </SharedPageLayout>
+  )
+}
+```
+
+### 自訂樣式
+
+```tsx
+// 增加頂部間距
+<SectionHeader
+  icon={Database}
+  title="使用數據"
+  iconColor="#3996FE"
+  className="mt-8"
+/>
+
+// 置中顯示
+<SectionHeader
+  icon={Database}
+  title="使用數據"
+  iconColor="#3996FE"
+  className="justify-center"
+/>
+```
+
+### 可用的 Lucide Icons
+
+常用的 icon 清單（從 `lucide-react` 引入）：
+
+| Icon | 適用場景 |
+|------|---------|
+| `Database` | 使用數據、資料輸入 |
+| `List` | 資料列表、已儲存記錄 |
+| `FileText` | 佐證文件、檔案上傳 |
+| `Settings` | 設備資料、配置 |
+| `Zap` | 電力、能源 |
+| `Droplet` | 水、液體類能源 |
+| `Wind` | 空氣、氣體 |
+| `Thermometer` | 溫度、熱能 |
+
+完整 icon 清單：https://lucide.dev/icons/
+
+### Before vs. After
+
+**Before (每個區塊 5-8 行):**
+```tsx
+<div className="flex items-center mb-6">
+  <Database
+    className="w-6 h-6 mr-3"
+    style={{ color: "#3996FE" }}
+  />
+  <h2 className="text-2xl font-semibold" style={{ color: "#3996FE" }}>
+    使用數據
+  </h2>
+</div>
+```
+
+**After (每個區塊 1 行):**
+```tsx
+<SectionHeader icon={Database} title="使用數據" iconColor="#3996FE" />
+```
+
+**成果：** 每個區塊減少 6 行代碼
+
+---
+
+## 📋 區塊標題配置問卷（圖解版）
+
+### 問卷說明
+
+當你說「我要在 XXX 頁面加區塊標題」時，對照下方圖解填寫。
+
+### 視覺化參考
+
+```
+┌────────────────────────────────────────────────┐
+│ SharedPageLayout (母版已包含)                  │
+│ ├── 導航欄                                     │
+│ ├── PageHeader: D / 柴油(移動源)                │
+│ ├── StatusBanner: 審核狀態                      │
+│ ├── InstructionText: 說明文字                   │
+│ └── Children: ↓↓↓ 你要填的區塊在這裡 ↓↓↓        │
+├────────────────────────────────────────────────┤
+│                                                 │
+│  ┌──────────────────────────────────────────┐ │
+│  │ 📊 使用數據  ← 區塊 1 的標題              │ │
+│  ├──────────────────────────────────────────┤ │
+│  │ [填寫框或表格內容]                        │ │
+│  └──────────────────────────────────────────┘ │
+│                                                 │
+│  ┌──────────────────────────────────────────┐ │
+│  │ 📋 資料列表  ← 區塊 2 的標題              │ │
+│  ├──────────────────────────────────────────┤ │
+│  │ [列表內容]                                │ │
+│  └──────────────────────────────────────────┘ │
+│                                                 │
+└─────────────────────────────────────────────────┘
+```
+
+---
+
+### 問卷模板
+
+```
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+📋 SectionHeader 配置問卷
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+【步驟 1：頁面基本資訊】
+頁面名稱: _______
+主題顏色: #_______ (例如：#3996FE、#6197C5)
+
+【步驟 2：區塊標題配置】
+
+區塊 1:
+- 標題: _______ (例如：使用數據、設備資料)
+- Icon: _______ (選項見下方)
+- 加在哪裡: _______ (例如：表格上方、MobileEnergyUsageSection 上方)
+
+區塊 2: (沒有就空著)
+- 標題: _______
+- Icon: _______
+- 加在哪裡: _______
+
+區塊 3: (沒有就空著)
+- 標題: _______
+- Icon: _______
+- 加在哪裡: _______
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Icon 選項 (複製貼上即可)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Database     → 📊 使用數據、資料輸入、設備資料
+List         → 📋 資料列表、已儲存記錄
+FileText     → 📄 佐證文件、檔案上傳
+Settings     → ⚙️ 設備配置、系統設定
+Zap          → ⚡ 電力、能源
+Droplet      → 💧 水、液體
+Wind         → 💨 氣體、空氣
+Thermometer  → 🌡️ 溫度、熱能
+```
+
+---
+
+### 填寫範例 1：柴油頁面
+
+```
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+📋 SectionHeader 配置問卷
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+【步驟 1：頁面基本資訊】
+頁面名稱: 柴油
+主題顏色: #3996FE
+
+【步驟 2：區塊標題配置】
+
+區塊 1:
+- 標題: 使用數據
+- Icon: Database
+- 加在哪裡: MobileEnergyUsageSection 上方
+
+區塊 2:
+- 標題: 資料列表
+- Icon: List
+- 加在哪裡: MobileEnergyGroupListSection 上方
+
+區塊 3: (空)
+```
+
+### 填寫範例 2：冷媒頁面
+
+```
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+📋 SectionHeader 配置問卷
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+【步驟 1：頁面基本資訊】
+頁面名稱: 冷媒
+主題顏色: #6197C5
+
+【步驟 2：區塊標題配置】
+
+區塊 1:
+- 標題: 冷媒設備資料
+- Icon: Database
+- 加在哪裡: 設備表格上方
+
+區塊 2: (空)
+
+區塊 3: (空)
+```
+
+---
+
+### 使用流程
+
+1. **複製空白問卷模板**
+2. **填寫頁面名稱和主題顏色**
+3. **填寫每個區塊的標題、Icon、位置**
+4. **把填好的問卷貼給我**
+5. **我直接加到頁面**
+
+**就這麼簡單。**
+
+---
+
+## ActionButtons - 編輯/刪除操作按鈕
+
+### 用途
+
+統一所有能源頁面的**編輯和刪除按鈕**樣式與行為。
+
+### 為什麼需要這個組件？
+
+**Before（重構前）：**
+- 6 個檔案重複相同的 20 行按鈕程式碼
+- 每次改樣式（如 icon 大小）要改 6 個地方
+- 按鈕樣式不一致（有些 20px、有些 24px、有些 32px）
+- 違反 DRY 原則
+
+**After（重構後）：**
+- 1 個組件 → 6 個地方複用
+- 改一次 = 全部更新
+- 樣式統一（32x32 icon）
+- 程式碼減少 50 行（42% 降低）
+
+### 文件位置
+
+```
+frontend/src/components/energy/ActionButtons.tsx
+```
+
+### Props
+
+```typescript
+interface ActionButtonsProps {
+  onEdit: () => void          // 編輯回調
+  onDelete: () => void        // 刪除回調
+  disabled?: boolean          // 是否禁用（預設 false）
+  editTitle?: string          // 編輯按鈕 hover 提示（預設「編輯」）
+  deleteTitle?: string        // 刪除按鈕 hover 提示（預設「刪除」）
+  marginRight?: string        // 右側邊距（預設 '20px'）
+}
+```
+
+### UI 結構
+
+```
+┌──────────────────────────────────┐
+│  [✏️ 編輯]  [🗑️ 刪除]            │ ← 32x32 icon
+│                                  │
+│  • hover: 背景變色               │
+│  • disabled: 半透明 + 禁用游標   │
+└──────────────────────────────────┘
+```
+
+**按鈕樣式：**
+- **編輯按鈕：** 黑色 icon → hover 變灰 + 灰底
+- **刪除按鈕：** 黑色 icon → hover 變紅底
+- **Icon 大小：** 統一 32x32px
+- **間距：** 按鈕間 8px，右側可自訂
+
+### 使用方式
+
+#### 範例 1：GroupListItem（群組列表項）
+
+```tsx
+import { ActionButtons } from './ActionButtons'
+
+export function GroupListItem({ groupId, onEdit, onDelete, disabled }) {
+  return (
+    <div className="flex items-center">
+      {/* ...其他內容 */}
+
+      <ActionButtons
+        onEdit={() => onEdit(groupId)}
+        onDelete={() => onDelete(groupId)}
+        disabled={disabled}
+        editTitle="編輯群組"
+        deleteTitle="刪除群組"
+      />
+    </div>
+  )
+}
+```
+
+#### 範例 2：SF6ListSection（列表內的項目）
+
+```tsx
+import { ActionButtons } from '../../../components/energy/ActionButtons'
+
+export function SF6ListSection({ savedDevices, onEditDevice, onDeleteDevice, isReadOnly }) {
+  return (
+    <div>
+      {savedDevices.map(device => (
+        <div key={device.id} className="flex items-center">
+          {/* 設備資訊 */}
+
+          <ActionButtons
+            onEdit={() => onEditDevice(device.id)}
+            onDelete={() => onDeleteDevice(device.id)}
+            disabled={isReadOnly}
+          />
+        </div>
+      ))}
+    </div>
+  )
+}
+```
+
+#### 範例 3：RefrigerantListSection（無右側邊距）
+
+```tsx
+<ActionButtons
+  onEdit={() => onEdit(device.id)}
+  onDelete={() => onDelete(device.id)}
+  disabled={isReadOnly}
+  editTitle="編輯設備"
+  deleteTitle="刪除設備"
+  marginRight="0"  // ← 移除右側邊距
+/>
+```
+
+### 已套用的檔案
+
+✅ **GroupListItem.tsx** - 通用群組列表項（柴油、化糞池、尿素等頁面自動受益）
+✅ **SF6ListSection.tsx** - SF6 列表區
+✅ **RefrigerantListSection.tsx** - 冷媒列表區
+
+### 何時使用 ActionButtons？
+
+#### ✅ 應該使用
+
+1. **成對的編輯+刪除按鈕**（最常見）
+2. **列表項目的操作按鈕**（資料列表、設備列表）
+3. **樣式需要與其他頁面一致**
+
+#### ❌ 不該使用
+
+1. **單一按鈕**（只有刪除、只有編輯）
+2. **樣式完全不同**（如 GeneratorTest 的彩色按鈕 + 文字）
+3. **特殊交互邏輯**（如需要額外確認、多步驟操作）
+
+### 關鍵設計決策
+
+**1. 為什麼不支援 variant（變體）？**
+
+「GeneratorTest 的按鈕樣式完全不同（18x18 icon + 文字 + 彩色背景），為什麼不加 variant 支援？」
+
+**Linus 原則：不為單一特例創建抽象**
+
+- 目前只有 GeneratorTest 1 個頁面用不同樣式
+- 加 variant 會增加組件複雜度
+- 當有 2-3 個頁面需要時再考慮
+
+**2. 為什麼不包含編輯模式邏輯？**
+
+「為什麼不把『點鉛筆後按鈕文字從「新增」變「儲存」』的邏輯也包進來？」
+
+**Separation of Concerns（關注點分離）：**
+
+- **ActionButtons = UI 組件**（只管外觀和點擊事件）
+- **編輯模式邏輯 = 業務邏輯**（屬於各頁面的 Hook）
+
+這兩者職責不同，不應該混在一起。
+
+**3. 為什麼支援 marginRight 而不是完整的 style？**
+
+**最小化 Props，避免過度靈活：**
+
+- 只開放「真的需要變動」的屬性（目前只有 marginRight）
+- 保持大部分樣式統一（gap、flexShrink 等）
+- 如果未來需要更多自訂，再擴充
+
+### Before vs. After
+
+#### Before（重複 6 次）
+
+```tsx
+// GroupListItem.tsx
+<div style={{ display: 'flex', gap: '8px', marginRight: '20px' }}>
+  <button
+    onClick={() => onEdit(groupId)}
+    disabled={disabled}
+    className="p-2 text-black hover:text-gray-700 hover:bg-gray-100 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+    title="編輯群組"
+  >
+    <Pencil style={{ width: '32px', height: '32px' }} />
+  </button>
+  <button
+    onClick={() => onDelete(groupId)}
+    disabled={disabled}
+    className="p-2 hover:bg-red-50 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+    title="刪除群組"
+  >
+    <Trash2 style={{ width: '32px', height: '32px', color: '#000' }} />
+  </button>
+</div>
+
+// SF6ListSection.tsx - 重複同樣程式碼
+// RefrigerantListSection.tsx - 重複同樣程式碼
+// ... 其他 3 個檔案也重複
+```
+
+**問題：**
+- ❌ 6 個檔案 × 20 行 = 120 行重複程式碼
+- ❌ 修改 icon 大小要改 12 個地方（編輯 + 刪除）
+- ❌ 樣式不一致風險
+
+#### After（統一引用）
+
+```tsx
+// GroupListItem.tsx
+import { ActionButtons } from './ActionButtons'
+
+<ActionButtons
+  onEdit={() => onEdit(groupId)}
+  onDelete={() => onDelete(groupId)}
+  disabled={disabled}
+  editTitle="編輯群組"
+  deleteTitle="刪除群組"
+/>
+
+// SF6ListSection.tsx
+import { ActionButtons } from '../../../components/energy/ActionButtons'
+
+<ActionButtons
+  onEdit={() => onEditDevice(device.id)}
+  onDelete={() => onDeleteDevice(device.id)}
+  disabled={isReadOnly}
+/>
+```
+
+**成果：**
+- ✅ 每個檔案減少 ~14 行程式碼
+- ✅ 修改樣式只需改 1 個檔案
+- ✅ 樣式完全統一
+
+### 快速檢查清單
+
+**當你在寫新頁面或重構時，問自己：**
+
+- [ ] 我的頁面有「編輯 + 刪除」成對按鈕嗎？
+- [ ] 這些按鈕跟其他頁面的樣式應該一樣嗎？
+- [ ] 我是不是在複製貼上按鈕程式碼？
+
+**如果 3 個都是 YES → 使用 ActionButtons**
+
+**如果有任何 NO → 自己寫按鈕（不要強迫套用）**
+
+---
+
+## 案例研究：RefrigerantPage 重構
+
+### 背景
+
+**任務：** 將 RefrigerantPage.tsx 從 **1149 行**重構到 **600-800 行**目標範圍。
+
+**參考模式：** 遵循 SF6Page 的重構模式（599 行）。
+
+### 初步重構成果
+
+**創建的文件：**
+
+| 文件 | 行數 | 用途 |
+|------|------|------|
+| `useEnergyPageNotifications.ts` | 47 | 通知管理 Hook（可複用） |
+| `useRefrigerantDeviceManager.ts` | 108 | 設備 CRUD 邏輯 Hook |
+| `RefrigerantInputFields.tsx` | 237 | 6 個輸入欄位 + FileDropzone |
+| `RefrigerantListSection.tsx` | 247 | 分組列表 + 縮略圖 + 操作按鈕 |
+
+**成果：**
+- RefrigerantPage.tsx: **1149 → 550 行**（減少 52%）✅
+- 業務邏輯分離到 Hooks ✅
+- UI 組件拆分完成 ✅
+- 複用 ActionButtons 組件 ✅
+
+### 問題發現：設計不一致
+
+**用戶提問：**
+> "為啥這裡會有這個？但其他頁卻沒有？"（指向 RefrigerantPage 的保存按鈕）
+
+**對比分析：**
+
+| 頁面 | 保存按鈕位置 | 模式 |
+|------|------------|------|
+| **DieselPage** | 在 `MobileEnergyUsageSection` 組件內 | ✅ 內聚 |
+| **SF6Page** | 在 `MobileEnergyUsageSection` 組件內 | ✅ 內聚 |
+| **RefrigerantPage** | 在主頁面檔案（組件外） | ❌ 分散 |
+
+**問題本質：**
+- RefrigerantPage 的保存按鈕（26 行）放在主頁面
+- 其他頁面的按鈕包含在輸入組件內
+- **違反一致性原則**
+
+### Linus 分析
+
+**核心問題：**
+「這不是單一頁面的問題，而是**整體設計模式不一致**的問題。」
+
+**兩個方案對比：**
+
+#### 方案 A：移動按鈕到組件內（✅ 推薦）
+
+**理由：**
+1. **消除特殊情況** — RefrigerantPage 不再是例外
+2. **內聚性** — 表單 + 按鈕是一個完整單元
+3. **可測試性** — 組件可以獨立測試提交邏輯
+4. **維護性** — 改樣式只需改一個組件
+
+**權衡：**
+- 需要傳入 `onSave` 和 `editingDeviceId` 兩個額外 props
+- 但這是合理的職責（按鈕需要知道保存邏輯和編輯狀態）
+
+#### 方案 B：保持現狀（❌ 不推薦）
+
+**理由：**
+- 減少組件 props（只需要欄位變更回調）
+
+**問題：**
+- **特殊情況不會自己消失** — 維護者會困惑為什麼不一致
+- **違反 DRY** — 未來新增相似頁面會不知道跟誰學
+- **職責分散** — 表單和提交按鈕應該在一起
+
+**Linus 準則：**
+> "有時你可以從不同角度看問題，重寫它，讓特殊情況消失，變成正常情況。"
+
+**決策：採用方案 A**
+
+### 實施細節
+
+#### 修改 1：RefrigerantInputFields 介面擴展
+
+**Before（原始介面）：**
+```typescript
+interface RefrigerantInputFieldsProps {
+  device: RefrigerantDevice
+  onFieldChange: (field: keyof RefrigerantDevice, value: any) => void
+  isReadOnly: boolean
+}
+```
+
+**After（新增 2 個 props）：**
+```typescript
+interface RefrigerantInputFieldsProps {
+  device: RefrigerantDevice
+  onFieldChange: (field: keyof RefrigerantDevice, value: any) => void
+  onSave: () => void              // 新增：保存回調
+  editingDeviceId: string | null  // 新增：編輯狀態（決定按鈕文字）
+  isReadOnly: boolean
+}
+```
+
+#### 修改 2：將按鈕移入組件
+
+**RefrigerantInputFields.tsx（新增 26 行，在組件底部）：**
+
+```tsx
+{/* 保存按鈕 */}
+<div className="flex justify-center" style={{ marginTop: '46px' }}>
+  <button
+    onClick={onSave}
+    disabled={isReadOnly}
+    style={{
+      width: '237px',
+      height: '46.25px',
+      flexShrink: 0,
+      borderRadius: '7px',
+      border: '1px solid rgba(0, 0, 0, 0.50)',
+      background: isReadOnly ? '#9CA3AF' : '#000',
+      boxShadow: '0 4px 4px 0 rgba(0, 0, 0, 0.25)',
+      cursor: isReadOnly ? 'not-allowed' : 'pointer',
+      color: '#FFF',
+      textAlign: 'center',
+      fontFamily: 'var(--sds-typography-body-font-family)',
+      fontSize: '20px',
+      fontStyle: 'normal',
+      fontWeight: 'var(--sds-typography-body-font-weight-regular)',
+      lineHeight: '100%'
+    }}
+  >
+    {editingDeviceId ? '儲存變更' : '+ 新增設備'}
+  </button>
+</div>
+```
+
+**按鈕邏輯：**
+- `editingDeviceId !== null` → 顯示「儲存變更」
+- `editingDeviceId === null` → 顯示「+ 新增設備」
+- `isReadOnly = true` → 按鈕禁用 + 灰色背景
+
+#### 修改 3：RefrigerantPage 更新調用
+
+**Before（主頁面包含按鈕）：**
+```tsx
+{/* 輸入欄位組件 */}
+<RefrigerantInputFields
+  device={currentEditingDevice}
+  onFieldChange={updateCurrentDevice}
+  isReadOnly={isReadOnly}
+/>
+
+{/* 保存按鈕（26 行 JSX）*/}
+<div className="flex justify-center" style={{ marginTop: '46px' }}>
+  <button onClick={handleSaveDevice} disabled={isReadOnly}>
+    {editingDeviceId ? '儲存變更' : '+ 新增設備'}
+  </button>
+</div>
+```
+
+**After（按鈕移到組件內）：**
+```tsx
+{/* 輸入欄位組件（含保存按鈕） */}
+<RefrigerantInputFields
+  device={currentEditingDevice}
+  onFieldChange={updateCurrentDevice}
+  onSave={handleSaveDevice}           // 新增
+  editingDeviceId={editingDeviceId}   // 新增
+  isReadOnly={isReadOnly}
+/>
+```
+
+### 最終成果
+
+**行數變化：**
+| 檔案 | Before | After | 變化 |
+|------|--------|-------|------|
+| **RefrigerantPage.tsx** | 1149 | 525 | -624（-54%） |
+| **RefrigerantInputFields.tsx** | 237 | 263 | +26 |
+
+**淨收益：** 主頁面減少 **624 行**（54% 降低）
+
+**設計改善：**
+- ✅ **一致性** — 與 DieselPage、SF6Page 模式統一
+- ✅ **內聚性** — 表單 + 按鈕在同一組件
+- ✅ **可測試性** — `RefrigerantInputFields` 可獨立測試提交行為
+- ✅ **可維護性** — 未來修改按鈕樣式只需改一個檔案
+
+### 關鍵經驗
+
+#### 1. 特殊情況是設計的敵人
+
+**問題：** 初步重構完成後，RefrigerantPage 的按鈕位置與其他頁面不同。
+
+**根本原因：** 機械式複製 SF6Page 結構，但沒有深入理解**為什麼** SF6Page 把按鈕放在組件內。
+
+**教訓：** 重構不是單純的「減少行數」，而是**消除不一致性**。
+
+#### 2. 組件職責的清晰界線
+
+**RefrigerantInputFields 應該負責什麼？**
+
+✅ **應該負責：**
+- 顯示 6 個輸入欄位
+- 檔案上傳 UI
+- **保存按鈕 UI**（因為是表單的一部分）
+
+❌ **不應該負責：**
+- 保存邏輯（由 `onSave` callback 提供）
+- 設備列表管理（屬於父組件）
+- 權限檢查（由 `isReadOnly` props 提供）
+
+**準則：** 組件負責 **UI 和交互**，業務邏輯通過 **props 和 callbacks** 注入。
+
+#### 3. 重構 = 發現模式 + 應用模式
+
+| 階段 | 目標 | 方法 |
+|------|------|------|
+| **第一階段** | 減少行數 | 抽取 Hooks 和組件 |
+| **第二階段** | 發現不一致 | 對比其他頁面（DieselPage、SF6Page） |
+| **第三階段** | 統一模式 | 應用方案 A（消除特殊情況） |
+
+**Linus 語錄：**
+> "消除邊界情況永遠優於增加條件判斷。"
+
+我們沒有在 RefrigerantPage 加 `if (isRefrigerantPage)` 來處理按鈕位置差異，而是**重新設計組件邊界**，讓所有頁面遵循相同模式。
+
+#### 4. 何時該 STOP 重構？
+
+**停止信號：**
+- ✅ 行數達到目標範圍（525 < 800）
+- ✅ 與同類頁面模式一致（SF6Page、DieselPage）
+- ✅ 組件職責清晰（Hooks、輸入、列表）
+- ✅ 沒有明顯的程式碼異味
+
+**不該繼續的理由：**
+- ❌ 為了「對稱」而強行抽取只用 1 次的程式碼
+- ❌ 過度抽象（如創建「萬能設備管理器」）
+- ❌ 破壞現有功能（Never break userspace）
+
+**準則：** 當重構**不再帶來明顯價值**時，就該停止。
+
+---
+
 ## 重構成果
 
 ### 統計數據
@@ -1479,7 +2324,8 @@ const handleApprove = async () => {
 | `StatusBanner.tsx` | 127 | Component |
 | `ConfirmClearModal.tsx` | 118 | Component |
 | `SuccessModal.tsx` | 121 | Component |
-| **總計** | **403** | **4 組件** |
+| `ActionButtons.tsx` | 70 | Component |
+| **總計** | **473** | **5 組件** |
 
 **移除的重複代碼：**
 | 組件 | 每頁行數 | 使用頁面數 | 總移除行數 |
@@ -1488,15 +2334,16 @@ const handleApprove = async () => {
 | StatusBanner | 58 | 14 | 812 |
 | ConfirmClearModal | 75 | 12 | 900 |
 | SuccessModal | 80 | 12 | 960 |
-| **總計** | - | - | **2,897** |
+| ActionButtons | 20 | 3 | 60 |
+| **總計** | - | - | **2,957** |
 
 ### 改善比例
 
 ```
-2,897 行移除 ÷ 403 行新增 = 7.2 倍
+2,957 行移除 ÷ 473 行新增 = 6.25 倍
 ```
 
-**每寫 1 行新代碼，消除 7.2 行舊代碼**
+**每寫 1 行新代碼，消除 6.25 行舊代碼**
 
 ### 維護成本對比
 
@@ -1866,6 +2713,397 @@ A: 它們已經共用組件了 (`MobileEnergyUsageSection`)，只有配置不同
 
 **Q: 測試怎麼辦？**
 A: 測試共用組件 1 次，所有頁面都受益。配置檔不需要測試（只是資料）。
+
+---
+
+## MobileEnergyUsageSection - 移動源能源問卷組件
+
+### 用途
+
+柴油/汽油等移動源頁面的**輸入表單區塊**，包含佐證文件上傳（左側）+ 使用數據輸入（右側）。
+
+### 為什麼需要這個組件？
+
+**問題：**
+- 柴油、汽油、柴油發電機等頁面都需要「上傳檔案 + 輸入日期數量」的表單
+- 每個頁面的長寬需求可能不同（柴油 358px，其他可能需要 400px、500px）
+- 硬編碼尺寸會導致重構時需要改程式碼
+
+**解決方案：**
+- 統一的問卷組件，但支援**配置長寬**
+- 重構新頁面時，只需傳入 `dropzoneWidth` 和 `dropzoneHeight` 參數即可
+
+### 文件位置
+
+```
+frontend/src/pages/Category1/shared/mobile/components/MobileEnergyUsageSection.tsx
+```
+
+### 組件結構
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                      使用數據標題                            │
+├────────────────────────┬────────────────────────────────────┤
+│ 左側：佐證文件上傳      │ 右側：輸入表單                      │
+│                        │                                     │
+│ ┌──────────────────┐  │ ┌───────────────────────────────┐  │
+│ │                  │  │ │ 加油日期  │  加油量 (L)       │  │
+│ │  FileDropzone    │  │ ├───────────────────────────────┤  │
+│ │  (可配置長寬)     │  │ │ 2025-01-15 │  100             │  │
+│ │                  │  │ │ 2025-01-16 │  200             │  │
+│ └──────────────────┘  │ │ 2025-01-17 │  150             │  │
+│                        │ └───────────────────────────────┘  │
+│                        │ [+ 新增數據到此群組]                │
+└────────────────────────┴────────────────────────────────────┘
+                    [+ 新增群組 / 變更儲存]
+```
+
+### 核心功能
+
+#### 1. FileDropzone（檔案上傳區）
+- 支援拖放 + 點擊上傳
+- 圖片預覽縮圖
+- PDF/Excel 檔案 icon
+- **可配置長寬** ← 重點！
+
+#### 2. RecordInputRow（輸入欄位）
+- 日期選擇器
+- 數量輸入框
+- 刪除按鈕（多筆記錄時顯示）
+
+#### 3. 群組管理
+- 新增數據到群組
+- 儲存/變更群組
+
+### Props 參數
+
+```typescript
+interface MobileEnergyUsageSectionProps {
+  // ⭐ FileDropzone 尺寸配置（可選）
+  dropzoneWidth?: number   // 預設 358px
+  dropzoneHeight?: number  // 預設 308px
+
+  // ⭐ 可配置外觀（可選）
+  title?: string           // 標題文字，預設「使用數據」
+  icon?: React.ReactNode   // 標題 icon，預設 Database icon
+  renderInputFields?: (props: {
+    currentGroup: CurrentEditingGroup
+    onUpdate: (id: string, field: 'date' | 'quantity', value: any) => void
+    onDelete: (id: string) => void
+    isReadOnly: boolean
+  }) => React.ReactNode     // 自訂輸入欄位，預設 RecordInputRow
+
+  // 樣式
+  iconColor: string  // 主題顏色（藍色、綠色等）
+
+  // 狀態
+  currentEditingGroup: CurrentEditingGroup
+  setCurrentEditingGroup: (value) => void
+
+  // 操作
+  addRecordToCurrentGroup: () => void
+  updateCurrentGroupRecord: (id, field, value) => void
+  removeRecordFromCurrentGroup: (id) => void
+  saveCurrentGroup: () => void
+
+  // 檔案相關
+  thumbnails: Record<string, string>
+  onPreviewImage: (src: string) => void
+  onError: (msg: string) => void
+
+  // 權限
+  isReadOnly: boolean
+  submitting: boolean
+  approvalStatus: { isApproved: boolean }
+  editPermissions: { canUploadFiles: boolean }
+
+  // 柴油發電機專用（可選）
+  config?: MobileEnergyConfig
+  deviceType?: string
+  customDeviceType?: string
+  onDeviceTypeChange?: (type: string) => void
+  onCustomDeviceTypeChange?: (value: string) => void
+}
+```
+
+### 使用範例
+
+#### 基礎用法（使用預設尺寸）
+
+```tsx
+// DieselPage.tsx - 柴油頁面
+<MobileEnergyUsageSection
+  iconColor="#18C7A0"  // 綠色
+  currentEditingGroup={currentEditingGroup}
+  setCurrentEditingGroup={setCurrentEditingGroup}
+  addRecordToCurrentGroup={addRecordToCurrentGroup}
+  updateCurrentGroupRecord={updateCurrentGroupRecord}
+  removeRecordFromCurrentGroup={removeRecordFromCurrentGroup}
+  saveCurrentGroup={saveCurrentGroup}
+  thumbnails={thumbnails}
+  onPreviewImage={setLightboxSrc}
+  onError={setError}
+  isReadOnly={isReadOnly}
+  submitting={submitting}
+  approvalStatus={approvalStatus}
+  editPermissions={editPermissions}
+  // dropzoneWidth 不傳 → 預設 358px
+  // dropzoneHeight 不傳 → 預設 308px
+/>
+```
+
+#### 進階用法（自訂尺寸）
+
+```tsx
+// GasolinePage.tsx - 汽油頁面（需要更大的上傳區）
+<MobileEnergyUsageSection
+  iconColor="#1E90FF"  // 藍色
+  dropzoneWidth={500}  // ⭐ 自訂寬度
+  dropzoneHeight={400} // ⭐ 自訂高度
+  currentEditingGroup={currentEditingGroup}
+  ... // 其他 props 相同
+/>
+```
+
+#### 柴油發電機專用（需要設備選單）
+
+```tsx
+// DieselGeneratorPage.tsx - 柴油發電機頁面
+<MobileEnergyUsageSection
+  iconColor="#18C7A0"
+  config={DIESEL_GENERATOR_CONFIG}  // ⭐ 包含 requiresDeviceType: true
+  deviceType={deviceType}
+  customDeviceType={customDeviceType}
+  onDeviceTypeChange={setDeviceType}
+  onCustomDeviceTypeChange={setCustomDeviceType}
+  ... // 其他 props
+/>
+```
+
+### 配置驅動
+
+**柴油和汽油共用同一個組件**，只有顏色和尺寸不同：
+
+```typescript
+// mobileEnergyConfig.ts
+export const DIESEL_CONFIG = {
+  pageKey: 'diesel',
+  iconColor: '#18C7A0',  // 綠色
+  // dropzoneWidth: 預設 358px
+}
+
+export const GASOLINE_CONFIG = {
+  pageKey: 'gasoline',
+  iconColor: '#1E90FF',  // 藍色
+  // dropzoneWidth: 可傳入 500px 覆蓋預設
+}
+```
+
+### 重構步驟
+
+重構新頁面時只需 3 步：
+
+1. **引入組件**
+```tsx
+import { MobileEnergyUsageSection } from './shared/mobile/components/MobileEnergyUsageSection'
+```
+
+2. **準備狀態**
+```tsx
+const [currentEditingGroup, setCurrentEditingGroup] = useState(...)
+const [thumbnails, setThumbnails] = useState({})
+```
+
+3. **使用組件（可選配置尺寸）**
+```tsx
+<MobileEnergyUsageSection
+  iconColor="#18C7A0"
+  dropzoneWidth={400}  // ⭐ 可選：自訂長寬
+  dropzoneHeight={350} // ⭐ 可選：自訂長寬
+  currentEditingGroup={currentEditingGroup}
+  setCurrentEditingGroup={setCurrentEditingGroup}
+  ... // 其他必要 props
+/>
+```
+
+### 📋 套用問卷組件配置清單
+
+重構新頁面時填寫此清單：
+
+---
+
+#### 【填寫資料框 icon 與標題】
+- **icon**: _______（使用預設 Database icon / 自訂 SVG）
+- **標題名稱**: _______（預設：使用數據）
+- **iconColor**: _______ （主題顏色，例如：`#18C7A0`）
+
+---
+
+#### 【填寫框長寬】
+- **dropzoneWidth**: _______ px（預設 358）
+- **dropzoneHeight**: _______ px（預設 308）
+
+---
+
+#### 【填寫所需欄位】
+- **欄位類型**:
+  - ☐ 預設（日期 + 數量）← **柴油/汽油直接用這個**
+  - ☐ 自訂（需要寫 `renderInputFields` 函數）← **冷媒等複雜頁面才用**
+
+**如果選擇「自訂」**，列出所需欄位：
+
+| 欄位名稱 | 類型 | 備註 |
+|---------|------|------|
+| _______ | text / select / number | 例如：牌號名稱（text） |
+| _______ | text / select / number | 例如：型號（text） |
+| _______ | text / select / number | 例如：設備種類（select） |
+
+---
+
+#### 【使用範例】
+
+**基礎用法（柴油/汽油）**：
+```tsx
+<MobileEnergyUsageSection
+  iconColor="#18C7A0"
+  dropzoneWidth={358}  // 可選
+  dropzoneHeight={308} // 可選
+  // title, icon, renderInputFields 不傳 → 使用預設
+  {...otherProps}
+/>
+```
+
+**進階用法（冷媒）**：
+```tsx
+<MobileEnergyUsageSection
+  title="設備資訊"
+  icon={<CustomIcon />}
+  iconColor="#FFE0F4"
+  renderInputFields={renderCustomFields}
+  {...otherProps}
+/>
+```
+
+---
+
+### 快速問答
+
+**Q: 我要改上傳框的大小，要改哪裡？**
+A: 傳入 `dropzoneWidth` 和 `dropzoneHeight` props 即可，不需要改程式碼。
+
+**Q: 柴油和汽油的表單有什麼不同？**
+A: 100% 相同的組件，只有 `iconColor`（顏色）和尺寸（可選）不同。
+
+**Q: 我要改標題或 icon，怎麼做？**
+A: 傳入 `title` 和 `icon` props 即可。不傳就使用預設值（「使用數據」+ Database icon）。
+
+**Q: 我要加入設備選單（像柴油發電機那樣），怎麼做？**
+A: 傳入 `config` prop，設定 `requiresDeviceType: true` 即可。
+
+**Q: 不傳 dropzoneWidth 會怎樣？**
+A: 使用預設值 358px（LAYOUT_CONSTANTS.EDITOR_UPLOAD_WIDTH）。
+
+**Q: 什麼時候需要用 renderInputFields？**
+A: 只有冷媒等需要 6+ 個自訂欄位的頁面才需要。柴油/汽油用預設就好。
+
+---
+
+### 🧪 單元測試清單
+
+#### 測試檔案位置
+```
+frontend/src/pages/Category1/shared/mobile/components/__tests__/MobileEnergyUsageSection.test.tsx
+```
+
+#### 必須測試的功能
+
+##### 1. Props 預設值測試
+- ✅ `title` 預設值應該是「使用數據」
+- ✅ `icon` 預設值應該是 Database icon
+- ✅ `dropzoneWidth` 預設值應該是 358px
+- ✅ `dropzoneHeight` 預設值應該是 308px
+
+##### 2. 可配置性測試
+- ✅ 傳入自訂 `title` 應該正確顯示
+- ✅ 傳入自訂 `icon` 應該正確渲染
+- ✅ 傳入自訂 `dropzoneWidth` 應該應用到 FileDropzone
+- ✅ 傳入自訂 `dropzoneHeight` 應該應用到 FileDropzone
+
+##### 3. renderInputFields 測試
+- ✅ 不傳 `renderInputFields` 應該使用預設的 RecordInputRow
+- ✅ 預設模式應該顯示「加油日期」和「加油量 (L)」表頭
+- ✅ 傳入自訂 `renderInputFields` 應該使用自訂渲染函數
+- ✅ 自訂模式應該不顯示預設表頭
+
+##### 4. 設備選單測試（柴油發電機專用）
+- ✅ `config.requiresDeviceType = true` 應該顯示設備選單
+- ✅ 選擇「其他」應該顯示自訂輸入框
+- ✅ `onDeviceTypeChange` 應該被正確調用
+
+##### 5. 檔案上傳測試
+- ✅ 點擊上傳應該觸發 `onFileSelect`
+- ✅ 上傳檔案應該更新 `currentEditingGroup.memoryFiles`
+- ✅ 刪除檔案應該清空 `memoryFiles`
+- ✅ 達到檔案數量上限（1 個）應該禁用上傳
+
+##### 6. 權限測試
+- ✅ `isReadOnly = true` 應該禁用所有輸入欄位
+- ✅ `approvalStatus.isApproved = true` 應該禁用新增/刪除按鈕
+- ✅ `editPermissions.canUploadFiles = false` 應該隱藏檔案刪除按鈕
+
+##### 7. 操作測試
+- ✅ 點擊「+ 新增數據到此群組」應該調用 `addRecordToCurrentGroup`
+- ✅ 點擊「變更儲存」應該調用 `saveCurrentGroup`
+- ✅ 更新記錄應該調用 `updateCurrentGroupRecord`
+- ✅ 刪除記錄應該調用 `removeRecordFromCurrentGroup`
+
+#### 測試範例
+
+```typescript
+// MobileEnergyUsageSection.test.tsx
+import { render, screen } from '@testing-library/react'
+import { MobileEnergyUsageSection } from '../MobileEnergyUsageSection'
+
+describe('MobileEnergyUsageSection', () => {
+  const mockProps = {
+    iconColor: '#18C7A0',
+    currentEditingGroup: { /* ... */ },
+    setCurrentEditingGroup: jest.fn(),
+    addRecordToCurrentGroup: jest.fn(),
+    updateCurrentGroupRecord: jest.fn(),
+    removeRecordFromCurrentGroup: jest.fn(),
+    saveCurrentGroup: jest.fn(),
+    thumbnails: {},
+    onPreviewImage: jest.fn(),
+    onError: jest.fn(),
+    isReadOnly: false,
+    submitting: false,
+    approvalStatus: { isApproved: false },
+    editPermissions: { canUploadFiles: true }
+  }
+
+  it('應該顯示預設標題「使用數據」', () => {
+    render(<MobileEnergyUsageSection {...mockProps} />)
+    expect(screen.getByText('使用數據')).toBeInTheDocument()
+  })
+
+  it('應該顯示自訂標題', () => {
+    render(<MobileEnergyUsageSection {...mockProps} title="設備資訊" />)
+    expect(screen.getByText('設備資訊')).toBeInTheDocument()
+  })
+
+  it('應該應用自訂 FileDropzone 尺寸', () => {
+    const { container } = render(
+      <MobileEnergyUsageSection {...mockProps} dropzoneWidth={500} dropzoneHeight={400} />
+    )
+    const dropzone = container.querySelector('[style*="width: 500px"]')
+    expect(dropzone).toBeInTheDocument()
+  })
+
+  // ... 其他測試
+})
+```
 
 ---
 

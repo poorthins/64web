@@ -1,0 +1,707 @@
+
+> carbon-tracker@0.0.0 test
+> vitest --run
+
+
+[7m[1m[36m RUN [39m[22m[27m [36mv1.6.1[39m [90mC:/Users/Tim/Desktop/python/64web/frontend[39m
+
+ [32m✓[39m src/pages/Category1/__tests__/dieselPageUtils.test.ts [2m ([22m[2m41 tests[22m[2m)[22m[90m 21[2mms[22m[39m
+ [33m❯[39m src/pages/admin/utils/__tests__/userTransformers.test.ts [2m ([22m[2m9 tests[22m [2m|[22m [31m3 failed[39m[2m)[22m[90m 28[2mms[22m[39m
+[31m   [33m❯[31m src/pages/admin/utils/__tests__/userTransformers.test.ts[2m > [22muserTransformers[2m > [22mapiUserToFormData[2m > [22m應該正確轉換為表單資料[39m
+[31m     → expected undefined to be 'refuel' // Object.is equality[39m
+[31m   [33m❯[31m src/pages/admin/utils/__tests__/userTransformers.test.ts[2m > [22muserTransformers[2m > [22mformDataToCreateUserData[2m > [22m應該正確轉換為建立用戶資料[39m
+[31m     → expected undefined to be 'test' // Object.is equality[39m
+[31m   [33m❯[31m src/pages/admin/utils/__tests__/userTransformers.test.ts[2m > [22muserTransformers[2m > [22mformDataToCreateUserData[2m > [22m應該使用預設值處理缺少的 dieselGeneratorVersion[39m
+[31m     → expected undefined to be 'refuel' // Object.is equality[39m
+ [32m✓[39m src/config/__tests__/categoryMapping.test.ts [2m ([22m[2m19 tests[22m[2m)[22m[90m 18[2mms[22m[39m
+[90mstdout[2m | src/hooks/__tests__/useEnergyClear.test.ts[2m > [22m[2museEnergyClear[2m > [22m[2mclear() - 成功情況[2m > [22m[2m應該刪除所有檔案和 entry[22m[39m
+✅ [useEnergyClear] 清除成功
+
+[90mstdout[2m | src/hooks/__tests__/useEnergyClear.test.ts[2m > [22m[2museEnergyClear[2m > [22m[2mclear() - 成功情況[2m > [22m[2m應該支援二維陣列的 memoryFiles[22m[39m
+✅ [useEnergyClear] 清除成功
+
+[90mstdout[2m | src/hooks/__tests__/useEnergyClear.test.ts[2m > [22m[2museEnergyClear[2m > [22m[2mclear() - 成功情況[2m > [22m[2m清除完成後 clearing 應該為 false[22m[39m
+✅ [useEnergyClear] 清除成功
+
+[90mstderr[2m | src/hooks/__tests__/useRecordFileMapping.test.ts[2m > [22m[2museRecordFileMapping[2m > [22m[2muploadRecordFiles()[2m > [22m[2m上傳失敗應該拋出錯誤[22m[39m
+❌ [useRecordFileMapping] 上傳失敗 (recordId=record-1): Error: 上傳失敗
+    at [90mC:\Users\Tim\Desktop\python\64web\frontend\[39msrc\hooks\__tests__\useRecordFileMapping.test.ts:133:27
+    at [90mfile:///C:/Users/Tim/Desktop/python/64web/frontend/[39mnode_modules/[4m@vitest[24m/runner/dist/index.js:135:14
+    at [90mfile:///C:/Users/Tim/Desktop/python/64web/frontend/[39mnode_modules/[4m@vitest[24m/runner/dist/index.js:60:26
+    at runTest [90m(file:///C:/Users/Tim/Desktop/python/64web/frontend/[39mnode_modules/[4m@vitest[24m/runner/dist/index.js:781:17[90m)[39m
+    at runSuite [90m(file:///C:/Users/Tim/Desktop/python/64web/frontend/[39mnode_modules/[4m@vitest[24m/runner/dist/index.js:909:15[90m)[39m
+    at runSuite [90m(file:///C:/Users/Tim/Desktop/python/64web/frontend/[39mnode_modules/[4m@vitest[24m/runner/dist/index.js:909:15[90m)[39m
+    at runSuite [90m(file:///C:/Users/Tim/Desktop/python/64web/frontend/[39mnode_modules/[4m@vitest[24m/runner/dist/index.js:909:15[90m)[39m
+    at runFiles [90m(file:///C:/Users/Tim/Desktop/python/64web/frontend/[39mnode_modules/[4m@vitest[24m/runner/dist/index.js:958:5[90m)[39m
+    at startTests [90m(file:///C:/Users/Tim/Desktop/python/64web/frontend/[39mnode_modules/[4m@vitest[24m/runner/dist/index.js:967:3[90m)[39m
+    at [90mfile:///C:/Users/Tim/Desktop/python/64web/frontend/[39mnode_modules/[4mvitest[24m/dist/chunks/runtime-runBaseTests.oAvMKtQC.js:116:7
+
+[90mstderr[2m | src/hooks/__tests__/useEnergyClear.test.ts[2m > [22m[2museEnergyClear[2m > [22m[2mclear() - 錯誤處理[2m > [22m[2m部分檔案刪除失敗應該收集錯誤但繼續執行[22m[39m
+⚠️ [useEnergyClear] 刪除檔案失敗 (file-1): Error: 刪除失敗
+    at [90mC:\Users\Tim\Desktop\python\64web\frontend\[39msrc\hooks\__tests__\useEnergyClear.test.ts:147:32
+    at [90mfile:///C:/Users/Tim/Desktop/python/64web/frontend/[39mnode_modules/[4m@vitest[24m/runner/dist/index.js:135:14
+    at [90mfile:///C:/Users/Tim/Desktop/python/64web/frontend/[39mnode_modules/[4m@vitest[24m/runner/dist/index.js:60:26
+    at runTest [90m(file:///C:/Users/Tim/Desktop/python/64web/frontend/[39mnode_modules/[4m@vitest[24m/runner/dist/index.js:781:17[90m)[39m
+    at runSuite [90m(file:///C:/Users/Tim/Desktop/python/64web/frontend/[39mnode_modules/[4m@vitest[24m/runner/dist/index.js:909:15[90m)[39m
+    at runSuite [90m(file:///C:/Users/Tim/Desktop/python/64web/frontend/[39mnode_modules/[4m@vitest[24m/runner/dist/index.js:909:15[90m)[39m
+    at runSuite [90m(file:///C:/Users/Tim/Desktop/python/64web/frontend/[39mnode_modules/[4m@vitest[24m/runner/dist/index.js:909:15[90m)[39m
+    at runFiles [90m(file:///C:/Users/Tim/Desktop/python/64web/frontend/[39mnode_modules/[4m@vitest[24m/runner/dist/index.js:958:5[90m)[39m
+    at startTests [90m(file:///C:/Users/Tim/Desktop/python/64web/frontend/[39mnode_modules/[4m@vitest[24m/runner/dist/index.js:967:3[90m)[39m
+    at [90mfile:///C:/Users/Tim/Desktop/python/64web/frontend/[39mnode_modules/[4mvitest[24m/dist/chunks/runtime-runBaseTests.oAvMKtQC.js:116:7
+⚠️ [useEnergyClear] 部分清除失敗: [ [32m'檔案 test1.jpg 刪除失敗'[39m ]
+❌ [useEnergyClear] 清除失敗: Error: 清除未完全成功：
+檔案 test1.jpg 刪除失敗
+    at Object.clear [90m(C:\Users\Tim\Desktop\python\64web\frontend\[39msrc\hooks\useEnergyClear.ts:133:15[90m)[39m
+    at [90mC:\Users\Tim\Desktop\python\64web\frontend\[39msrc\hooks\__tests__\useEnergyClear.test.ts:156:9
+
+[90mstderr[2m | src/hooks/__tests__/useEnergyClear.test.ts[2m > [22m[2museEnergyClear[2m > [22m[2mclear() - 錯誤處理[2m > [22m[2mentry 刪除失敗應該拋錯[22m[39m
+❌ [useEnergyClear] 刪除 entry 失敗: Error: 資料庫錯誤
+    at [90mC:\Users\Tim\Desktop\python\64web\frontend\[39msrc\hooks\__tests__\useEnergyClear.test.ts:168:54
+    at [90mfile:///C:/Users/Tim/Desktop/python/64web/frontend/[39mnode_modules/[4m@vitest[24m/runner/dist/index.js:135:14
+    at [90mfile:///C:/Users/Tim/Desktop/python/64web/frontend/[39mnode_modules/[4m@vitest[24m/runner/dist/index.js:60:26
+    at runTest [90m(file:///C:/Users/Tim/Desktop/python/64web/frontend/[39mnode_modules/[4m@vitest[24m/runner/dist/index.js:781:17[90m)[39m
+    at runSuite [90m(file:///C:/Users/Tim/Desktop/python/64web/frontend/[39mnode_modules/[4m@vitest[24m/runner/dist/index.js:909:15[90m)[39m
+    at runSuite [90m(file:///C:/Users/Tim/Desktop/python/64web/frontend/[39mnode_modules/[4m@vitest[24m/runner/dist/index.js:909:15[90m)[39m
+    at runSuite [90m(file:///C:/Users/Tim/Desktop/python/64web/frontend/[39mnode_modules/[4m@vitest[24m/runner/dist/index.js:909:15[90m)[39m
+    at runFiles [90m(file:///C:/Users/Tim/Desktop/python/64web/frontend/[39mnode_modules/[4m@vitest[24m/runner/dist/index.js:958:5[90m)[39m
+    at startTests [90m(file:///C:/Users/Tim/Desktop/python/64web/frontend/[39mnode_modules/[4m@vitest[24m/runner/dist/index.js:967:3[90m)[39m
+    at [90mfile:///C:/Users/Tim/Desktop/python/64web/frontend/[39mnode_modules/[4mvitest[24m/dist/chunks/runtime-runBaseTests.oAvMKtQC.js:116:7
+❌ [useEnergyClear] 清除失敗: Error: 刪除記錄失敗，請重試
+    at Object.clear [90m(C:\Users\Tim\Desktop\python\64web\frontend\[39msrc\hooks\useEnergyClear.ts:102:15[90m)[39m
+    at [90mC:\Users\Tim\Desktop\python\64web\frontend\[39msrc\hooks\__tests__\useEnergyClear.test.ts:176:9
+
+[90mstdout[2m | src/hooks/__tests__/useEnergyClear.test.ts[2m > [22m[2museEnergyClear[2m > [22m[2mclear() - 錯誤處理[2m > [22m[2m孤兒檔案清理失敗不應影響主流程[22m[39m
+✅ [useEnergyClear] 清除成功
+
+[90mstderr[2m | src/hooks/__tests__/useEnergyClear.test.ts[2m > [22m[2museEnergyClear[2m > [22m[2mclear() - 錯誤處理[2m > [22m[2m孤兒檔案清理失敗不應影響主流程[22m[39m
+⚠️ [useEnergyClear] 清理孤兒檔案失敗: Error: 清理失敗
+    at [90mC:\Users\Tim\Desktop\python\64web\frontend\[39msrc\hooks\__tests__\useEnergyClear.test.ts:185:53
+    at [90mfile:///C:/Users/Tim/Desktop/python/64web/frontend/[39mnode_modules/[4m@vitest[24m/runner/dist/index.js:135:14
+    at [90mfile:///C:/Users/Tim/Desktop/python/64web/frontend/[39mnode_modules/[4m@vitest[24m/runner/dist/index.js:60:26
+    at runTest [90m(file:///C:/Users/Tim/Desktop/python/64web/frontend/[39mnode_modules/[4m@vitest[24m/runner/dist/index.js:781:17[90m)[39m
+    at runSuite [90m(file:///C:/Users/Tim/Desktop/python/64web/frontend/[39mnode_modules/[4m@vitest[24m/runner/dist/index.js:909:15[90m)[39m
+    at runSuite [90m(file:///C:/Users/Tim/Desktop/python/64web/frontend/[39mnode_modules/[4m@vitest[24m/runner/dist/index.js:909:15[90m)[39m
+    at runSuite [90m(file:///C:/Users/Tim/Desktop/python/64web/frontend/[39mnode_modules/[4m@vitest[24m/runner/dist/index.js:909:15[90m)[39m
+    at runFiles [90m(file:///C:/Users/Tim/Desktop/python/64web/frontend/[39mnode_modules/[4m@vitest[24m/runner/dist/index.js:958:5[90m)[39m
+    at startTests [90m(file:///C:/Users/Tim/Desktop/python/64web/frontend/[39mnode_modules/[4m@vitest[24m/runner/dist/index.js:967:3[90m)[39m
+    at [90mfile:///C:/Users/Tim/Desktop/python/64web/frontend/[39mnode_modules/[4mvitest[24m/dist/chunks/runtime-runBaseTests.oAvMKtQC.js:116:7
+
+[90mstdout[2m | src/hooks/__tests__/useEnergyClear.test.ts[2m > [22m[2museEnergyClear[2m > [22m[2mclear() - 錯誤處理[2m > [22m[2m孤兒檔案清理回報錯誤應該被收集[22m[39m
+🧹 [useEnergyClear] 清理了 2 個孤兒檔案
+
+[90mstderr[2m | src/hooks/__tests__/useEnergyClear.test.ts[2m > [22m[2museEnergyClear[2m > [22m[2mclear() - 錯誤處理[2m > [22m[2m孤兒檔案清理回報錯誤應該被收集[22m[39m
+⚠️ [useEnergyClear] 部分清除失敗: [ [32m'檔案 A 刪除失敗'[39m, [32m'檔案 B 刪除失敗'[39m ]
+❌ [useEnergyClear] 清除失敗: Error: 清除未完全成功：
+檔案 A 刪除失敗
+檔案 B 刪除失敗
+    at Object.clear [90m(C:\Users\Tim\Desktop\python\64web\frontend\[39msrc\hooks\useEnergyClear.ts:133:15[90m)[39m
+    at [90mC:\Users\Tim\Desktop\python\64web\frontend\[39msrc\hooks\__tests__\useEnergyClear.test.ts:215:9
+
+ [32m✓[39m src/hooks/__tests__/useRecordFileMapping.test.ts [2m ([22m[2m21 tests[22m[2m)[22m[90m 114[2mms[22m[39m
+ [32m✓[39m src/components/dashboard/__tests__/Footer.test.tsx [2m ([22m[2m4 tests[22m[2m)[22m[90m 172[2mms[22m[39m
+[90mstdout[2m | src/hooks/__tests__/useEnergyClear.test.ts[2m > [22m[2museEnergyClear[2m > [22m[2mclearing 狀態[2m > [22m[2m清除期間 clearing 應該為 true[22m[39m
+✅ [useEnergyClear] 清除成功
+
+ [32m✓[39m src/hooks/__tests__/useEnergyClear.test.ts [2m ([22m[2m11 tests[22m[2m)[22m[90m 199[2mms[22m[39m
+ [32m✓[39m src/components/dashboard/__tests__/HeroSection.test.tsx [2m ([22m[2m4 tests[22m[2m)[22m[90m 281[2mms[22m[39m
+ [32m✓[39m src/hooks/__tests__/useEditPermissions.test.ts [2m ([22m[2m16 tests[22m[2m)[22m[90m 80[2mms[22m[39m
+ [32m✓[39m src/components/dashboard/__tests__/AboutUsSection.test.tsx [2m ([22m[2m5 tests[22m[2m)[22m[33m 325[2mms[22m[39m
+[90mstderr[2m | src/hooks/__tests__/useMultiRecordSubmit.test.ts[2m > [22m[2museMultiRecordSubmit[2m > [22m[2msubmit()[2m > [22m[2m上傳失敗時應該設定錯誤訊息[22m[39m
+❌ [useMultiRecordSubmit] 失敗: Error: 上傳失敗
+    at [90mC:\Users\Tim\Desktop\python\64web\frontend\[39msrc\hooks\__tests__\useMultiRecordSubmit.test.ts:145:27
+    at [90mfile:///C:/Users/Tim/Desktop/python/64web/frontend/[39mnode_modules/[4m@vitest[24m/runner/dist/index.js:135:14
+    at [90mfile:///C:/Users/Tim/Desktop/python/64web/frontend/[39mnode_modules/[4m@vitest[24m/runner/dist/index.js:60:26
+    at runTest [90m(file:///C:/Users/Tim/Desktop/python/64web/frontend/[39mnode_modules/[4m@vitest[24m/runner/dist/index.js:781:17[90m)[39m
+[90m    at runNextTicks (node:internal/process/task_queues:60:5)[39m
+[90m    at processTimers (node:internal/timers:516:9)[39m
+    at runSuite [90m(file:///C:/Users/Tim/Desktop/python/64web/frontend/[39mnode_modules/[4m@vitest[24m/runner/dist/index.js:909:15[90m)[39m
+    at runSuite [90m(file:///C:/Users/Tim/Desktop/python/64web/frontend/[39mnode_modules/[4m@vitest[24m/runner/dist/index.js:909:15[90m)[39m
+    at runSuite [90m(file:///C:/Users/Tim/Desktop/python/64web/frontend/[39mnode_modules/[4m@vitest[24m/runner/dist/index.js:909:15[90m)[39m
+    at runFiles [90m(file:///C:/Users/Tim/Desktop/python/64web/frontend/[39mnode_modules/[4m@vitest[24m/runner/dist/index.js:958:5[90m)[39m
+
+[90mstderr[2m | src/hooks/__tests__/useMultiRecordSubmit.test.ts[2m > [22m[2museMultiRecordSubmit[2m > [22m[2mclearError() / clearSuccess()[2m > [22m[2mclearError 應該清除錯誤訊息[22m[39m
+❌ [useMultiRecordSubmit] 失敗: Error: 測試錯誤
+    at [90mC:\Users\Tim\Desktop\python\64web\frontend\[39msrc\hooks\__tests__\useMultiRecordSubmit.test.ts:213:54
+    at [90mfile:///C:/Users/Tim/Desktop/python/64web/frontend/[39mnode_modules/[4m@vitest[24m/runner/dist/index.js:135:14
+    at [90mfile:///C:/Users/Tim/Desktop/python/64web/frontend/[39mnode_modules/[4m@vitest[24m/runner/dist/index.js:60:26
+    at runTest [90m(file:///C:/Users/Tim/Desktop/python/64web/frontend/[39mnode_modules/[4m@vitest[24m/runner/dist/index.js:781:17[90m)[39m
+[90m    at runNextTicks (node:internal/process/task_queues:60:5)[39m
+[90m    at processTimers (node:internal/timers:516:9)[39m
+    at runSuite [90m(file:///C:/Users/Tim/Desktop/python/64web/frontend/[39mnode_modules/[4m@vitest[24m/runner/dist/index.js:909:15[90m)[39m
+    at runSuite [90m(file:///C:/Users/Tim/Desktop/python/64web/frontend/[39mnode_modules/[4m@vitest[24m/runner/dist/index.js:909:15[90m)[39m
+    at runSuite [90m(file:///C:/Users/Tim/Desktop/python/64web/frontend/[39mnode_modules/[4m@vitest[24m/runner/dist/index.js:909:15[90m)[39m
+    at runFiles [90m(file:///C:/Users/Tim/Desktop/python/64web/frontend/[39mnode_modules/[4m@vitest[24m/runner/dist/index.js:958:5[90m)[39m
+
+ [32m✓[39m src/hooks/__tests__/useMultiRecordSubmit.test.ts [2m ([22m[2m10 tests[22m[2m)[22m[90m 222[2mms[22m[39m
+[90mstderr[2m | src/components/dashboard/__tests__/NavigationBar.test.tsx[2m > [22m[2mNavigationBar[2m > [22m[2m應該顯示 Logo 和品牌名稱[22m[39m
+⚠️ React Router Future Flag Warning: React Router will begin wrapping state updates in `React.startTransition` in v7. You can use the `v7_startTransition` future flag to opt-in early. For more information, see https://reactrouter.com/v6/upgrading/future#v7_starttransition.
+⚠️ React Router Future Flag Warning: Relative route resolution within Splat routes is changing in v7. You can use the `v7_relativeSplatPath` future flag to opt-in early. For more information, see https://reactrouter.com/v6/upgrading/future#v7_relativesplatpath.
+
+ [32m✓[39m src/components/dashboard/__tests__/StatusCard.test.tsx [2m ([22m[2m12 tests[22m[2m)[22m[90m 276[2mms[22m[39m
+ [32m✓[39m src/components/dashboard/__tests__/ProgressBar.test.tsx [2m ([22m[2m12 tests[22m[2m)[22m[90m 281[2mms[22m[39m
+ [33m❯[39m src/components/dashboard/__tests__/StatusModal.test.tsx [2m ([22m[2m8 tests[22m [2m|[22m [31m2 failed[39m[2m)[22m[90m 258[2mms[22m[39m
+[31m   [33m❯[31m src/components/dashboard/__tests__/StatusModal.test.tsx[2m > [22mStatusModal[2m > [22m點擊 Backdrop 應該觸發 onClose[39m
+[31m     → Unable to fire a "click" event - please provide a DOM element.[39m
+[31m   [33m❯[31m src/components/dashboard/__tests__/StatusModal.test.tsx[2m > [22mStatusModal[2m > [22m點擊項目應該觸發 onItemClick 並關閉 Modal[39m
+[31m     → expected "spy" to be called with arguments: [ '/app/wd40' ][90m
+
+Received: 
+
+[1m  1st spy call:
+
+[22m[2m  Array [[22m
+[32m-   "/app/wd40",[90m
+[31m+   "wd40",[90m
+[2m  ][22m
+[31m[90m
+
+Number of calls: [1m1[22m
+[31m[39m
+ [33m❯[39m src/components/dashboard/__tests__/NavigationBar.test.tsx [2m ([22m[2m9 tests[22m [2m|[22m [31m1 failed[39m[2m)[22m[33m 1420[2mms[22m[39m
+[31m   [33m❯[31m src/components/dashboard/__tests__/NavigationBar.test.tsx[2m > [22mNavigationBar[2m > [22m下拉選單應該顯示所有類別一項目（12 個）[39m
+[31m     → Unable to find an element with the text: 柴油(發電機). This could be because the text is broken up by multiple elements. In this case, you can provide a function for your text matcher to make your matcher more flexible.
+
+Ignored nodes: comments, script, style
+[36m<body>[31m
+  [36m<div>[31m
+    [36m<nav[31m
+      [33mstyle[31m=[32m"position: relative; height: 86px; width: 100%;"[31m
+    [36m>[31m
+      [36m<div[31m
+        [33mstyle[31m=[32m"position: relative; width: 1920px; height: 100%; margin: 0px auto;"[31m
+      [36m>[31m
+        [36m<div[31m
+          [33mclass[31m=[32m"absolute flex items-center gap-10 px-6"[31m
+          [33mstyle[31m=[32m"left: 54px; top: 27px; height: 54px; border-radius: 27px; background-color: rgba(255, 255, 255, 0.8);"[31m
+        [36m>[31m
+          [36m<div[31m
+            [33mclass[31m=[32m"flex items-center gap-3"[31m
+          [36m>[31m
+            [36m<img[31m
+              [33malt[31m=[32m"山椒魚 Logo"[31m
+              [33mclass[31m=[32m"h-11 w-11 object-cover rounded-full"[31m
+              [33msrc[31m=[32m"/formosanus-logo.png"[31m
+            [36m/>[31m
+            [36m<span[31m
+              [33mclass[31m=[32m"font-bold text-figma-primary"[31m
+              [33mstyle[31m=[32m"font-size: 32px; font-family: \"PT Sans Narrow\", \"Noto Sans JP\", sans-serif; line-height: 1; font-variation-settings: 'wght' 700;"[31m
+            [36m>[31m
+              [0m山椒魚FESS[0m
+            [36m</span>[31m
+          [36m</div>[31m
+          [36m<div[31m
+            [33mclass[31m=[32m"relative"[31m
+          [36m>[31m
+            [36m<button[31m
+              [33mclass[31m=[32m"hover:text-figma-accent transition-colors"[31m
+              [33mstyle[31m=[32m"display: flex; width: 74px; height: 54px; justify-content: center; align-items: center; flex-shrink: 0; color: rgb(14, 60, 50); font-family: Inter; font-size: 22px; font-weight: 600;"[31m
+            [36m>[31m
+              [0m類別一[0m
+            [36m</button>[31m
+            [36m<div[31m
+              [33mclass[31m=[32m"absolute left-0 z-50"[31m
+              [33mstyle[31m=[32m"top: 100%; margin-top: 0px; width: 202px; background: rgba(255, 255, 255, 0.8); border-radius: 0 0 8px 8px; padding: 9px 0px; display: flex; flex-direction: column; gap: 6px;"[31m
+            [36m>[31m
+              [36m<button[31m
+                [33mclass[31m=[32m"hover:opacity-80 transition-opacity"[31m
+                [33mstyle[31m=[32m"width: 202px; height: 33px; display: flex; align-items: center; padding-left: 12.76%; background: transparent; color: rgb(0, 0, 0); font-family: Inter; font-size: 20px; font-weight: 400; text-align: left;"[31m
+              [36m>[31m
+                [0mWD-40[0m
+              [36m</button>[31m
+              [36m<button[31m
+                [33mclass[31m=[32m"hover:opacity-80 transition-opacity"[31m
+                [33mstyle[31m=[32m"width: 202px; height: 33px; display: flex; align-items: center; padding-left: 12.76%; background: transparent; color: rgb(0, 0, 0); font-family: Inter; font-size: 20px; font-weight: 400; text-align: left;"[31m
+              [36m>[31m
+                [0m乙炔[0m
+              [36m</button>[31m
+              [36m<button[31m
+                [33mclass[31m=[32m"hover:opacity-80 transition-opacity"[31m
+                [33mstyle[31m=[32m"width: 202px; height: 33px; display: flex; align-items: center; padding-left: 12.76%; background: transparent; color: rgb(0, 0, 0); font-family: Inter; font-size: 20px; font-weight: 400; text-align: left;"[31m
+              [36m>[31m
+                [0m冷媒[0m
+              [36m</button>[31m
+              [36m<button[31m
+                [33mclass[31m=[32m"hover:opacity-80 transition-opacity"[31m
+                [33mstyle[31m=[32m"width: 202px; height: 33px; display: flex; align-items: center; padding-left: 12.76%; background: transparent; color: rgb(0, 0, 0); font-family: Inter; font-size: 20px; font-weight: 400; text-align: left;"[31m
+              [36m>[31m
+                [0m化糞池[0m
+              [36m</button>[31m
+              [36m<button[31m
+                [33mclass[31m=[32m"hover:opacity-80 transition-opacity"[31m
+                [33mstyle[31m=[32m"width: 202px; height: 33px; display: flex; align-items: center; padding-left: 12.76%; background: transparent; color: rgb(0, 0, 0); font-family: Inter; font-size: 20px; font-weight: 400; text-align: left;"[31m
+              [36m>[31m
+                [0m天然氣[0m
+              [36m</button>[31m
+              [36m<button[31m
+                [33mclass[31m=[32m"hover:opacity-80 transition-opacity"[31m
+                [33mstyle[31m=[32m"width: 202px; height: 33px; display: flex; align-items: center; padding-left: 12.76%; background: transparent; color: rgb(0, 0, 0); font-family: Inter; font-size: 20px; font-weight: 400; text-align: left;"[31m
+              [36m>[31m
+                [0m尿素[0m
+              [36m</button>[31m
+              [36m<button[31m
+                [33mclass[31m=[32m"hover:opacity-80 transition-opacity"[31m
+                [33mstyle[31m=[32m"width: 202px; height: 33px; display: flex; align-items: center; padding-left: 12.76%; background: transparent; color: rgb(0, 0, 0); font-family: Inter; font-size: 20px; font-weight: 400; text-align: left;"[31m
+              [36m>[31m
+                [0m柴油(固定源)[0m
+              [36m</button>[31m
+              [36m<button[31m
+                [33mclass[31m=[32m"hover:opacity-80 transition-opacity"[31m
+                [33mstyle[31m=[32m"width: 202px; height: 33px; display: flex; align-items: center; padding-left: 12.76%; background: transparent; color: rgb(0, 0, 0); font-family: Inter; font-size: 20px; font-weight: 400; text-align: left;"[31m
+              [36m>[31m
+                [0m發電機測試資料[0m
+              [36m</button>[31m
+              [36m<button[31m
+                [33mclass[31m=[32m"hover:opacity-80 transition-opacity"[31m
+                [33mstyle[31m=[32m"width: 202px; height: 33px; display: flex; align-items: center; padding-left: 12.76%; background: transparent; color: rgb(0, 0, 0); font-family: Inter; font-size: 20px; font-weight: 400; text-align: left;"[31m
+              [36m>[31m
+                [0m柴油(移動源)[0m
+              [36m</button>[31m
+              [36m<button[31m
+                [33mclass[31m=[32m"hover:opacity-80 transition-opacity"[31m
+                [33mstyle[31m=[32m"width: 202px; height: 33px; display: flex; align-items: center; padding-left: 12.76%; background: transparent; color: rgb(0, 0, 0); font-family: Inter; font-size: 20px; font-weight: 400; text-align: left;"[31m
+              [36m>[31m
+                [0m汽油[0m
+              [36m</button>[31m
+              [36m<button[31m
+                [33mclass[31m=[32m"hover:opacity-80 transition-opacity"[31m
+                [33mstyle[31m=[32m"width: 202px; height: 33px; display: flex; align-items: center; padding-left: 12.76%; background: transparent; color: rgb(0, 0, 0); font-family: Inter; font-size: 20px; font-weight: 400; text-align: left;"[31m
+  ...
+
+Ignored nodes: comments, script, style
+[36m<html>[31m
+  [36m<head />[31m
+  [36m<body>[31m
+    [36m<div>[31m
+      [36m<nav[31m
+        [33mstyle[31m=[32m"position: relative; height: 86px; width: 100%;"[31m
+      [36m>[31m
+        [36m<div[31m
+          [33mstyle[31m=[32m"position: relative; width: 1920px; height: 100%; margin: 0px auto;"[31m
+        [36m>[31m
+          [36m<div[31m
+            [33mclass[31m=[32m"absolute flex items-center gap-10 px-6"[31m
+            [33mstyle[31m=[32m"left: 54px; top: 27px; height: 54px; border-radius: 27px; background-color: rgba(255, 255, 255, 0.8);"[31m
+          [36m>[31m
+            [36m<div[31m
+              [33mclass[31m=[32m"flex items-center gap-3"[31m
+            [36m>[31m
+              [36m<img[31m
+                [33malt[31m=[32m"山椒魚 Logo"[31m
+                [33mclass[31m=[32m"h-11 w-11 object-cover rounded-full"[31m
+                [33msrc[31m=[32m"/formosanus-logo.png"[31m
+              [36m/>[31m
+              [36m<span[31m
+                [33mclass[31m=[32m"font-bold text-figma-primary"[31m
+                [33mstyle[31m=[32m"font-size: 32px; font-family: \"PT Sans Narrow\", \"Noto Sans JP\", sans-serif; line-height: 1; font-variation-settings: 'wght' 700;"[31m
+              [36m>[31m
+                [0m山椒魚FESS[0m
+              [36m</span>[31m
+            [36m</div>[31m
+            [36m<div[31m
+              [33mclass[31m=[32m"relative"[31m
+            [36m>[31m
+              [36m<button[31m
+                [33mclass[31m=[32m"hover:text-figma-accent transition-colors"[31m
+                [33mstyle[31m=[32m"display: flex; width: 74px; height: 54px; justify-content: center; align-items: center; flex-shrink: 0; color: rgb(14, 60, 50); font-family: Inter; font-size: 22px; font-weight: 600;"[31m
+              [36m>[31m
+                [0m類別一[0m
+              [36m</button>[31m
+              [36m<div[31m
+                [33mclass[31m=[32m"absolute left-0 z-50"[31m
+                [33mstyle[31m=[32m"top: 100%; margin-top: 0px; width: 202px; background: rgba(255, 255, 255, 0.8); border-radius: 0 0 8px 8px; padding: 9px 0px; display: flex; flex-direction: column; gap: 6px;"[31m
+              [36m>[31m
+                [36m<button[31m
+                  [33mclass[31m=[32m"hover:opacity-80 transition-opacity"[31m
+                  [33mstyle[31m=[32m"width: 202px; height: 33px; display: flex; align-items: center; padding-left: 12.76%; background: transparent; color: rgb(0, 0, 0); font-family: Inter; font-size: 20px; font-weight: 400; text-align: left;"[31m
+                [36m>[31m
+                  [0mWD-40[0m
+                [36m</button>[31m
+                [36m<button[31m
+                  [33mclass[31m=[32m"hover:opacity-80 transition-opacity"[31m
+                  [33mstyle[31m=[32m"width: 202px; height: 33px; display: flex; align-items: center; padding-left: 12.76%; background: transparent; color: rgb(0, 0, 0); font-family: Inter; font-size: 20px; font-weight: 400; text-align: left;"[31m
+                [36m>[31m
+                  [0m乙炔[0m
+                [36m</button>[31m
+                [36m<button[31m
+                  [33mclass[31m=[32m"hover:opacity-80 transition-opacity"[31m
+                  [33mstyle[31m=[32m"width: 202px; height: 33px; display: flex; align-items: center; padding-left: 12.76%; background: transparent; color: rgb(0, 0, 0); font-family: Inter; font-size: 20px; font-weight: 400; text-align: left;"[31m
+                [36m>[31m
+                  [0m冷媒[0m
+                [36m</button>[31m
+                [36m<button[31m
+                  [33mclass[31m=[32m"hover:opacity-80 transition-opacity"[31m
+                  [33mstyle[31m=[32m"width: 202px; height: 33px; display: flex; align-items: center; padding-left: 12.76%; background: transparent; color: rgb(0, 0, 0); font-family: Inter; font-size: 20px; font-weight: 400; text-align: left;"[31m
+                [36m>[31m
+                  [0m化糞池[0m
+                [36m</button>[31m
+                [36m<button[31m
+                  [33mclass[31m=[32m"hover:opacity-80 transition-opacity"[31m
+                  [33mstyle[31m=[32m"width: 202px; height: 33px; display: flex; align-items: center; padding-left: 12.76%; background: transparent; color: rgb(0, 0, 0); font-family: Inter; font-size: 20px; font-weight: 400; text-align: left;"[31m
+                [36m>[31m
+                  [0m天然氣[0m
+                [36m</button>[31m
+                [36m<button[31m
+                  [33mclass[31m=[32m"hover:opacity-80 transition-opacity"[31m
+                  [33mstyle[31m=[32m"width: 202px; height: 33px; display: flex; align-items: center; padding-left: 12.76%; background: transparent; color: rgb(0, 0, 0); font-family: Inter; font-size: 20px; font-weight: 400; text-align: left;"[31m
+                [36m>[31m
+                  [0m尿素[0m
+                [36m</button>[31m
+                [36m<button[31m
+                  [33mclass[31m=[32m"hover:opacity-80 transition-opacity"[31m
+                  [33mstyle[31m=[32m"width: 202px; height: 33px; display: flex; align-items: center; padding-left: 12.76%; background: transparent; color: rgb(0, 0, 0); font-family: Inter; font-size: 20px; font-weight: 400; text-align: left;"[31m
+                [36m>[31m
+                  [0m柴油(固定源)[0m
+                [36m</button>[31m
+                [36m<button[31m
+                  [33mclass[31m=[32m"hover:opacity-80 transition-opacity"[31m
+                  [33mstyle[31m=[32m"width: 202px; height: 33px; display: flex; align-items: center; padding-left: 12.76%; background: transparent; color: rgb(0, 0, 0); font-family: Inter; font-size: 20px; font-weight: 400; text-align: left;"[31m
+                [36m>[31m
+                  [0m發電機測試資料[0m
+                [36m</button>[31m
+                [36m<button[31m
+                  [33mclass[31m=[32m"hover:opacity-80 transition-opacity"[31m
+                  [33mstyle[31m=[32m"width: 202px; height: 33px; display: flex; align-items: center; padding-left: 12.76%; background: transparent; color: rgb(0, 0, 0); font-family: Inter; font-size: 20px; font-weight: 400; text-align: left;"[31m
+                [36m>[31m
+                  [0m柴油(移動源)[0m
+                [36m</button>[31m
+                [36m<button[31m
+                  [33mclass[31m=[32m"hover:opacity-80 transition-opacity"[31m
+                  [33mstyle[31m=[32m"width: 202px; height: 33px; display: flex; align-items: center; padding-left: 12.76%; background: transparent; color: rgb(0, 0, 0); font-family: Inter; font-size: 20px; font-weight: 400; text-align: left;"[31m
+                [36m>[31m
+                  [0m汽油[0m
+                [36m</button>[31m
+                [36m<button[31m
+                  [33mclass[31m=[32m"hover:opacity-80 transition-opacity"[31m
+         ...[39m
+
+[31m⎯⎯⎯⎯⎯⎯⎯[1m[7m Failed Tests 6 [27m[22m⎯⎯⎯⎯⎯⎯⎯[39m
+
+[31m[1m[7m FAIL [27m[22m[39m src/components/dashboard/__tests__/NavigationBar.test.tsx[2m > [22mNavigationBar[2m > [22m下拉選單應該顯示所有類別一項目（12 個）
+[31m[1mTestingLibraryElementError[22m[39m: Unable to find an element with the text: 柴油(發電機). This could be because the text is broken up by multiple elements. In this case, you can provide a function for your text matcher to make your matcher more flexible.
+
+Ignored nodes: comments, script, style
+[36m<body>[39m
+  [36m<div>[39m
+    [36m<nav[39m
+      [33mstyle[39m=[32m"position: relative; height: 86px; width: 100%;"[39m
+    [36m>[39m
+      [36m<div[39m
+        [33mstyle[39m=[32m"position: relative; width: 1920px; height: 100%; margin: 0px auto;"[39m
+      [36m>[39m
+        [36m<div[39m
+          [33mclass[39m=[32m"absolute flex items-center gap-10 px-6"[39m
+          [33mstyle[39m=[32m"left: 54px; top: 27px; height: 54px; border-radius: 27px; background-color: rgba(255, 255, 255, 0.8);"[39m
+        [36m>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"flex items-center gap-3"[39m
+          [36m>[39m
+            [36m<img[39m
+              [33malt[39m=[32m"山椒魚 Logo"[39m
+              [33mclass[39m=[32m"h-11 w-11 object-cover rounded-full"[39m
+              [33msrc[39m=[32m"/formosanus-logo.png"[39m
+            [36m/>[39m
+            [36m<span[39m
+              [33mclass[39m=[32m"font-bold text-figma-primary"[39m
+              [33mstyle[39m=[32m"font-size: 32px; font-family: \"PT Sans Narrow\", \"Noto Sans JP\", sans-serif; line-height: 1; font-variation-settings: 'wght' 700;"[39m
+            [36m>[39m
+              [0m山椒魚FESS[0m
+            [36m</span>[39m
+          [36m</div>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"relative"[39m
+          [36m>[39m
+            [36m<button[39m
+              [33mclass[39m=[32m"hover:text-figma-accent transition-colors"[39m
+              [33mstyle[39m=[32m"display: flex; width: 74px; height: 54px; justify-content: center; align-items: center; flex-shrink: 0; color: rgb(14, 60, 50); font-family: Inter; font-size: 22px; font-weight: 600;"[39m
+            [36m>[39m
+              [0m類別一[0m
+            [36m</button>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"absolute left-0 z-50"[39m
+              [33mstyle[39m=[32m"top: 100%; margin-top: 0px; width: 202px; background: rgba(255, 255, 255, 0.8); border-radius: 0 0 8px 8px; padding: 9px 0px; display: flex; flex-direction: column; gap: 6px;"[39m
+            [36m>[39m
+              [36m<button[39m
+                [33mclass[39m=[32m"hover:opacity-80 transition-opacity"[39m
+                [33mstyle[39m=[32m"width: 202px; height: 33px; display: flex; align-items: center; padding-left: 12.76%; background: transparent; color: rgb(0, 0, 0); font-family: Inter; font-size: 20px; font-weight: 400; text-align: left;"[39m
+              [36m>[39m
+                [0mWD-40[0m
+              [36m</button>[39m
+              [36m<button[39m
+                [33mclass[39m=[32m"hover:opacity-80 transition-opacity"[39m
+                [33mstyle[39m=[32m"width: 202px; height: 33px; display: flex; align-items: center; padding-left: 12.76%; background: transparent; color: rgb(0, 0, 0); font-family: Inter; font-size: 20px; font-weight: 400; text-align: left;"[39m
+              [36m>[39m
+                [0m乙炔[0m
+              [36m</button>[39m
+              [36m<button[39m
+                [33mclass[39m=[32m"hover:opacity-80 transition-opacity"[39m
+                [33mstyle[39m=[32m"width: 202px; height: 33px; display: flex; align-items: center; padding-left: 12.76%; background: transparent; color: rgb(0, 0, 0); font-family: Inter; font-size: 20px; font-weight: 400; text-align: left;"[39m
+              [36m>[39m
+                [0m冷媒[0m
+              [36m</button>[39m
+              [36m<button[39m
+                [33mclass[39m=[32m"hover:opacity-80 transition-opacity"[39m
+                [33mstyle[39m=[32m"width: 202px; height: 33px; display: flex; align-items: center; padding-left: 12.76%; background: transparent; color: rgb(0, 0, 0); font-family: Inter; font-size: 20px; font-weight: 400; text-align: left;"[39m
+              [36m>[39m
+                [0m化糞池[0m
+              [36m</button>[39m
+              [36m<button[39m
+                [33mclass[39m=[32m"hover:opacity-80 transition-opacity"[39m
+                [33mstyle[39m=[32m"width: 202px; height: 33px; display: flex; align-items: center; padding-left: 12.76%; background: transparent; color: rgb(0, 0, 0); font-family: Inter; font-size: 20px; font-weight: 400; text-align: left;"[39m
+              [36m>[39m
+                [0m天然氣[0m
+              [36m</button>[39m
+              [36m<button[39m
+                [33mclass[39m=[32m"hover:opacity-80 transition-opacity"[39m
+                [33mstyle[39m=[32m"width: 202px; height: 33px; display: flex; align-items: center; padding-left: 12.76%; background: transparent; color: rgb(0, 0, 0); font-family: Inter; font-size: 20px; font-weight: 400; text-align: left;"[39m
+              [36m>[39m
+                [0m尿素[0m
+              [36m</button>[39m
+              [36m<button[39m
+                [33mclass[39m=[32m"hover:opacity-80 transition-opacity"[39m
+                [33mstyle[39m=[32m"width: 202px; height: 33px; display: flex; align-items: center; padding-left: 12.76%; background: transparent; color: rgb(0, 0, 0); font-family: Inter; font-size: 20px; font-weight: 400; text-align: left;"[39m
+              [36m>[39m
+                [0m柴油(固定源)[0m
+              [36m</button>[39m
+              [36m<button[39m
+                [33mclass[39m=[32m"hover:opacity-80 transition-opacity"[39m
+                [33mstyle[39m=[32m"width: 202px; height: 33px; display: flex; align-items: center; padding-left: 12.76%; background: transparent; color: rgb(0, 0, 0); font-family: Inter; font-size: 20px; font-weight: 400; text-align: left;"[39m
+              [36m>[39m
+                [0m發電機測試資料[0m
+              [36m</button>[39m
+              [36m<button[39m
+                [33mclass[39m=[32m"hover:opacity-80 transition-opacity"[39m
+                [33mstyle[39m=[32m"width: 202px; height: 33px; display: flex; align-items: center; padding-left: 12.76%; background: transparent; color: rgb(0, 0, 0); font-family: Inter; font-size: 20px; font-weight: 400; text-align: left;"[39m
+              [36m>[39m
+                [0m柴油(移動源)[0m
+              [36m</button>[39m
+              [36m<button[39m
+                [33mclass[39m=[32m"hover:opacity-80 transition-opacity"[39m
+                [33mstyle[39m=[32m"width: 202px; height: 33px; display: flex; align-items: center; padding-left: 12.76%; background: transparent; color: rgb(0, 0, 0); font-family: Inter; font-size: 20px; font-weight: 400; text-align: left;"[39m
+              [36m>[39m
+                [0m汽油[0m
+              [36m</button>[39m
+              [36m<button[39m
+                [33mclass[39m=[32m"hover:opacity-80 transition-opacity"[39m
+                [33mstyle[39m=[32m"width: 202px; height: 33px; display: flex; align-items: center; padding-left: 12.76%; background: transparent; color: rgb(0, 0, 0); font-family: Inter; font-size: 20px; font-weight: 400; text-align: left;"[39m
+  ...
+
+Ignored nodes: comments, script, style
+[36m<html>[39m
+  [36m<head />[39m
+  [36m<body>[39m
+    [36m<div>[39m
+      [36m<nav[39m
+        [33mstyle[39m=[32m"position: relative; height: 86px; width: 100%;"[39m
+      [36m>[39m
+        [36m<div[39m
+          [33mstyle[39m=[32m"position: relative; width: 1920px; height: 100%; margin: 0px auto;"[39m
+        [36m>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"absolute flex items-center gap-10 px-6"[39m
+            [33mstyle[39m=[32m"left: 54px; top: 27px; height: 54px; border-radius: 27px; background-color: rgba(255, 255, 255, 0.8);"[39m
+          [36m>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"flex items-center gap-3"[39m
+            [36m>[39m
+              [36m<img[39m
+                [33malt[39m=[32m"山椒魚 Logo"[39m
+                [33mclass[39m=[32m"h-11 w-11 object-cover rounded-full"[39m
+                [33msrc[39m=[32m"/formosanus-logo.png"[39m
+              [36m/>[39m
+              [36m<span[39m
+                [33mclass[39m=[32m"font-bold text-figma-primary"[39m
+                [33mstyle[39m=[32m"font-size: 32px; font-family: \"PT Sans Narrow\", \"Noto Sans JP\", sans-serif; line-height: 1; font-variation-settings: 'wght' 700;"[39m
+              [36m>[39m
+                [0m山椒魚FESS[0m
+              [36m</span>[39m
+            [36m</div>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"relative"[39m
+            [36m>[39m
+              [36m<button[39m
+                [33mclass[39m=[32m"hover:text-figma-accent transition-colors"[39m
+                [33mstyle[39m=[32m"display: flex; width: 74px; height: 54px; justify-content: center; align-items: center; flex-shrink: 0; color: rgb(14, 60, 50); font-family: Inter; font-size: 22px; font-weight: 600;"[39m
+              [36m>[39m
+                [0m類別一[0m
+              [36m</button>[39m
+              [36m<div[39m
+                [33mclass[39m=[32m"absolute left-0 z-50"[39m
+                [33mstyle[39m=[32m"top: 100%; margin-top: 0px; width: 202px; background: rgba(255, 255, 255, 0.8); border-radius: 0 0 8px 8px; padding: 9px 0px; display: flex; flex-direction: column; gap: 6px;"[39m
+              [36m>[39m
+                [36m<button[39m
+                  [33mclass[39m=[32m"hover:opacity-80 transition-opacity"[39m
+                  [33mstyle[39m=[32m"width: 202px; height: 33px; display: flex; align-items: center; padding-left: 12.76%; background: transparent; color: rgb(0, 0, 0); font-family: Inter; font-size: 20px; font-weight: 400; text-align: left;"[39m
+                [36m>[39m
+                  [0mWD-40[0m
+                [36m</button>[39m
+                [36m<button[39m
+                  [33mclass[39m=[32m"hover:opacity-80 transition-opacity"[39m
+                  [33mstyle[39m=[32m"width: 202px; height: 33px; display: flex; align-items: center; padding-left: 12.76%; background: transparent; color: rgb(0, 0, 0); font-family: Inter; font-size: 20px; font-weight: 400; text-align: left;"[39m
+                [36m>[39m
+                  [0m乙炔[0m
+                [36m</button>[39m
+                [36m<button[39m
+                  [33mclass[39m=[32m"hover:opacity-80 transition-opacity"[39m
+                  [33mstyle[39m=[32m"width: 202px; height: 33px; display: flex; align-items: center; padding-left: 12.76%; background: transparent; color: rgb(0, 0, 0); font-family: Inter; font-size: 20px; font-weight: 400; text-align: left;"[39m
+                [36m>[39m
+                  [0m冷媒[0m
+                [36m</button>[39m
+                [36m<button[39m
+                  [33mclass[39m=[32m"hover:opacity-80 transition-opacity"[39m
+                  [33mstyle[39m=[32m"width: 202px; height: 33px; display: flex; align-items: center; padding-left: 12.76%; background: transparent; color: rgb(0, 0, 0); font-family: Inter; font-size: 20px; font-weight: 400; text-align: left;"[39m
+                [36m>[39m
+                  [0m化糞池[0m
+                [36m</button>[39m
+                [36m<button[39m
+                  [33mclass[39m=[32m"hover:opacity-80 transition-opacity"[39m
+                  [33mstyle[39m=[32m"width: 202px; height: 33px; display: flex; align-items: center; padding-left: 12.76%; background: transparent; color: rgb(0, 0, 0); font-family: Inter; font-size: 20px; font-weight: 400; text-align: left;"[39m
+                [36m>[39m
+                  [0m天然氣[0m
+                [36m</button>[39m
+                [36m<button[39m
+                  [33mclass[39m=[32m"hover:opacity-80 transition-opacity"[39m
+                  [33mstyle[39m=[32m"width: 202px; height: 33px; display: flex; align-items: center; padding-left: 12.76%; background: transparent; color: rgb(0, 0, 0); font-family: Inter; font-size: 20px; font-weight: 400; text-align: left;"[39m
+                [36m>[39m
+                  [0m尿素[0m
+                [36m</button>[39m
+                [36m<button[39m
+                  [33mclass[39m=[32m"hover:opacity-80 transition-opacity"[39m
+                  [33mstyle[39m=[32m"width: 202px; height: 33px; display: flex; align-items: center; padding-left: 12.76%; background: transparent; color: rgb(0, 0, 0); font-family: Inter; font-size: 20px; font-weight: 400; text-align: left;"[39m
+                [36m>[39m
+                  [0m柴油(固定源)[0m
+                [36m</button>[39m
+                [36m<button[39m
+                  [33mclass[39m=[32m"hover:opacity-80 transition-opacity"[39m
+                  [33mstyle[39m=[32m"width: 202px; height: 33px; display: flex; align-items: center; padding-left: 12.76%; background: transparent; color: rgb(0, 0, 0); font-family: Inter; font-size: 20px; font-weight: 400; text-align: left;"[39m
+                [36m>[39m
+                  [0m發電機測試資料[0m
+                [36m</button>[39m
+                [36m<button[39m
+                  [33mclass[39m=[32m"hover:opacity-80 transition-opacity"[39m
+                  [33mstyle[39m=[32m"width: 202px; height: 33px; display: flex; align-items: center; padding-left: 12.76%; background: transparent; color: rgb(0, 0, 0); font-family: Inter; font-size: 20px; font-weight: 400; text-align: left;"[39m
+                [36m>[39m
+                  [0m柴油(移動源)[0m
+                [36m</button>[39m
+                [36m<button[39m
+                  [33mclass[39m=[32m"hover:opacity-80 transition-opacity"[39m
+                  [33mstyle[39m=[32m"width: 202px; height: 33px; display: flex; align-items: center; padding-left: 12.76%; background: transparent; color: rgb(0, 0, 0); font-family: Inter; font-size: 20px; font-weight: 400; text-align: left;"[39m
+                [36m>[39m
+                  [0m汽油[0m
+                [36m</button>[39m
+                [36m<button[39m
+                  [33mclass[39m=[32m"hover:opacity-80 transition-opacity"[39m
+         ...
+[90m [2m❯[22m Proxy.waitForWrapper node_modules/@testing-library/react/node_modules/@testing-library/dom/dist/wait-for.js:[2m163:27[22m[39m
+[36m [2m❯[22m src/components/dashboard/__tests__/NavigationBar.test.tsx:[2m117:11[22m[39m
+    [90m115| [39m    fireEvent[33m.[39m[34mmouseEnter[39m(category1Button)
+    [90m116| [39m
+    [90m117| [39m    [35mawait[39m [34mwaitFor[39m(() [33m=>[39m {
+    [90m   | [39m          [31m^[39m
+    [90m118| [39m      [34mexpect[39m(screen[33m.[39m[34mgetByText[39m([32m'WD-40'[39m))[33m.[39m[34mtoBeInTheDocument[39m()
+    [90m119| [39m      [34mexpect[39m(screen[33m.[39m[34mgetByText[39m([32m'乙炔'[39m))[33m.[39m[34mtoBeInTheDocument[39m()
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/6]⎯[22m[39m
+
+[31m[1m[7m FAIL [27m[22m[39m src/components/dashboard/__tests__/StatusModal.test.tsx[2m > [22mStatusModal[2m > [22m點擊 Backdrop 應該觸發 onClose
+[31m[1mError[22m: Unable to fire a "click" event - please provide a DOM element.[39m
+[90m [2m❯[22m createEvent node_modules/@testing-library/react/node_modules/@testing-library/dom/dist/events.js:[2m27:11[22m[39m
+[90m [2m❯[22m Function.createEvent.<computed> [as click] node_modules/@testing-library/react/node_modules/@testing-library/dom/dist/events.js:[2m106:38[22m[39m
+[90m [2m❯[22m Function.fireEvent.<computed> [as click] node_modules/@testing-library/react/node_modules/@testing-library/dom/dist/events.js:[2m110:68[22m[39m
+[90m [2m❯[22m Function.fireEvent.<computed> [as click] node_modules/@testing-library/react/dist/fire-event.js:[2m15:52[22m[39m
+[36m [2m❯[22m src/components/dashboard/__tests__/StatusModal.test.tsx:[2m87:15[22m[39m
+    [90m 85| [39m
+    [90m 86| [39m    [35mconst[39m backdrop [33m=[39m container[33m.[39m[34mquerySelector[39m([32m'.fixed.inset-0.bg-black'[39m…
+    [90m 87| [39m    fireEvent[33m.[39m[34mclick[39m(backdrop)
+    [90m   | [39m              [31m^[39m
+    [90m 88| [39m
+    [90m 89| [39m    [34mexpect[39m(handleClose)[33m.[39m[34mtoHaveBeenCalled[39m()
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/6]⎯[22m[39m
+
+[31m[1m[7m FAIL [27m[22m[39m src/components/dashboard/__tests__/StatusModal.test.tsx[2m > [22mStatusModal[2m > [22m點擊項目應該觸發 onItemClick 並關閉 Modal
+[31m[1mAssertionError[22m: expected "spy" to be called with arguments: [ '/app/wd40' ][90m
+
+Received: 
+
+[1m  1st spy call:
+
+[22m[2m  Array [[22m
+[32m-   "/app/wd40",[90m
+[31m+   "wd40",[90m
+[2m  ][22m
+[31m[90m
+
+Number of calls: [1m1[22m
+[31m[39m
+[36m [2m❯[22m src/components/dashboard/__tests__/StatusModal.test.tsx:[2m109:29[22m[39m
+    [90m107| [39m    fireEvent[33m.[39m[34mclick[39m(itemButton)
+    [90m108| [39m
+    [90m109| [39m    [34mexpect[39m(handleItemClick)[33m.[39m[34mtoHaveBeenCalledWith[39m([32m'/app/wd40'[39m)
+    [90m   | [39m                            [31m^[39m
+    [90m110| [39m    [34mexpect[39m(handleClose)[33m.[39m[34mtoHaveBeenCalled[39m()
+    [90m111| [39m  })
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/6]⎯[22m[39m
+
+[31m[1m[7m FAIL [27m[22m[39m src/pages/admin/utils/__tests__/userTransformers.test.ts[2m > [22muserTransformers[2m > [22mapiUserToFormData[2m > [22m應該正確轉換為表單資料
+[31m[1mAssertionError[22m: expected undefined to be 'refuel' // Object.is equality[39m
+
+[32m- Expected:[39m 
+"refuel"
+
+[31m+ Received:[39m 
+undefined
+
+[36m [2m❯[22m src/pages/admin/utils/__tests__/userTransformers.test.ts:[2m83:45[22m[39m
+    [90m 81| [39m      [34mexpect[39m(result[33m.[39mtargetYear)[33m.[39m[34mtoBe[39m([34m2024[39m)
+    [90m 82| [39m      [34mexpect[39m(result[33m.[39menergyCategories)[33m.[39m[34mtoEqual[39m([[32m'diesel'[39m[33m,[39m [32m'gasoline'[39m])
+    [90m 83| [39m      [34mexpect[39m(result[33m.[39mdieselGeneratorVersion)[33m.[39m[34mtoBe[39m([32m'refuel'[39m)
+    [90m   | [39m                                            [31m^[39m
+    [90m 84| [39m      [34mexpect[39m(result[33m.[39misActive)[33m.[39m[34mtoBe[39m([35mtrue[39m)
+    [90m 85| [39m      [34mexpect[39m(result[33m.[39mpassword)[33m.[39m[34mtoBe[39m([32m''[39m)
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/6]⎯[22m[39m
+
+[31m[1m[7m FAIL [27m[22m[39m src/pages/admin/utils/__tests__/userTransformers.test.ts[2m > [22muserTransformers[2m > [22mformDataToCreateUserData[2m > [22m應該正確轉換為建立用戶資料
+[31m[1mAssertionError[22m: expected undefined to be 'test' // Object.is equality[39m
+
+[32m- Expected:[39m 
+"test"
+
+[31m+ Received:[39m 
+undefined
+
+[36m [2m❯[22m src/pages/admin/utils/__tests__/userTransformers.test.ts:[2m127:47[22m[39m
+    [90m125| [39m      [34mexpect[39m(result[33m.[39mtarget_year)[33m.[39m[34mtoBe[39m([34m2024[39m)
+    [90m126| [39m      [34mexpect[39m(result[33m.[39menergy_categories)[33m.[39m[34mtoEqual[39m([[32m'diesel'[39m[33m,[39m [32m'electricity[39m…
+    [90m127| [39m      [34mexpect[39m(result[33m.[39mdiesel_generator_version)[33m.[39m[34mtoBe[39m([32m'test'[39m)
+    [90m   | [39m                                              [31m^[39m
+    [90m128| [39m    })
+    [90m129| [39m
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[5/6]⎯[22m[39m
+
+[31m[1m[7m FAIL [27m[22m[39m src/pages/admin/utils/__tests__/userTransformers.test.ts[2m > [22muserTransformers[2m > [22mformDataToCreateUserData[2m > [22m應該使用預設值處理缺少的 dieselGeneratorVersion
+[31m[1mAssertionError[22m: expected undefined to be 'refuel' // Object.is equality[39m
+
+[32m- Expected:[39m 
+"refuel"
+
+[31m+ Received:[39m 
+undefined
+
+[36m [2m❯[22m src/pages/admin/utils/__tests__/userTransformers.test.ts:[2m142:60[22m[39m
+    [90m140| [39m      [35mconst[39m result [33m=[39m [34mformDataToCreateUserData[39m(formData)
+    [90m141| [39m
+    [90m142| [39m      [34mexpect[39m(result[33m.[39mfilling_config[33m?.[39mdiesel_generator_mode)[33m.[39m[34mtoBe[39m([32m'refue[39m…
+    [90m   | [39m                                                           [31m^[39m
+    [90m143| [39m    })
+    [90m144| [39m  })
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[6/6]⎯[22m[39m
+
+[2m Test Files [22m [1m[31m3 failed[39m[22m[2m | [22m[1m[32m11 passed[39m[22m[90m (14)[39m
+[2m      Tests [22m [1m[31m6 failed[39m[22m[2m | [22m[1m[32m175 passed[39m[22m[90m (181)[39m
+[2m   Start at [22m 17:53:36
+[2m   Duration [22m 4.53s[2m (transform 896ms, setup 3.05s, collect 5.99s, tests 3.69s, environment 19.17s, prepare 7.23s)[22m
+

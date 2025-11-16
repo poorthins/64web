@@ -35,6 +35,7 @@ export const CATEGORY_GROUPS: CategoryGroup[] = [
       'generator_test',
       'diesel',
       'gasoline',
+      'sf6',
       'lpg',
       'fire_extinguisher',
       'welding_rod'

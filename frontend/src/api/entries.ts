@@ -68,6 +68,8 @@ export function getCategoryFromPageKey(pageKey: string): string {
     'diesel_generator': '柴油(發電機)',
     'diesel': '柴油',
     'gasoline': '汽油',
+    'sf6': '六氟化硫',
+    'generator_test': '發電機測試資料',
     'lpg': '液化石油氣',
     'fire_extinguisher': '滅火器',
     'welding_rod': '焊條',

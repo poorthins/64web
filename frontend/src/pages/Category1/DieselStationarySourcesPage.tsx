@@ -90,7 +90,16 @@ export default function DieselStationarySourcesPage() {
     save,
     submitting: submitLoading,
     clearError: clearSubmitError
-  } = useMultiRecordSubmit(pageKey, year)
+  } = useMultiRecordSubmit(pageKey, year, {
+    onSubmitSuccess: () => {
+      setSuccessModalType('submit')
+      setShowSuccessModal(true)
+    },
+    onSaveSuccess: () => {
+      setSuccessModalType('save')
+      setShowSuccessModal(true)
+    }
+  })
 
   const {
     clear,
@@ -416,9 +425,6 @@ export default function DieselStationarySourcesPage() {
       })
 
       reloadApprovalStatus()
-      setSuccess('暫存成功！資料已儲存')
-      setSuccessModalType('save')
-      setShowSuccessModal(true)
     }).catch(error => {
       console.error('暫存失敗:', error)
       setError(error instanceof Error ? error.message : '暫存失敗')
@@ -455,8 +461,6 @@ export default function DieselStationarySourcesPage() {
       })
 
       await handleSubmitSuccess()
-      setSuccessModalType('submit')
-      setShowSuccessModal(true)
       reloadApprovalStatus()
     })
   }
@@ -562,15 +566,12 @@ export default function DieselStationarySourcesPage() {
       <MobileEnergyGroupListSection
         savedGroups={savedGroups}
         isReadOnly={isReadOnly}
-        submitting={submitting || submitLoading}
         approvalStatus={approvalStatus}
-        editPermissions={editPermissions}
         onEditGroup={handleEditGroup}
         onDeleteGroup={handleDeleteGroup}
         thumbnails={thumbnails}
         onPreviewImage={setLightboxSrc}
         iconColor={DIESEL_GENERATOR_CONFIG.iconColor}
-        unit={DIESEL_GENERATOR_CONFIG.unit}
       />
 
       {/* Toast 訊息 */}

@@ -101,9 +101,6 @@ export function MobileEnergyGroupListSection(props: MobileEnergyGroupListSection
           </div>
         )}
       </div>
-
-      {/* 底部佔位空間，避免被工具列擋住 */}
-      <div className="h-20"></div>
     </>
   )
 }

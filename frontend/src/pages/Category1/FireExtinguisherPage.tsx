@@ -795,7 +795,7 @@ export default function FireExtinguisherPage() {
                             title="刪除此記錄"
                             disabled={submitting}
                           >
-                            <Trash2 className="w-5 h-5" />
+                            <Trash2 style={{ width: '32px', height: '32px' }} />
                           </button>
                         )}
                       </div>
