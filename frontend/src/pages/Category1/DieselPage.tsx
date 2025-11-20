@@ -1,7 +1,6 @@
 import { useState, useEffect, useMemo } from 'react';
 import { EntryStatus } from '../../components/StatusSwitcher';
 import ConfirmClearModal from '../../components/ConfirmClearModal'
-import SuccessModal from '../../components/SuccessModal'
 import SharedPageLayout from '../../layouts/SharedPageLayout'
 import { useEditPermissions } from '../../hooks/useEditPermissions';
 import { useFrontendStatus } from '../../hooks/useFrontendStatus';
@@ -38,8 +37,6 @@ export default function DieselPage() {
   const [initialStatus, setInitialStatus] = useState<EntryStatus>('submitted')
   const [currentEntryId, setCurrentEntryId] = useState<string | null>(null)
   const { executeSubmit, submitting } = useSubmitGuard()
-  const [showSuccessModal, setShowSuccessModal] = useState(false)
-  const [successModalType, setSuccessModalType] = useState<'save' | 'submit'>('submit')
   const [showClearConfirmModal, setShowClearConfirmModal] = useState(false)
 
   // 圖片放大 lightbox
@@ -95,16 +92,7 @@ export default function DieselPage() {
     success: submitSuccess,
     clearError: clearSubmitError,
     clearSuccess: clearSubmitSuccess
-  } = useMultiRecordSubmit(pageKey, year, {
-    onSubmitSuccess: () => {
-      setSuccessModalType('submit')
-      setShowSuccessModal(true)
-    },
-    onSaveSuccess: () => {
-      setSuccessModalType('save')
-      setShowSuccessModal(true)
-    }
-  })
+  } = useMultiRecordSubmit(pageKey, year)
 
   // 清除 Hook
   const {
@@ -279,8 +267,13 @@ export default function DieselPage() {
 
     const targetGroupId = isEditMode ? groupId : generateRecordId()
 
-    // 將 groupId 和 memoryFiles 套用到所有記錄
-    const recordsWithGroupId = records.map(r => ({
+    // ⭐ 過濾出有效記錄（有日期或數量的記錄）
+    const validRecords = records.filter(r =>
+      r.date.trim() !== '' || r.quantity > 0
+    )
+
+    // 將 groupId 和 memoryFiles 套用到有效記錄
+    const recordsWithGroupId = validRecords.map(r => ({
       ...r,
       groupId: targetGroupId,
       memoryFiles: [...memoryFiles]
@@ -620,6 +613,12 @@ export default function DieselPage() {
         onSave: handleSave,
         isSaving: submitLoading
       }}
+      notificationState={{
+        success: submitSuccess,
+        error: submitError,
+        clearSuccess: clearSubmitSuccess,
+        clearError: clearSubmitError
+      }}
     >
       {/* 使用數據區塊 */}
       <MobileEnergyUsageSection
@@ -683,13 +682,6 @@ export default function DieselPage() {
         />
       )}
 
-      {/* 提交成功彈窗 */}
-      <SuccessModal
-        show={showSuccessModal}
-        message={success || ''}
-        type={successModalType}
-        onClose={() => setShowSuccessModal(false)}
-      />
     </SharedPageLayout>
     </>
   );

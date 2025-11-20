@@ -132,7 +132,7 @@ export function useMultiRecordSubmit(
             record.id,
             record.memoryFiles,
             entry_id,
-            undefined,  // fileType
+            record.fileType,  // ⭐ 使用 record.fileType
             record.allRecordIds  // ⭐ 傳遞 allRecordIds
           )
         }

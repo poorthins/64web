@@ -2,29 +2,50 @@ import { useState, useEffect } from 'react';
 import { useSearchParams } from 'react-router-dom'
 import SharedPageLayout from '../../layouts/SharedPageLayout'
 import ConfirmClearModal from '../../components/ConfirmClearModal'
+import SuccessModal from '../../components/SuccessModal'
 import { EntryStatus } from '../../components/StatusSwitcher';
-import ReviewSection from '../../components/ReviewSection'
 import { ImageLightbox } from './shared/mobile/components/ImageLightbox'
 import Toast from '../../components/Toast';
-import { useEditPermissions } from '../../hooks/useEditPermissions';
 import { useFrontendStatus } from '../../hooks/useFrontendStatus';
 import { useApprovalStatus } from '../../hooks/useApprovalStatus';
 import { useReviewMode } from '../../hooks/useReviewMode';
 import { useEnergyData } from '../../hooks/useEnergyData'
-import { useMultiRecordSubmit } from '../../hooks/useMultiRecordSubmit'
 import { useEnergyClear } from '../../hooks/useEnergyClear'
-import { useSubmitGuard } from '../../hooks/useSubmitGuard'
-import { useRecordFileMapping } from '../../hooks/useRecordFileMapping'
-import { useReloadWithFileSync } from '../../hooks/useReloadWithFileSync'
 import { useRole } from '../../hooks/useRole'
 import { useAdminSave } from '../../hooks/useAdminSave'
-import { upsertEnergyEntry } from '../../api/entries';
-import { getFileUrl } from '../../api/files';
-// 新的 hooks 和組件
-import { useRefrigerantDeviceManager, RefrigerantDevice } from './hooks/useRefrigerantDeviceManager'
-import { useEnergyPageNotifications } from './hooks/useEnergyPageNotifications'
+import type { AdminSaveParams } from '../../hooks/useAdminSave'
+import { getFileUrl, adminDeleteEvidence } from '../../api/files';
+import { submitEnergyEntry } from '../../api/v2/entryAPI';
+import { uploadEvidenceFile } from '../../api/v2/fileAPI';
 import { RefrigerantInputFields } from './components/RefrigerantInputFields'
 import { RefrigerantListSection } from './components/RefrigerantListSection'
+import { generateRecordId } from '../../utils/idGenerator'
+import { calculateTotalWeightInKg } from '../../utils/unitConversions'
+import type { MemoryFile } from '../../components/FileDropzone'
+import type { EvidenceFile } from '../../api/files'
+
+export interface RefrigerantDevice {
+  id: string
+  brandModel: string
+  equipmentType: string
+  equipmentLocation: string
+  refrigerantType: string
+  fillAmount: number
+  unit: 'gram' | 'kg'
+  memoryFiles: MemoryFile[]
+  evidenceFiles?: EvidenceFile[]
+}
+
+const createEmptyDevice = (): RefrigerantDevice => ({
+  id: generateRecordId(),
+  brandModel: '',
+  equipmentType: '',
+  equipmentLocation: '',
+  refrigerantType: '',
+  fillAmount: 0,
+  unit: 'kg',
+  memoryFiles: []
+})
 
 export default function RefrigerantPage() {
   const [searchParams] = useSearchParams()
@@ -38,31 +59,75 @@ export default function RefrigerantPage() {
   const [year] = useState(new Date().getFullYear())
   const [initialStatus, setInitialStatus] = useState<EntryStatus>('submitted')
   const [currentEntryId, setCurrentEntryId] = useState<string | null>(null)
-  const { executeSubmit, submitting } = useSubmitGuard()
+  const [submitting, setSubmitting] = useState(false)
 
   // 圖片放大 lightbox
   const [lightboxSrc, setLightboxSrc] = useState<string | null>(null)
 
-  // 🔧 使用新的 hooks
-  const {
-    savedDevices,
-    setSavedDevices,
-    currentEditingDevice,
-    editingDeviceId,
-    updateCurrentDevice,
-    saveCurrentDevice,
-    editDevice,
-    deleteDevice
-  } = useRefrigerantDeviceManager()
+  // 設備管理狀態
+  const [savedDevices, setSavedDevices] = useState<RefrigerantDevice[]>([])
+  const [currentEditingDevice, setCurrentEditingDevice] = useState<RefrigerantDevice>(createEmptyDevice())
+  const [editingDeviceId, setEditingDeviceId] = useState<string | null>(null)
 
-  const {
-    error: localError,
-    success: localSuccess,
-    setError: setLocalError,
-    setSuccess: setLocalSuccess,
-    showClearConfirmModal,
-    setShowClearConfirmModal
-  } = useEnergyPageNotifications()
+  // 更新當前編輯設備的欄位
+  const updateCurrentDevice = (field: keyof RefrigerantDevice, value: any) => {
+    setCurrentEditingDevice(prev => ({ ...prev, [field]: value }))
+  }
+
+  // 保存當前設備
+  const saveCurrentDevice = () => {
+    const device = currentEditingDevice
+
+    // 驗證：至少要有一個欄位有值
+    const hasValidData =
+      device.brandModel.trim() !== '' ||
+      device.equipmentLocation.trim() !== '' ||
+      device.refrigerantType.trim() !== '' ||
+      device.fillAmount > 0
+
+    if (!hasValidData) {
+      throw new Error('請至少填寫一個欄位')
+    }
+
+    const isEditMode = editingDeviceId !== null
+
+    if (isEditMode) {
+      // 編輯模式：更新設備
+      setSavedDevices(prev => prev.map(d =>
+        d.id === editingDeviceId ? device : d
+      ))
+    } else {
+      // 新增模式：加入設備
+      setSavedDevices(prev => [...prev, device])
+    }
+
+    // 清空編輯區
+    setEditingDeviceId(null)
+    setCurrentEditingDevice(createEmptyDevice())
+
+    return isEditMode ? '設備已更新' : '設備已新增'
+  }
+
+  // 載入設備到編輯區
+  const editDevice = (id: string) => {
+    const device = savedDevices.find(d => d.id === id)
+    if (!device) return
+
+    setCurrentEditingDevice(device)
+    setEditingDeviceId(id)
+    return '設備已載入到編輯區'
+  }
+
+  // 刪除設備
+  const deleteDevice = (id: string) => {
+    setSavedDevices(prev => prev.filter(d => d.id !== id))
+    return '設備已刪除'
+  }
+
+  // 通知狀態
+  const [localError, setLocalError] = useState<string | null>(null)
+  const [localSuccess, setLocalSuccess] = useState<string | null>(null)
+  const [showClearConfirmModal, setShowClearConfirmModal] = useState(false)
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setLightboxSrc(null) }
@@ -70,25 +135,23 @@ export default function RefrigerantPage() {
     return () => window.removeEventListener('keydown', onKey);
   }, []);
 
-  // 前端狀態管理 Hook
   const frontendStatus = useFrontendStatus({
     initialStatus,
-    entryId: currentEntryId,
-    onStatusChange: () => {},
-    onError: () => {},  // 錯誤由母版統一處理
-    onSuccess: () => {}  // 成功由母版統一處理
+    entryId: currentEntryId
   })
 
   const { currentStatus, setCurrentStatus, handleDataChanged, handleSubmitSuccess, isInitialLoad } = frontendStatus
 
   // 角色檢查 Hook
   const { role } = useRole()
-  const isReadOnly = isReviewMode && role !== 'admin'
+
+  // 審核狀態 Hook（需要提前，因為 isReadOnly 依賴它）
+  const { reload: reloadApprovalStatus, ...approvalStatus } = useApprovalStatus(pageKey, year)
+
+  const isReadOnly = approvalStatus.isApproved || (isReviewMode && role !== 'admin')
 
   // 管理員審核儲存 Hook
   const { save: adminSave } = useAdminSave(pageKey, reviewEntryId)
-
-  const editPermissions = useEditPermissions(currentStatus, isReadOnly, role ?? undefined)
 
   // 資料載入 Hook
   const entryIdToLoad = isReviewMode && reviewEntryId ? reviewEntryId : undefined
@@ -99,32 +162,14 @@ export default function RefrigerantPage() {
     reload
   } = useEnergyData(pageKey, year, entryIdToLoad)
 
-  // Reload 同步 Hook
-  const { reloadAndSync } = useReloadWithFileSync(reload)
-
-  // 審核狀態 Hook
-  const { reload: reloadApprovalStatus, ...approvalStatus } = useApprovalStatus(pageKey, year)
-
-  // 提交 Hook（多記錄專用）
-  const {
-    submit,
-    save
-  } = useMultiRecordSubmit(pageKey, year)
-
-  // 清除 Hook
   const {
     clear,
     clearing: clearLoading
   } = useEnergyClear(currentEntryId, currentStatus)
 
-  // 檔案映射 Hook
-  const {
-    uploadRecordFiles,
-    getRecordFiles,
-    loadFileMapping,
-    getFileMappingForPayload,
-    removeRecordMapping
-  } = useRecordFileMapping(pageKey, currentEntryId)
+  // 提交狀態管理
+  const [submitError, setSubmitError] = useState<string | null>(null)
+  const [submitSuccess, setSubmitSuccess] = useState<string | null>(null)
 
   // 縮圖管理（用於圖片預覽）
   const [thumbnails, setThumbnails] = useState<Record<string, string>>({})
@@ -150,7 +195,6 @@ export default function RefrigerantPage() {
         }))
 
         setSavedDevices(updated)
-        loadFileMapping(loadedEntry.payload)
       }
 
       if (!isInitialLoad.current) {
@@ -173,7 +217,7 @@ export default function RefrigerantPage() {
       if (refrigerantFiles.length > 0) {
         setSavedDevices(prev => {
           return prev.map((device) => {
-            const recordFiles = getRecordFiles(device.id, refrigerantFiles)
+            const recordFiles = refrigerantFiles.filter(f => f.record_id === device.id)
             return {
               ...device,
               evidenceFiles: recordFiles
@@ -182,7 +226,7 @@ export default function RefrigerantPage() {
         })
       }
     }
-  }, [loadedFiles, pageKey, dataLoading, getRecordFiles])
+  }, [loadedFiles, pageKey, dataLoading, savedDevices.length])
 
   // ⭐ 生成縮圖（只為圖片檔案）
   useEffect(() => {
@@ -195,8 +239,8 @@ export default function RefrigerantPage() {
             ...prev,
             [evidenceFile.id]: url
           }))
-        } catch (error) {
-          console.warn('Failed to generate thumbnail for', evidenceFile.file_name, error)
+        } catch {
+          // Silently ignore thumbnail errors
         }
       }
     })
@@ -223,180 +267,173 @@ export default function RefrigerantPage() {
     })
   }
 
-  // 包裝保存函數以處理通知
-  const handleSaveDevice = () => {
+  // 高階函數：統一處理通知的包裝器
+  const withNotification = <T extends any[]>(
+    fn: (...args: T) => string | undefined
+  ) => (...args: T) => {
     try {
-      const message = saveCurrentDevice()
-      setLocalSuccess(message)
+      const message = fn(...args)
+      if (message) setLocalSuccess(message)
     } catch (error) {
-      setLocalError(error instanceof Error ? error.message : '保存失敗')
+      setLocalError(error instanceof Error ? error.message : '操作失敗')
     }
   }
 
-  // 包裝編輯函數以處理通知
-  const handleEditDevice = (id: string) => {
-    const message = editDevice(id)
-    if (message) setLocalSuccess(message)
+  const handleSaveDevice = withNotification(saveCurrentDevice)
+  const handleEditDevice = withNotification(editDevice)
+  const handleDeleteDevice = withNotification(deleteDevice)
+
+  // 提取乾淨的設備資料（去除 memoryFiles 和 evidenceFiles）
+  const prepareCleanedData = (devices: RefrigerantDevice[]) => {
+    return devices.map(r => ({
+      id: r.id,
+      brandModel: r.brandModel,
+      equipmentType: r.equipmentType,
+      equipmentLocation: r.equipmentLocation,
+      refrigerantType: r.refrigerantType,
+      fillAmount: r.fillAmount,
+      unit: r.unit
+    }))
   }
 
-  // 包裝刪除函數以處理通知和確認
-  const handleDeleteDevice = (id: string) => {
-    if (!window.confirm('確定要刪除此設備嗎？')) return
-    const message = deleteDevice(id)
-    removeRecordMapping(id)
-    setLocalSuccess(message)
-  }
-
-  const handleSubmit = async () => {
+  // 統一提交函數（提交和暫存）
+  const submitData = async (isDraft: boolean) => {
     if (savedDevices.length === 0) {
       throw new Error('請至少新增一個設備')
     }
 
-    await executeSubmit(async () => {
-      const totalFillAmount = savedDevices.reduce((sum, item) => {
-        const amountInKg = item.unit === 'gram' ? item.fillAmount / 1000 : item.fillAmount
-        return sum + amountInKg
-      }, 0)
+    setSubmitting(true)
+    try {
+      const totalFillAmount = calculateTotalWeightInKg(savedDevices)
+      const cleanedData = prepareCleanedData(savedDevices)
 
-      const cleanedData = savedDevices.map(r => ({
-        id: r.id,
-        brandModel: r.brandModel,
-        equipmentType: r.equipmentType,
-        equipmentLocation: r.equipmentLocation,
-        refrigerantType: r.refrigerantType,
-        fillAmount: r.fillAmount,
-        unit: r.unit
-      }))
-
-      await submit({
-        entryInput: {
-          page_key: pageKey,
-          period_year: year,
-          unit: 'kg',
-          monthly: { '1': totalFillAmount },
-          notes: `冷媒設備共 ${savedDevices.length} 台`,
-          extraPayload: {
-            refrigerantData: cleanedData
-          }
-        },
-        recordData: savedDevices,
-        uploadRecordFiles,
-        onSuccess: async (entry_id) => {
-          await upsertEnergyEntry({
-            page_key: pageKey,
-            period_year: year,
-            unit: 'kg',
-            monthly: { '1': totalFillAmount },
-            notes: `冷媒設備共 ${savedDevices.length} 台`,
-            extraPayload: {
-              refrigerantData: cleanedData,
-              fileMapping: getFileMappingForPayload()
-            }
-          }, true)
-
-          setCurrentEntryId(entry_id)
-          await reload()
+      // 1. 提交 entry
+      const response = await submitEnergyEntry({
+        page_key: pageKey,
+        period_year: year,
+        unit: 'kg',
+        monthly: { '1': totalFillAmount },  // Type 1 不需要月份資料，給預設值
+        status: isDraft ? 'saved' : 'submitted',
+        notes: `冷媒設備共 ${savedDevices.length} 台`,
+        payload: {
+          refrigerantData: cleanedData
         }
       })
 
-      await handleSubmitSuccess()
+      // 2. 上傳檔案
+      for (const device of savedDevices) {
+        if (device.memoryFiles?.length > 0) {
+          for (const file of device.memoryFiles) {
+            await uploadEvidenceFile(file.file, {
+              page_key: pageKey,
+              period_year: year,
+              file_type: 'other',
+              entry_id: response.entry_id,
+              record_id: device.id,
+              standard: '64'
+            })
+          }
+        }
+      }
+
+      setCurrentEntryId(response.entry_id)
+      setSubmitSuccess(isDraft ? '暫存成功' : '提交成功')
+
+      await reload()
+
+      // 只有「提交」才需要更新狀態為 submitted
+      if (!isDraft) {
+        await handleSubmitSuccess()
+      }
+
       reloadApprovalStatus()
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  const handleSubmit = async () => {
+    try {
+      await submitData(false)
+    } catch (error) {
+      setSubmitError(error instanceof Error ? error.message : '提交失敗')
+    }
+  }
+
+  // 收集要上傳和刪除的檔案
+  const collectFilesForAdminSave = () => {
+    const filesToUpload: AdminSaveParams['files'] = []
+    const filesToDelete: string[] = []
+
+    savedDevices.forEach((record, index) => {
+      if (record.memoryFiles && record.memoryFiles.length > 0) {
+        record.memoryFiles.forEach(mf => {
+          filesToUpload.push({
+            file: mf.file,
+            metadata: {
+              recordIndex: index,
+              fileType: 'other' as const,
+              recordId: record.id
+            }
+          })
+        })
+
+        const oldFiles = loadedFiles.filter(f =>
+          f.record_id === record.id && f.file_type === 'other'
+        )
+        oldFiles.forEach(f => filesToDelete.push(f.id))
+      }
     })
+
+    return { filesToUpload, filesToDelete }
+  }
+
+  // 刪除舊檔案
+  const deleteOldFiles = async (fileIds: string[]) => {
+    if (fileIds.length > 0) {
+      for (const fileId of fileIds) {
+        try {
+          await adminDeleteEvidence(fileId)
+        } catch {
+          // Continue on error
+        }
+      }
+    }
   }
 
   const handleSave = async () => {
-    await executeSubmit(async () => {
-      const totalFillAmount = savedDevices.reduce((sum, item) => {
-        const amountInKg = item.unit === 'gram' ? item.fillAmount / 1000 : item.fillAmount
-        return sum + amountInKg
-      }, 0)
+    // 管理員審核模式
+    if (isReviewMode && reviewEntryId) {
+      setSubmitting(true)
+      try {
+        const totalFillAmount = calculateTotalWeightInKg(savedDevices)
+        const cleanedData = prepareCleanedData(savedDevices)
+        const { filesToUpload, filesToDelete } = collectFilesForAdminSave()
 
-      const cleanedData = savedDevices.map(r => ({
-        id: r.id,
-        brandModel: r.brandModel,
-        equipmentType: r.equipmentType,
-        equipmentLocation: r.equipmentLocation,
-        refrigerantType: r.refrigerantType,
-        fillAmount: r.fillAmount,
-        unit: r.unit
-      }))
-
-      // 管理員審核模式
-      if (isReviewMode && reviewEntryId) {
-        const filesToUpload: Array<{
-          file: File
-          metadata: {
-            recordIndex: number
-            fileType: 'usage_evidence' | 'msds' | 'other'
-          }
-        }> = []
-
-        savedDevices.forEach((record, index) => {
-          if (record.memoryFiles && record.memoryFiles.length > 0) {
-            record.memoryFiles.forEach(mf => {
-              filesToUpload.push({
-                file: mf.file,
-                metadata: {
-                  recordIndex: index,
-                  fileType: 'other' as const
-                }
-              })
-            })
-          }
-        })
+        await deleteOldFiles(filesToDelete)
 
         await adminSave({
           updateData: {
             unit: 'kg',
             amount: totalFillAmount,
             payload: {
-              refrigerantData: cleanedData,
-              fileMapping: getFileMappingForPayload()
+              refrigerantData: cleanedData
             }
           },
           files: filesToUpload
         })
 
-        await reloadAndSync()
+        await reload()
         reloadApprovalStatus()
-        setSavedDevices(prev => prev.map(r => ({ ...r, memoryFiles: [] })))
-        return
+        setSubmitSuccess('管理員儲存成功')
+      } finally {
+        setSubmitting(false)
       }
+      return
+    }
 
-      // 一般暫存
-      await save({
-        entryInput: {
-          page_key: pageKey,
-          period_year: year,
-          unit: 'kg',
-          monthly: { '1': totalFillAmount },
-          notes: `冷媒設備共 ${savedDevices.length} 台`,
-          extraPayload: {
-            refrigerantData: cleanedData
-          }
-        },
-        recordData: savedDevices,
-        uploadRecordFiles,
-        onSuccess: async (entry_id) => {
-          await upsertEnergyEntry({
-            page_key: pageKey,
-            period_year: year,
-            unit: 'kg',
-            monthly: { '1': totalFillAmount },
-            notes: `冷媒設備共 ${savedDevices.length} 台`,
-            extraPayload: {
-              refrigerantData: cleanedData,
-              fileMapping: getFileMappingForPayload()
-            }
-          }, true)
-
-          setCurrentEntryId(entry_id)
-          await reload()
-        }
-      })
-
-      reloadApprovalStatus()
-    })
+    // 一般暫存
+    await submitData(true)
   }
 
   const handleClear = () => {
@@ -443,8 +480,27 @@ export default function RefrigerantPage() {
         onSave: handleSave,
         onClear: handleClear,
         show: !isReadOnly && !approvalStatus.isApproved && !isReviewMode,
-        submitSuccessMessage: '冷媒設備資料已提交！',
-        saveSuccessMessage: () => isReviewMode ? '儲存成功！資料已更新' : '暫存成功！資料已儲存'
+        customNotifications: true  // 由頁面自己處理通知，不要母版自動顯示
+      }}
+      reviewSection={{
+        isReviewMode,
+        reviewEntryId,
+        reviewUserId,
+        currentEntryId,
+        pageKey,
+        year,
+        category: "冷媒",
+        amount: calculateTotalWeightInKg(savedDevices),
+        unit: "kg",
+        role,
+        onSave: handleSave,
+        isSaving: submitting
+      }}
+      notificationState={{
+        success: submitSuccess,
+        error: submitError,
+        clearSuccess: () => setSubmitSuccess(null),
+        clearError: () => setSubmitError(null)
       }}
     >
       {/* 輸入欄位組件（含保存按鈕） */}
@@ -454,6 +510,8 @@ export default function RefrigerantPage() {
         onSave={handleSaveDevice}
         editingDeviceId={editingDeviceId}
         isReadOnly={isReadOnly}
+        thumbnails={thumbnails}
+        onImageClick={setLightboxSrc}
       />
 
       {/* 設備列表組件 */}
@@ -468,28 +526,6 @@ export default function RefrigerantPage() {
         isReadOnly={isReadOnly}
       />
 
-      {/* 審核區塊 */}
-      {isReviewMode && (
-        <div className="max-w-4xl mx-auto mt-8">
-          <ReviewSection
-            entryId={reviewEntryId || currentEntryId || `refrigerant_${year}`}
-            userId={reviewUserId || "current_user"}
-            category="冷媒"
-            userName="填報用戶"
-            amount={savedDevices.reduce((sum, item) => {
-              const amountInKg = item.unit === 'gram' ? item.fillAmount / 1000 : item.fillAmount
-              return sum + amountInKg
-            }, 0)}
-            unit="kg"
-            role={role}
-            onSave={handleSave}
-            isSaving={submitting}
-            onApprove={() => {}}
-            onReject={() => {}}
-          />
-        </div>
-      )}
-
       {/* 清除確認彈窗 */}
       <ConfirmClearModal
         show={showClearConfirmModal}
@@ -503,6 +539,13 @@ export default function RefrigerantPage() {
         src={lightboxSrc}
         zIndex={9999}
         onClose={() => setLightboxSrc(null)}
+      />
+
+      {/* 成功提示彈窗（管理員儲存、一般提交） */}
+      <SuccessModal
+        show={!!submitSuccess}
+        onClose={() => setSubmitSuccess(null)}
+        type="save"
       />
 
       {/* 區域性即時反饋 Toast（新增/編輯/刪除設備） */}

@@ -1,79 +1,45 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect } from 'react';
 import { EntryStatus } from '../../components/StatusSwitcher';
 import ConfirmClearModal from '../../components/ConfirmClearModal'
-import SuccessModal from '../../components/SuccessModal'
 import SharedPageLayout from '../../layouts/SharedPageLayout'
-import { useEditPermissions } from '../../hooks/useEditPermissions';
 import { useFrontendStatus } from '../../hooks/useFrontendStatus';
 import { useApprovalStatus } from '../../hooks/useApprovalStatus';
 import { useReviewMode } from '../../hooks/useReviewMode'
 import { useEnergyData } from '../../hooks/useEnergyData'
-import { useMultiRecordSubmit } from '../../hooks/useMultiRecordSubmit'
 import { useEnergyClear } from '../../hooks/useEnergyClear'
-import { useSubmitGuard } from '../../hooks/useSubmitGuard'
-import { useGhostFileCleaner } from '../../hooks/useGhostFileCleaner'
-import { useRecordFileMapping } from '../../hooks/useRecordFileMapping'
-import { useSubmissions } from '../admin/hooks/useSubmissions'
 import { useRole } from '../../hooks/useRole'
 import { useAdminSave } from '../../hooks/useAdminSave'
-import { EvidenceFile, getFileUrl } from '../../api/files';
-import Toast from '../../components/Toast';
+import type { AdminSaveParams } from '../../hooks/useAdminSave'
+import { EvidenceFile, getFileUrl, adminDeleteEvidence } from '../../api/files';
+import { submitEnergyEntry } from '../../api/v2/entryAPI';
+import { uploadEvidenceFile, deleteEvidenceFile } from '../../api/v2/fileAPI';
 import { generateRecordId } from '../../utils/idGenerator';
-import { GeneratorTestRecord, GeneratorTestEditingGroup } from './shared/mobile/mobileEnergyTypes'
 import { LAYOUT_CONSTANTS } from './shared/mobile/mobileEnergyConstants'
 import { GENERATOR_TEST_CONFIG } from './shared/mobileEnergyConfig'
-import { GeneratorTestUsageSection } from './shared/mobile/components/GeneratorTestUsageSection'
-import { GeneratorTestGroupListSection } from './shared/mobile/components/GeneratorTestGroupListSection'
 import { ImageLightbox } from './shared/mobile/components/ImageLightbox'
-import type { MemoryFile } from '../../services/documentHandler';
+import { GeneratorTestInputFields } from './components/GeneratorTestInputFields'
+import { GeneratorTestListSection } from './components/GeneratorTestListSection'
+import type { MemoryFile } from '../../components/FileDropzone';
 
-/**
- * 準備發電機測試資料的提交格式
- */
-const prepareGeneratorTestSubmissionData = (testData: GeneratorTestRecord[]) => {
-  const totalQuantity = testData.length  // 發電機測試以記錄數量計
-
-  // 清理 payload：只送基本資料，移除 File 物件
-  const cleanedTestData = testData.map((r: GeneratorTestRecord) => ({
-    id: r.id,
-    location: r.location,
-    generatorPower: r.generatorPower,
-    testFrequency: r.testFrequency,
-    testDuration: r.testDuration,
-    groupId: r.groupId
-  }))
-
-  // 建立群組 → recordIds 映射表
-  const groupRecordIds = new Map<string, string[]>()
-  testData.forEach(record => {
-    if (record.groupId) {
-      if (!groupRecordIds.has(record.groupId)) {
-        groupRecordIds.set(record.groupId, [])
-      }
-      groupRecordIds.get(record.groupId)!.push(record.id)
-    }
-  })
-
-  // 去重：每個群組只保留第一個 record 的 memoryFiles
-  const seenGroupIds = new Set<string>()
-  const deduplicatedRecordData = testData.map(record => {
-    const allRecordIds = record.groupId ? groupRecordIds.get(record.groupId) : [record.id]
-
-    if (record.groupId && seenGroupIds.has(record.groupId)) {
-      return { ...record, memoryFiles: [], allRecordIds }
-    }
-    if (record.groupId) {
-      seenGroupIds.add(record.groupId)
-    }
-    return { ...record, allRecordIds }
-  })
-
-  return {
-    totalQuantity,
-    cleanedEnergyData: cleanedTestData,
-    deduplicatedRecordData
-  }
+// 發電機測試資料結構
+export interface GeneratorTest {
+  id: string
+  location: string
+  generatorPower: number
+  testFrequency: number
+  testDuration: number
+  memoryFiles: MemoryFile[]
+  evidenceFiles?: EvidenceFile[]
 }
+
+const createEmptyTest = (): GeneratorTest => ({
+  id: generateRecordId(),
+  location: '',
+  generatorPower: 0,
+  testFrequency: 0,
+  testDuration: 0,
+  memoryFiles: []
+})
 
 export default function GeneratorTestPage() {
   // 審核模式檢測
@@ -83,24 +49,25 @@ export default function GeneratorTestPage() {
   const [year] = useState(new Date().getFullYear())
   const [initialStatus, setInitialStatus] = useState<EntryStatus>('submitted')
   const [currentEntryId, setCurrentEntryId] = useState<string | null>(null)
-  const { executeSubmit, submitting } = useSubmitGuard()
-  const [showSuccessModal, setShowSuccessModal] = useState(false)
-  const [successModalType, setSuccessModalType] = useState<'save' | 'submit'>('submit')
+  const [submitting, setSubmitting] = useState(false)
   const [showClearConfirmModal, setShowClearConfirmModal] = useState(false)
 
   // 圖片放大 lightbox
   const [lightboxSrc, setLightboxSrc] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [success, setSuccess] = useState<string | null>(null);
-  const [thumbnails, setThumbnails] = useState<{ [key: string]: string }>({});  // ⭐ 檔案縮圖 URL
 
-  // 前端狀態管理 Hook
+  // 測試管理狀態
+  const [savedTests, setSavedTests] = useState<GeneratorTest[]>([])
+  const [currentEditingTest, setCurrentEditingTest] = useState<GeneratorTest>(createEmptyTest())
+  const [editingTestId, setEditingTestId] = useState<string | null>(null)
+
+  // 更新當前編輯測試的欄位
+  const updateCurrentTest = (field: keyof GeneratorTest, value: any) => {
+    setCurrentEditingTest(prev => ({ ...prev, [field]: value }))
+  }
+
   const frontendStatus = useFrontendStatus({
     initialStatus,
-    entryId: currentEntryId,
-    onStatusChange: () => {},
-    onError: (error) => setError(error),
-    onSuccess: (message) => setSuccess(message)
+    entryId: currentEntryId
   })
 
   const { currentStatus, setCurrentStatus, handleSubmitSuccess, handleDataChanged, isInitialLoad } = frontendStatus
@@ -108,10 +75,14 @@ export default function GeneratorTestPage() {
   // 角色檢查
   const { role } = useRole()
 
-  // 審核模式下只有管理員可編輯
-  const isReadOnly = isReviewMode && role !== 'admin'
+  // 審核狀態 Hook
+  const { reload: reloadApprovalStatus, ...approvalStatus } = useApprovalStatus(pageKey, year)
 
-  const editPermissions = useEditPermissions(currentStatus, isReadOnly, role ?? undefined)
+  // 審核通過後鎖定（Bug #6 預防）
+  const isReadOnly = approvalStatus.isApproved || (isReviewMode && role !== 'admin')
+
+  // 管理員儲存 Hook
+  const { save: adminSave } = useAdminSave(pageKey, reviewEntryId)
 
   // 資料載入 Hook
   const entryIdToLoad = isReviewMode && reviewEntryId ? reviewEntryId : undefined
@@ -119,395 +90,336 @@ export default function GeneratorTestPage() {
     entry: loadedEntry,
     files: loadedFiles,
     loading: dataLoading,
-    error: dataError,
     reload
   } = useEnergyData(pageKey, year, entryIdToLoad)
-
-  // 審核狀態 Hook
-  const { reload: reloadApprovalStatus, ...approvalStatus } = useApprovalStatus(pageKey, year)
-
-  // 審核 API hook
-  const { reviewSubmission } = useSubmissions()
-
-  // 管理員儲存 Hook
-  const { save: adminSave, saving: adminSaving } = useAdminSave(pageKey, reviewEntryId)
-
-  // 提交 Hook（多記錄專用）
-  const {
-    submit,
-    save,
-    submitting: submitLoading,
-    error: submitError,
-    success: submitSuccess,
-    clearError: clearSubmitError,
-    clearSuccess: clearSubmitSuccess
-  } = useMultiRecordSubmit(pageKey, year)
 
   // 清除 Hook
   const {
     clear,
-    clearing: clearLoading,
-    error: clearError,
-    clearError: clearClearError
+    clearing: clearLoading
   } = useEnergyClear(currentEntryId, currentStatus)
 
-  // 幽靈檔案清理 Hook
-  const { cleanFiles } = useGhostFileCleaner()
+  // 通知狀態
+  const [submitError, setSubmitError] = useState<string | null>(null)
+  const [submitSuccess, setSubmitSuccess] = useState<string | null>(null)
 
-  // 檔案映射 Hook
-  const {
-    uploadRecordFiles,
-    getRecordFiles,
-    loadFileMapping,
-    getFileMappingForPayload,
-    removeRecordMapping
-  } = useRecordFileMapping(pageKey, currentEntryId)
+  // 縮圖管理
+  const [thumbnails, setThumbnails] = useState<Record<string, string>>({})
 
-  // 建立發電機測試的空記錄
-  const createEmptyGeneratorTestRecords = (): GeneratorTestRecord[] => [{
-    id: generateRecordId(),
-    location: '',
-    generatorPower: 0,
-    testFrequency: 0,
-    testDuration: 0,
-    evidenceFiles: [],
-    memoryFiles: []
-  }]
-
-  // ⭐ 新架構：分離「當前編輯」和「已保存群組」
-  // 當前正在編輯的群組（對應 Figma 上方「發電機測試資料」區）
-  const [currentEditingGroup, setCurrentEditingGroup] = useState<GeneratorTestEditingGroup>({
-    groupId: null,
-    records: createEmptyGeneratorTestRecords(),
-    memoryFiles: []
-  })
-
-  // 已保存的群組（對應 Figma 下方「資料列表」區）
-  const [savedGroups, setSavedGroups] = useState<GeneratorTestRecord[]>([])
-
-  // ⭐ 保留舊的 generatorTestData（提交時用）
-  const generatorTestData = useMemo(() => {
-    return savedGroups
-  }, [savedGroups])
-
-  // 檢查是否有填寫任何資料
-  // ⭐ TODO: 重構載入邏輯以配合新架構
-  // 第一步：載入記錄資料
+  // ===== 資料載入 =====
   useEffect(() => {
     if (loadedEntry && !dataLoading) {
       const entryStatus = loadedEntry.status as EntryStatus
       setInitialStatus(entryStatus)
-      setCurrentEntryId(loadedEntry.id)
       setCurrentStatus(entryStatus)
+      setCurrentEntryId(loadedEntry.id)
 
       // 從 payload 取得發電機測試資料
-      const dataFieldName = GENERATOR_TEST_CONFIG.dataFieldName
-      if (loadedEntry.payload?.[dataFieldName]) {
-        const dataArray = Array.isArray(loadedEntry.payload[dataFieldName])
-          ? loadedEntry.payload[dataFieldName]
-          : []
+      if (loadedEntry.payload?.generatorTestData) {
+        const updated = loadedEntry.payload.generatorTestData.map((item: any) => ({
+          ...item,
+          id: String(item.id),
+          evidenceFiles: [],
+          memoryFiles: []
+        }))
 
-        if (dataArray.length > 0) {
-          const updated = dataArray.map((item: any) => ({
-            ...item,
-            id: String(item.id || generateRecordId()),
-            evidenceFiles: [],
-            memoryFiles: [],
-          }))
-
-          // ⭐ 載入到 savedGroups（新架構）
-          setSavedGroups(updated)
-
-          // 載入檔案映射表
-          const payload = loadedEntry.payload || loadedEntry.extraPayload
-          if (payload) {
-            loadFileMapping(payload)
-          }
-        }
+        setSavedTests(updated)
       }
+
+      if (!isInitialLoad.current) {
+        handleDataChanged()
+      }
+      isInitialLoad.current = false
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loadedEntry, dataLoading])
 
-  // 第二步：檔案載入後分配到記錄
+  // 檔案載入後分配到測試（reload 後清空 memoryFiles，用資料庫檔案）
   useEffect(() => {
     if (dataLoading) return
 
-    if (loadedFiles.length > 0 && savedGroups.length > 0) {
-      const dieselFiles = loadedFiles.filter(f =>
+    if (loadedFiles.length > 0 && savedTests.length > 0) {
+      const testFiles = loadedFiles.filter(f =>
         f.file_type === 'other' && f.page_key === pageKey
       )
 
-      if (dieselFiles.length > 0) {
-        const cleanAndAssignFiles = async () => {
-          const validDieselFiles = await cleanFiles(dieselFiles)
+      if (testFiles.length > 0) {
+        setSavedTests(prev => prev.map(test => {
+          const recordFiles = testFiles.filter(f => f.record_id === test.id)
 
-          setSavedGroups(prev => {
-            return prev.map((item) => {
-              const filesForThisRecord = getRecordFiles(item.id, validDieselFiles)
-              return {
-                ...item,
-                evidenceFiles: filesForThisRecord,
-                memoryFiles: []
+          return {
+            ...test,
+            // reload 後清空 memoryFiles（跟 SF6Page 一樣）
+            memoryFiles: [],
+            // 直接用資料庫檔案
+            evidenceFiles: recordFiles
+          }
+        }))
+      }
+    }
+  }, [loadedFiles, pageKey, dataLoading, savedTests.length])
+
+  // 生成縮圖（只為圖片檔案）
+  useEffect(() => {
+    savedTests.forEach(async (test) => {
+      const evidenceFile = test.evidenceFiles?.[0]
+      if (evidenceFile && evidenceFile.mime_type.startsWith('image/') && !thumbnails[evidenceFile.id]) {
+        try {
+          const url = await getFileUrl(evidenceFile.file_path)
+          setThumbnails(prev => ({
+            ...prev,
+            [evidenceFile.id]: url
+          }))
+        } catch (error) {
+          console.warn('Failed to generate thumbnail', error)
+        }
+      }
+    })
+  }, [savedTests])
+
+  // ===== CRUD 函數 =====
+
+  // 保存當前測試
+  const saveCurrentTest = () => {
+    const test = currentEditingTest
+
+    // 驗證：至少要有一個欄位有值
+    const hasValidData =
+      test.location.trim() !== '' ||
+      test.generatorPower > 0 ||
+      test.testFrequency > 0 ||
+      test.testDuration > 0
+
+    if (!hasValidData) {
+      throw new Error('請至少填寫一個欄位')
+    }
+
+    const isEditMode = editingTestId !== null
+
+    if (isEditMode) {
+      // 編輯模式：更新測試
+      setSavedTests(prev => prev.map(t =>
+        t.id === editingTestId ? test : t
+      ))
+    } else {
+      // 新增模式：加入測試
+      setSavedTests(prev => [...prev, test])
+    }
+
+    // 清空編輯區
+    setEditingTestId(null)
+    setCurrentEditingTest(createEmptyTest())
+
+    return isEditMode ? '測試已更新' : '測試已新增'
+  }
+
+  // 載入測試到編輯區
+  const editTest = (id: string) => {
+    const test = savedTests.find(t => t.id === id)
+    if (!test) return
+
+    setCurrentEditingTest(test)
+    setEditingTestId(id)
+    return '測試已載入到編輯區'
+  }
+
+  // 刪除測試
+  const deleteTest = (id: string) => {
+    setSavedTests(prev => prev.filter(t => t.id !== id))
+    return '測試已刪除'
+  }
+
+  // ===== 統一提交函數 =====
+
+  // 準備乾淨的測試資料（移除前端專用欄位）
+  const prepareCleanedTestData = () => {
+    return savedTests.map(t => ({
+      id: t.id,
+      location: t.location,
+      generatorPower: t.generatorPower,
+      testFrequency: t.testFrequency,
+      testDuration: t.testDuration
+    }))
+  }
+
+  // 處理測試檔案上傳（刪除舊檔 + 上傳新檔）
+  const handleTestFilesUpload = async (entryId: string) => {
+    for (const test of savedTests) {
+      const newFiles = test.memoryFiles.filter(f => f.file && f.file.size > 0)
+
+      if (newFiles.length > 0) {
+        // 先刪除舊佐證
+        const oldFiles = loadedFiles.filter(f =>
+          f.record_id === test.id && f.file_type === 'other' && f.page_key === pageKey
+        )
+
+        if (oldFiles.length > 0) {
+          for (const oldFile of oldFiles) {
+            try {
+              await deleteEvidenceFile(oldFile.id)
+            } catch (error) {
+              console.warn('Failed to delete old file:', error)
+              // 繼續執行，不阻斷上傳新檔案
+            }
+          }
+        }
+
+        // 上傳新佐證
+        const file = newFiles[0].file
+        await uploadEvidenceFile(file, {
+          page_key: pageKey,
+          period_year: year,
+          file_type: 'other',
+          entry_id: entryId,
+          record_id: test.id
+        })
+      }
+    }
+  }
+
+  const submitData = async (isDraft: boolean) => {
+    try {
+      setSubmitting(true)
+      setSubmitError(null)
+      setSubmitSuccess(null)
+
+      // 1. 準備資料
+      const payload = {
+        generatorTestData: prepareCleanedTestData()
+      }
+
+      // 2. 提交 entry
+      const { entry_id } = await submitEnergyEntry({
+        page_key: pageKey,
+        period_year: year,
+        status: isDraft ? 'saved' : 'submitted',
+        unit: '次',
+        monthly: { '1': savedTests.length },
+        payload
+      })
+
+      // 3. 上傳檔案
+      await handleTestFilesUpload(entry_id)
+
+      // 4. 完成
+      setCurrentEntryId(entry_id)
+      await reload()
+
+      // 清空 memoryFiles（讓 useEffect 載入資料庫的新檔案）
+      setSavedTests(prev => prev.map(test => ({
+        ...test,
+        memoryFiles: []
+      })))
+
+      // Bug #8 預防：只在提交時觸發
+      if (!isDraft) {
+        await handleSubmitSuccess()
+      }
+
+      await reloadApprovalStatus()
+
+      setSubmitSuccess(isDraft ? '暫存成功' : '提交成功')
+
+    } catch (error) {
+      setSubmitError(error instanceof Error ? error.message : '操作失敗')
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  const handleSubmit = () => submitData(false)
+
+  // 收集管理員儲存所需的檔案（上傳和刪除清單）
+  const collectFilesForAdminSave = () => {
+    const filesToUpload: AdminSaveParams['files'] = []
+    const filesToDelete: string[] = []
+
+    savedTests.forEach((test, index) => {
+      // 只上傳新檔案（file.size > 0 的才是真的新檔案）
+      if (test.memoryFiles && test.memoryFiles.length > 0) {
+        const newFiles = test.memoryFiles.filter((mf: MemoryFile) => mf.file && mf.file.size > 0)
+
+        if (newFiles.length > 0) {
+          newFiles.forEach((mf: MemoryFile) => {
+            filesToUpload.push({
+              file: mf.file,
+              metadata: {
+                recordIndex: index,
+                fileType: 'other',
+                recordId: test.id
               }
             })
           })
+
+          // 刪除舊的佐證檔案
+          const oldFiles = loadedFiles.filter(f =>
+            f.record_id === test.id && f.file_type === 'other' && f.page_key === pageKey
+          )
+          oldFiles.forEach(f => filesToDelete.push(f.id))
         }
-
-        cleanAndAssignFiles()
       }
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [loadedFiles, pageKey, dataLoading])
-
-  // ⭐ 新架構的 Helper Functions
-
-
-  // 在當前編輯群組新增記錄
-  const addRecordToCurrentGroup = () => {
-    setCurrentEditingGroup(prev => ({
-      ...prev,
-      records: [...prev.records, {
-        id: generateRecordId(),
-        location: '',
-        generatorPower: 0,
-        testFrequency: 0,
-        testDuration: 0,
-        evidenceFiles: [],
-        memoryFiles: [],
-        groupId: prev.groupId || undefined
-      }]
-    }))
-  }
-
-  // 更新當前編輯群組的記錄
-  const updateCurrentGroupRecord = (recordId: string, field: 'location' | 'generatorPower' | 'testFrequency' | 'testDuration', value: any) => {
-    setCurrentEditingGroup(prev => ({
-      ...prev,
-      records: prev.records.map(r =>
-        r.id === recordId ? { ...r, [field]: value } : r
-      )
-    }))
-  }
-
-  // 刪除當前編輯群組的記錄
-  const removeRecordFromCurrentGroup = (recordId: string) => {
-    setCurrentEditingGroup(prev => ({
-      ...prev,
-      records: prev.records.filter(r => r.id !== recordId)
-    }))
-  }
-
-  // 保存群組：新增或更新
-  const saveCurrentGroup = () => {
-    const { groupId, records, memoryFiles } = currentEditingGroup
-
-    // 判斷是編輯模式還是新增模式
-    const isEditMode = groupId !== null
-
-    // ✅ 只在新增模式驗證（編輯模式的資料已經驗證過了）
-    if (!isEditMode) {
-      // 驗證：至少要有一筆記錄
-      if (records.length === 0) {
-        setError('請至少新增一筆記錄')
-        return
-      }
-
-      // 驗證：至少有一筆「有效」記錄（所有欄位都填寫）
-      const hasValidData = records.some(r =>
-        r.location.trim() !== '' && r.generatorPower > 0 && r.testFrequency > 0 && r.testDuration > 0
-      )
-      if (!hasValidData) {
-        setError('請至少填寫一筆完整的測試數據（位置、功率、頻率、時間）')
-        return
-      }
-    }
-
-    const targetGroupId = isEditMode ? groupId : generateRecordId()
-
-    // 將 groupId 和 memoryFiles 套用到所有記錄
-    const recordsWithGroupId = records.map(r => ({
-      ...r,
-      groupId: targetGroupId,
-      memoryFiles: [...memoryFiles]
-    }))
-
-    if (isEditMode) {
-      // 編輯模式：更新該群組（移除舊的，加入新的）
-      setSavedGroups(prev => [
-        ...recordsWithGroupId,
-        ...prev.filter(r => r.groupId !== groupId)
-      ])
-      setSuccess('群組已更新')
-    } else {
-      // 新增模式：加入已保存列表
-      setSavedGroups(prev => [...recordsWithGroupId, ...prev])
-      setSuccess('群組已新增')
-    }
-
-    // 清空編輯區（準備下一個群組）
-    setCurrentEditingGroup({
-      groupId: null,
-      records: createEmptyGeneratorTestRecords(),
-      memoryFiles: []
-    })
-  }
-
-  // 載入群組到編輯區（點「編輯群組」）
-  const loadGroupToEditor = (groupId: string) => {
-    // 檢查當前編輯區是否有未保存的資料
-    const currentHasData = currentEditingGroup.records.some(r =>
-      r.location.trim() !== '' || r.generatorPower > 0 || r.testFrequency > 0 || r.testDuration > 0
-    ) || currentEditingGroup.memoryFiles.length > 0
-
-    // 如果有未保存的資料，提示用戶
-    if (currentHasData && currentEditingGroup.groupId === null) {
-      // 當前是新增模式且有資料，先保存
-      if (!window.confirm('目前編輯區有未保存的資料，是否先保存後再載入其他群組？')) {
-        return
-      }
-      saveCurrentGroup()
-    }
-
-    // 從 savedGroups 找出該群組的所有記錄
-    const groupRecords = savedGroups.filter(r => r.groupId === groupId)
-
-    if (groupRecords.length === 0) return
-
-    // ✅ 不從列表移除，只複製到編輯區
-    setCurrentEditingGroup({
-      groupId,
-      records: groupRecords,
-      memoryFiles: groupRecords[0]?.memoryFiles || []
     })
 
-    setSuccess('群組已載入到編輯區')
+    return { filesToUpload, filesToDelete }
   }
 
-  // 刪除已保存的群組
-  const deleteSavedGroup = (groupId: string) => {
-    if (!window.confirm('確定要刪除此群組嗎？')) return
-
-    setSavedGroups(prev => prev.filter(r => r.groupId !== groupId))
-    removeRecordMapping(groupId)
-    setSuccess('群組已刪除')
-  }
-
-  const handleSubmit = async () => {
-    await executeSubmit(async () => {
-      // ✅ 使用統一的資料準備函數
-      const { totalQuantity, cleanedEnergyData, deduplicatedRecordData } = prepareGeneratorTestSubmissionData(generatorTestData)
-
-      // ⭐ 使用 hook 的 submit 函數
-      await submit({
-        entryInput: {
-          page_key: pageKey,
-          period_year: year,
-          unit: GENERATOR_TEST_CONFIG.unit,
-          monthly: { '1': totalQuantity },
-          notes: `${GENERATOR_TEST_CONFIG.title}共 ${generatorTestData.length} 筆記錄`,
-          extraPayload: {
-            [GENERATOR_TEST_CONFIG.dataFieldName]: cleanedEnergyData,
-            fileMapping: getFileMappingForPayload()
-          }
-        },
-        recordData: deduplicatedRecordData,  // ⭐ 使用去重後的資料（含 allRecordIds）
-        uploadRecordFiles,
-        onSuccess: async (entry_id) => {
-          // ⭐ 簡化為只有收尾工作
-          setCurrentEntryId(entry_id)
-          await reload()
+  // 刪除舊檔案
+  const deleteOldFiles = async (fileIds: string[]) => {
+    if (fileIds.length > 0) {
+      for (const fileId of fileIds) {
+        try {
+          await adminDeleteEvidence(fileId)
+        } catch {
+          // Continue on error
         }
-      })
-
-      await handleSubmitSuccess();
-
-      // 重新載入審核狀態，更新狀態橫幅
-      reloadApprovalStatus()
-
-      setSuccessModalType('submit')
-      setShowSuccessModal(true)
-    }).catch(error => {
-      setError(error instanceof Error ? error.message : '提交失敗，請重試');
-    })
-  };
+      }
+    }
+  }
 
   const handleSave = async () => {
-    await executeSubmit(async () => {
-      setError(null)
-      setSuccess(null)
+    // 管理員審核模式
+    if (isReviewMode && reviewEntryId) {
+      setSubmitting(true)
+      try {
+        // 1. 準備資料
+        const payload = {
+          generatorTestData: prepareCleanedTestData()
+        }
 
-      // ✅ 使用統一的資料準備函數
-      const { totalQuantity, cleanedEnergyData, deduplicatedRecordData } = prepareGeneratorTestSubmissionData(generatorTestData)
+        // 2. 收集檔案
+        const { filesToUpload, filesToDelete } = collectFilesForAdminSave()
 
-      // 審核模式：使用 useAdminSave hook
-      if (isReviewMode && reviewEntryId) {
-        console.log('📝 管理員審核模式：使用 useAdminSave hook', reviewEntryId)
+        // 3. 刪除舊檔案
+        await deleteOldFiles(filesToDelete)
 
-        // ⭐ 新架構：準備檔案列表（從當前編輯群組收集）
-        const filesToUpload = currentEditingGroup.memoryFiles.map((mf: MemoryFile) => ({
-          file: mf.file,
-          metadata: {
-            recordIndex: 0,
-            allRecordIds: currentEditingGroup.records.map(r => r.id)
-          }
-        }))
-
+        // 4. 用 adminSave 更新資料和上傳新檔案
         await adminSave({
           updateData: {
-            unit: GENERATOR_TEST_CONFIG.unit,
-            amount: totalQuantity,
-            payload: {
-              monthly: { '1': totalQuantity },
-              [GENERATOR_TEST_CONFIG.dataFieldName]: cleanedEnergyData,
-              fileMapping: getFileMappingForPayload()
-            }
+            unit: '次',
+            amount: savedTests.length,
+            payload
           },
           files: filesToUpload
         })
 
+        // 6. reload 和通知
         await reload()
         reloadApprovalStatus()
-        // 清空記憶體檔案（在 reload 之後，避免檔案暫時消失）
-        setCurrentEditingGroup(prev => ({ ...prev, memoryFiles: [] }))
-        setSuccess('✅ 儲存成功！資料已更新')
-        return
+        setSubmitSuccess('管理員儲存成功')
+      } finally {
+        setSubmitting(false)
       }
+      return
+    }
 
-      // 非審核模式：使用統一的資料準備函數（已在函數開頭準備好）
-      // ⭐ 使用 hook 的 save 函數（跳過驗證）
-      await save({
-        entryInput: {
-          page_key: pageKey,
-          period_year: year,
-          unit: GENERATOR_TEST_CONFIG.unit,
-          monthly: { '1': totalQuantity },
-          notes: `${GENERATOR_TEST_CONFIG.title}共 ${generatorTestData.length} 筆記錄`,
-          extraPayload: {
-            [GENERATOR_TEST_CONFIG.dataFieldName]: cleanedEnergyData,
-            fileMapping: getFileMappingForPayload()
-          }
-        },
-        recordData: deduplicatedRecordData,  // ⭐ 包含 allRecordIds
-        uploadRecordFiles,
-        onSuccess: async (entry_id) => {
-          // ⭐ 簡化為 2 行（原本 ~55 行）
-          setCurrentEntryId(entry_id)
-          await reload()
-        }
-      })
-
-      // 重新載入審核狀態，更新狀態橫幅
-      reloadApprovalStatus()
-
-      setSuccess('暫存成功！資料已儲存')
-      setSuccessModalType('save')
-      setShowSuccessModal(true)
-    }).catch(error => {
+    // 一般暫存
+    try {
+      await submitData(true)
+    } catch (error) {
       console.error('❌ 暫存失敗:', error)
-      setError(error instanceof Error ? error.message : '暫存失敗')
-    })
-  };
+      setSubmitError(error instanceof Error ? error.message : '暫存失敗')
+    }
+  }
 
   const handleClear = () => {
     setShowClearConfirmModal(true);
@@ -515,112 +427,34 @@ export default function GeneratorTestPage() {
 
   const handleClearConfirm = async () => {
     try {
-      // 收集所有檔案和記憶體檔案（包含編輯中和已保存的）
-      const allFiles = [
-        ...currentEditingGroup.records.flatMap(r => r.evidenceFiles || []),
-        ...savedGroups.flatMap(r => r.evidenceFiles || [])
-      ]
+      // 收集所有檔案
+      const allFiles = savedTests.flatMap(t => t.evidenceFiles || [])
       const allMemoryFiles = [
-        currentEditingGroup.memoryFiles,
-        ...savedGroups.map(r => r.memoryFiles || [])
+        currentEditingTest.memoryFiles,
+        ...savedTests.map(t => t.memoryFiles || [])
       ]
 
-      // 使用 Hook 清除
       await clear({
         filesToDelete: allFiles,
         memoryFilesToClean: allMemoryFiles
       })
 
-      // 重置前端狀態（新架構），預設 3 格
-      setCurrentEditingGroup({
-        groupId: null,
-        records: createEmptyGeneratorTestRecords(),
-        memoryFiles: []
-      })
-      setSavedGroups([])
+      // 重置狀態
+      setSavedTests([])
+      setCurrentEditingTest(createEmptyTest())
+      setEditingTestId(null)
       setCurrentEntryId(null)
       setShowClearConfirmModal(false)
 
-      // 重新載入審核狀態，清除狀態橫幅
       await reload()
-      reloadApprovalStatus()
+      await reloadApprovalStatus()
 
-      setSuccess('資料已完全清除')
+      setSubmitSuccess('資料已完全清除')
     } catch (error) {
-      setError(error instanceof Error ? error.message : '清除失敗，請重試')
+      setSubmitError(error instanceof Error ? error.message : '清除失敗')
     }
   };
 
-
-  // ✅ 群組分組邏輯：按 groupId 分組
-
-  const evidenceGroups = useMemo(() => {
-    // ⭐ 按 generatorTestData 順序收集唯一的 groupId（保持順序）
-    const seenGroupIds = new Set<string>()
-    const groupIds: string[] = []
-
-    generatorTestData.forEach(record => {
-      if (record.groupId && !seenGroupIds.has(record.groupId)) {
-        seenGroupIds.add(record.groupId)
-        groupIds.push(record.groupId)
-      }
-    })
-
-    // ⭐ 按收集到的順序建立 groups（所有群組平等）
-    const result: Array<{
-      groupId: string
-      evidence: EvidenceFile | null
-      records: GeneratorTestRecord[]
-    }> = []
-
-    groupIds.forEach(groupId => {
-      const records = generatorTestData.filter((r: GeneratorTestRecord) => r.groupId === groupId)
-      const evidence = records.find((r: GeneratorTestRecord) => r.evidenceFiles && r.evidenceFiles.length > 0)?.evidenceFiles?.[0]
-      result.push({ groupId, evidence: evidence || null, records })
-    })
-
-    // ✅ 排序：空白群組置頂，其他按時間新→舊
-    return result.sort((a, b) => {
-      const aIsEmpty = a.records.every((r: GeneratorTestRecord) =>
-        !r.location.trim() &&
-        r.generatorPower === 0 &&
-        r.testFrequency === 0 &&
-        r.testDuration === 0 &&
-        (!r.memoryFiles || r.memoryFiles.length === 0)
-      ) && !a.evidence
-
-      const bIsEmpty = b.records.every((r: GeneratorTestRecord) =>
-        !r.location.trim() &&
-        r.generatorPower === 0 &&
-        r.testFrequency === 0 &&
-        r.testDuration === 0 &&
-        (!r.memoryFiles || r.memoryFiles.length === 0)
-      ) && !b.evidence
-
-      if (aIsEmpty && !bIsEmpty) return -1  // 空白群組在前
-      if (!aIsEmpty && bIsEmpty) return 1
-      return 0  // 保持原順序（新的在前）
-    })
-  }, [generatorTestData])
-
-  // ⭐ 只為圖片檔案生成縮圖（PDF 不需要）
-  useEffect(() => {
-    evidenceGroups.forEach(async (group) => {
-      if (group.evidence &&
-          group.evidence.mime_type.startsWith('image/') &&
-          !thumbnails[group.evidence.id]) {
-        try {
-          const url = await getFileUrl(group.evidence.file_path)
-          setThumbnails(prev => ({
-            ...prev,
-            [group.evidence!.id]: url
-          }))
-        } catch (error) {
-          console.warn('Failed to generate thumbnail for', group.evidence.file_name, error)
-        }
-      }
-    })
-  }, [evidenceGroups])
   return (
     <>
       {/* 隱藏瀏覽器原生日曆圖示和數字輸入框的上下箭頭 */}
@@ -665,7 +499,8 @@ export default function GeneratorTestPage() {
         onSave: handleSave,
         onClear: handleClear,
         show: !isReadOnly && !approvalStatus.isApproved && !isReviewMode,
-        accentColor: GENERATOR_TEST_CONFIG.iconColor
+        accentColor: GENERATOR_TEST_CONFIG.iconColor,
+        customNotifications: true  // Bug #7 預防
       }}
       reviewSection={{
         isReviewMode,
@@ -675,41 +510,38 @@ export default function GeneratorTestPage() {
         pageKey,
         year,
         category: GENERATOR_TEST_CONFIG.title,
-        amount: generatorTestData.length,
+        amount: savedTests.length,
         unit: GENERATOR_TEST_CONFIG.unit,
         role,
         onSave: handleSave,
-        isSaving: submitLoading
+        isSaving: submitting
+      }}
+      notificationState={{
+        success: submitSuccess,
+        error: submitError,
+        clearSuccess: () => setSubmitSuccess(null),
+        clearError: () => setSubmitError(null)
       }}
     >
-      {/* 發電機測試資料區塊 */}
-      <GeneratorTestUsageSection
+      {/* 輸入區 */}
+      <GeneratorTestInputFields
+        test={currentEditingTest}
+        onFieldChange={updateCurrentTest}
+        onSave={saveCurrentTest}
+        editingTestId={editingTestId}
         isReadOnly={isReadOnly}
-        submitting={submitting}
-        approvalStatus={approvalStatus}
-        editPermissions={editPermissions}
-        currentEditingGroup={currentEditingGroup}
-        setCurrentEditingGroup={setCurrentEditingGroup}
-        addRecordToCurrentGroup={addRecordToCurrentGroup}
-        updateCurrentGroupRecord={updateCurrentGroupRecord}
-        removeRecordFromCurrentGroup={removeRecordFromCurrentGroup}
-        saveCurrentGroup={saveCurrentGroup}
         thumbnails={thumbnails}
-        onPreviewImage={(src) => setLightboxSrc(src)}
-        onError={(msg) => setError(msg)}
-        iconColor={GENERATOR_TEST_CONFIG.iconColor}
+        onImageClick={setLightboxSrc}
       />
 
-      {/* 資料列表區塊 */}
-      <GeneratorTestGroupListSection
-        savedGroups={savedGroups}
+      {/* 列表區 */}
+      <GeneratorTestListSection
+        tests={savedTests}
         thumbnails={thumbnails}
+        onEdit={editTest}
+        onDelete={deleteTest}
+        onImageClick={setLightboxSrc}
         isReadOnly={isReadOnly}
-        approvalStatus={approvalStatus}
-        onEditGroup={loadGroupToEditor}
-        onDeleteGroup={deleteSavedGroup}
-        onPreviewImage={(src) => setLightboxSrc(src)}
-        iconColor={GENERATOR_TEST_CONFIG.iconColor}
       />
 
       {/* 清除確認模態框 */}
@@ -725,31 +557,6 @@ export default function GeneratorTestPage() {
         src={lightboxSrc}
         zIndex={LAYOUT_CONSTANTS.MODAL_Z_INDEX}
         onClose={() => setLightboxSrc(null)}
-      />
-
-      {/* Toast 訊息 */}
-      {error && (
-        <Toast
-          message={error}
-          type="error"
-          onClose={() => setError(null)}
-        />
-      )}
-
-      {success && (
-        <Toast
-          message={success}
-          type="success"
-          onClose={() => setSuccess(null)}
-        />
-      )}
-
-      {/* 提交成功彈窗 */}
-      <SuccessModal
-        show={showSuccessModal}
-        message={success || ''}
-        type={successModalType}
-        onClose={() => setShowSuccessModal(false)}
       />
     </SharedPageLayout>
     </>

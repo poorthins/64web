@@ -40,6 +40,7 @@ export interface MobileEnergyUsageSectionProps {
   thumbnails: Record<string, string>
   onPreviewImage: (src: string) => void
   onError: (msg: string) => void
+  onDeleteEvidence?: (fileId: string) => void  // 刪除已上傳的檔案
 
   // 樣式
   iconColor: string
@@ -64,6 +65,8 @@ export interface MobileEnergyUsageSectionProps {
     onDelete: (id: string) => void
     isReadOnly: boolean
   }) => React.ReactNode     // 自訂輸入欄位，預設 RecordInputRow
+  saveButtonText?: string  // 保存按鈕文字，預設「+ 新增群組」/「變更儲存」
+  saveButtonNewText?: string  // 新增模式按鈕文字，預設「+ 新增群組」
 }
 
 // ==================== 預設值定義 ====================
@@ -90,6 +93,7 @@ export function MobileEnergyUsageSection(props: MobileEnergyUsageSectionProps) {
     thumbnails,
     onPreviewImage,
     onError,
+    onDeleteEvidence,
     iconColor,
     config,
     deviceType,
@@ -100,7 +104,9 @@ export function MobileEnergyUsageSection(props: MobileEnergyUsageSectionProps) {
     dropzoneHeight = LAYOUT_CONSTANTS.EDITOR_UPLOAD_HEIGHT,  // ⭐ 預設 308
     title = DEFAULT_TITLE,                                  // ⭐ 預設「使用數據」
     icon = DEFAULT_ICON,                                    // ⭐ 預設 Database icon
-    renderInputFields                                       // ⭐ 預設為 undefined，後面處理
+    renderInputFields,                                      // ⭐ 預設為 undefined，後面處理
+    saveButtonNewText = '+ 新增群組',                        // ⭐ 預設「+ 新增群組」
+    saveButtonText = '變更儲存'                              // ⭐ 預設「變更儲存」
   } = props
 
   return (
@@ -209,17 +215,35 @@ export function MobileEnergyUsageSection(props: MobileEnergyUsageSectionProps) {
 
       {/* ==================== 使用數據區塊 - 標題底部往下 34px，頁面置中 ==================== */}
       <div style={{ marginTop: `${LAYOUT_CONSTANTS.SECTION_BOTTOM_MARGIN}px`, marginBottom: '32px' }} className="flex justify-center">
-        <div
-          className={renderInputFields ? '' : 'bg-[#ebedf0] rounded-[37px]'}
-          style={{
-            width: renderInputFields ? 'auto' : `${LAYOUT_CONSTANTS.CONTAINER_WIDTH}px`,
-            minHeight: renderInputFields ? 'auto' : `${LAYOUT_CONSTANTS.CONTAINER_MIN_HEIGHT}px`,
-            flexShrink: 0,
-            padding: renderInputFields ? '0' : '38px 0 38px 49px'
-          }}
-        >
-          {/* 標題區 - 文字靠左上對齊 - 只在非自訂模式下顯示 */}
-          {!renderInputFields && (
+        {/* 自訂模式：不需要外層灰色框，直接渲染內容 */}
+        {renderInputFields ? (
+          <div className="flex" style={{
+            gap: `${LAYOUT_CONSTANTS.EDITOR_GAP}px`,
+            alignItems: 'flex-start',
+            justifyContent: 'center'
+          }}>
+            {/* 右側：輸入表單區域（含按鈕） */}
+            <div style={{ display: 'flex', flexDirection: 'column' }}>
+              {renderInputFields({
+                currentGroup: currentEditingGroup,
+                onUpdate: updateCurrentGroupRecord,
+                onDelete: removeRecordFromCurrentGroup,
+                isReadOnly: isReadOnly || approvalStatus.isApproved
+              })}
+            </div>
+          </div>
+        ) : (
+          /* 預設模式：有外層灰色框 */
+          <div
+            className="bg-[#ebedf0] rounded-[37px]"
+            style={{
+              width: `${LAYOUT_CONSTANTS.CONTAINER_WIDTH}px`,
+              minHeight: `${LAYOUT_CONSTANTS.CONTAINER_MIN_HEIGHT}px`,
+              flexShrink: 0,
+              padding: '38px 0 38px 49px'
+            }}
+          >
+            {/* 標題區 - 文字靠左上對齊 */}
             <div style={{
               width: `${dropzoneWidth}px`,
               height: '73px',
@@ -230,15 +254,17 @@ export function MobileEnergyUsageSection(props: MobileEnergyUsageSectionProps) {
               alignItems: 'flex-start'
             }}>
             </div>
-          )}
 
-          {/* 框框容器 */}
-          <div className="flex" style={{ gap: `${LAYOUT_CONSTANTS.EDITOR_GAP}px`, alignItems: 'flex-start' }}>
-            {/* 左側：佐證上傳區 - 只在非自訂模式下顯示 */}
-            {!renderInputFields && (
-              <div style={{ width: `${dropzoneWidth}px` }} className="flex-shrink-0">
-              {/* 使用 FileDropzone 元件 */}
-              <FileDropzone
+            {/* 框框容器 */}
+            <div className="flex" style={{
+              gap: `${LAYOUT_CONSTANTS.EDITOR_GAP}px`,
+              alignItems: 'flex-start',
+              justifyContent: 'flex-start'
+            }}>
+            {/* 左側：佐證上傳區 */}
+            <div style={{ width: `${dropzoneWidth}px` }} className="flex-shrink-0">
+                {/* 使用 FileDropzone 元件 */}
+                <FileDropzone
                 width={`${dropzoneWidth}px`}
                 height={`${dropzoneHeight}px`}
                 accept=".xlsx,.xls,.pdf,.jpg,.jpeg,.png,.gif,.webp,.bmp,.svg,image/*,application/pdf,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
@@ -357,7 +383,12 @@ export function MobileEnergyUsageSection(props: MobileEnergyUsageSectionProps) {
                         {/* 刪除按鈕 */}
                         <button
                           onClick={() => {
-                            // 從當前編輯群組的第一筆記錄移除檔案
+                            // 記錄要刪除的檔案 ID（給父組件處理實際刪除）
+                            if (onDeleteEvidence) {
+                              onDeleteEvidence(file.id)
+                            }
+
+                            // 從當前編輯群組的第一筆記錄移除檔案（UI 更新）
                             setCurrentEditingGroup(prev => ({
                               ...prev,
                               records: prev.records.map((record, idx) => {
@@ -383,65 +414,50 @@ export function MobileEnergyUsageSection(props: MobileEnergyUsageSectionProps) {
                 </div>
               )}
             </div>
-            )}
 
             {/* 右側：輸入表單區域（含按鈕） */}
             <div style={{ display: 'flex', flexDirection: 'column' }}>
-              {/* 輸入表單 - 完整框框 - 動態高度 */}
+              {/* 表頭 + RecordInputRow（有固定尺寸容器） */}
               <div
                 style={{
-                  width: renderInputFields ? 'auto' : `${LAYOUT_CONSTANTS.EDITOR_FORM_WIDTH}px`,
-                  minHeight: renderInputFields ? 'auto' : `${LAYOUT_CONSTANTS.EDITOR_UPLOAD_HEIGHT}px`,
-                  borderRadius: renderInputFields ? '0' : '30px',
-                  overflow: renderInputFields ? 'visible' : 'hidden'
+                  width: `${LAYOUT_CONSTANTS.EDITOR_FORM_WIDTH}px`,
+                  minHeight: `${LAYOUT_CONSTANTS.EDITOR_UPLOAD_HEIGHT}px`,
+                  borderRadius: '30px',
+                  overflow: 'hidden'
                 }}
               >
-              {/* 預設模式：表頭 + RecordInputRow */}
-              {!renderInputFields && (
-                <>
-                  {/* 表頭 - 藍色區域 58px */}
-                  <div className="flex items-center" style={{ backgroundColor: iconColor, height: `${LAYOUT_CONSTANTS.EDITOR_FORM_HEADER_HEIGHT}px`, paddingLeft: '43px', paddingRight: '16px' }}>
-                    <div style={{ width: '199px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                      <span className="text-white text-[20px] font-medium">加油日期</span>
-                    </div>
-                    <div style={{ width: '27px' }}></div>
-                    <div style={{ width: '230px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                      <span className="text-white text-[20px] font-medium">加油量 (L)</span>
-                    </div>
-                    <div style={{ width: '40px' }}></div> {/* 刪除按鈕空間 */}
+                {/* 表頭 - 藍色區域 58px */}
+                <div className="flex items-center" style={{ backgroundColor: iconColor, height: `${LAYOUT_CONSTANTS.EDITOR_FORM_HEADER_HEIGHT}px`, paddingLeft: '43px', paddingRight: '16px' }}>
+                  <div style={{ width: '199px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                    <span className="text-white text-[20px] font-medium">加油日期</span>
                   </div>
-
-                  {/* 輸入行 - 白色區域 - 動態高度 */}
-                  <div className="bg-white" style={{ minHeight: '250px', paddingLeft: '43px', paddingRight: '16px', paddingTop: '16px', paddingBottom: '16px' }}>
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: '22px' }}>
-                    {currentEditingGroup.records.map((record) => (
-                      <RecordInputRow
-                        key={record.id}
-                        recordId={record.id}
-                        date={record.date}
-                        quantity={record.quantity}
-                        onUpdate={updateCurrentGroupRecord}
-                        onDelete={removeRecordFromCurrentGroup}
-                        showDelete={currentEditingGroup.records.length > 1}
-                        disabled={isReadOnly || approvalStatus.isApproved}
-                      />
-                    ))}
-                    </div>
+                  <div style={{ width: '27px' }}></div>
+                  <div style={{ width: '230px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                    <span className="text-white text-[20px] font-medium">加油量 (L)</span>
                   </div>
-                </>
-              )}
+                  <div style={{ width: '40px' }}></div> {/* 刪除按鈕空間 */}
+                </div>
 
-              {/* 自訂模式：使用 renderInputFields */}
-              {renderInputFields && renderInputFields({
-                currentGroup: currentEditingGroup,
-                onUpdate: updateCurrentGroupRecord,
-                onDelete: removeRecordFromCurrentGroup,
-                isReadOnly: isReadOnly || approvalStatus.isApproved
-              })}
-            </div>
+                {/* 輸入行 - 白色區域 - 動態高度 */}
+                <div className="bg-white" style={{ minHeight: '250px', paddingLeft: '43px', paddingRight: '16px', paddingTop: '16px', paddingBottom: '16px' }}>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '22px' }}>
+                  {currentEditingGroup.records.map((record) => (
+                    <RecordInputRow
+                      key={record.id}
+                      recordId={record.id}
+                      date={record.date}
+                      quantity={record.quantity}
+                      onUpdate={updateCurrentGroupRecord}
+                      onDelete={removeRecordFromCurrentGroup}
+                      showDelete={currentEditingGroup.records.length > 1}
+                      disabled={isReadOnly || approvalStatus.isApproved}
+                    />
+                  ))}
+                  </div>
+                </div>
+              </div>
 
-            {/* 新增數據按鈕 - 只在非自訂模式下顯示 */}
-            {!renderInputFields && (
+              {/* 新增數據按鈕 */}
               <button
                 onClick={addRecordToCurrentGroup}
                 disabled={isReadOnly || approvalStatus.isApproved}
@@ -471,10 +487,10 @@ export function MobileEnergyUsageSection(props: MobileEnergyUsageSectionProps) {
               >
                 + 新增數據到此群組
               </button>
-            )}
+            </div>
+            </div>
           </div>
-          </div>
-        </div>
+        )}
       </div>
 
       {/* 保存群組按鈕 - 灰色框框下方 46px */}
@@ -499,7 +515,7 @@ export function MobileEnergyUsageSection(props: MobileEnergyUsageSectionProps) {
             lineHeight: '100%'
           }}
         >
-          {currentEditingGroup.groupId === null ? '+ 新增群組' : '變更儲存'}
+          {currentEditingGroup.groupId === null ? saveButtonNewText : saveButtonText}
         </button>
       </div>
     </>

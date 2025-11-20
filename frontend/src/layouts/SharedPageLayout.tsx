@@ -70,6 +70,14 @@ interface SharedPageLayoutProps {
     onSave: () => void
     isSaving: boolean
   }
+
+  // ⭐ 新增：統一通知狀態（來自 hook）
+  notificationState?: {
+    success: string | null      // 成功訊息（提交/儲存/清除等）
+    error: string | null        // 錯誤訊息
+    clearSuccess: () => void    // 清除成功訊息
+    clearError: () => void      // 清除錯誤訊息
+  }
 }
 
 /**
@@ -88,7 +96,8 @@ const SharedPageLayout: React.FC<SharedPageLayoutProps> = ({
   statusBanner,
   instructionText,
   bottomActionBar,
-  reviewSection
+  reviewSection,
+  notificationState
 }) => {
   const navigate = useNavigate()
   const [scale, setScale] = useState(1)
@@ -97,7 +106,43 @@ const SharedPageLayout: React.FC<SharedPageLayoutProps> = ({
   // 統一通知管理
   const [showSuccessModal, setShowSuccessModal] = useState(false)
   const [successMessage, setSuccessMessage] = useState('')
+  const [successModalType, setSuccessModalType] = useState<'save' | 'submit'>('submit')
   const [error, setError] = useState<string | null>(null)
+
+  // ⭐ 監聽頁面傳來的通知狀態
+  useEffect(() => {
+    if (notificationState?.success) {
+      const message = notificationState.success
+
+      // 判斷通知類型
+      if (message.includes('暫存')) {
+        // 儲存操作 → 藍色彈窗
+        setSuccessModalType('save')
+        setSuccessMessage(message)
+        setShowSuccessModal(true)
+      } else if (message.includes('提交')) {
+        // 提交操作 → 綠色彈窗
+        setSuccessModalType('submit')
+        setSuccessMessage(message)
+        setShowSuccessModal(true)
+      } else if (message.includes('清除')) {
+        // 清除操作 → 只顯示 Toast，不顯示彈窗
+        setError(message)
+      } else {
+        // 其他成功訊息 → 預設顯示提交彈窗
+        setSuccessModalType('submit')
+        setSuccessMessage(message)
+        setShowSuccessModal(true)
+      }
+    }
+  }, [notificationState?.success])
+
+  // ⭐ 監聽錯誤訊息
+  useEffect(() => {
+    if (notificationState?.error) {
+      setError(notificationState.error)
+    }
+  }, [notificationState?.error])
 
   // 響應式縮放
   useEffect(() => {
@@ -374,7 +419,7 @@ const SharedPageLayout: React.FC<SharedPageLayoutProps> = ({
             width: '1920px',
             minHeight: 'calc(100vh - 96px)',
             backgroundColor: '#FFFFFF',
-            paddingBottom: (bottomActionBar && bottomActionBar.show !== false) ? '120px' : '0'
+            paddingBottom: (bottomActionBar && bottomActionBar.show !== false) ? '120px' : '40px'
           }}
         >
           {/* 頁面標題 */}
@@ -417,8 +462,6 @@ const SharedPageLayout: React.FC<SharedPageLayoutProps> = ({
                 role={reviewSection.role}
                 onSave={reviewSection.onSave}
                 isSaving={reviewSection.isSaving}
-                onApprove={() => {}}
-                onReject={(reason) => {}}
               />
             </div>
           )}
@@ -456,14 +499,27 @@ const SharedPageLayout: React.FC<SharedPageLayoutProps> = ({
         <Toast
           message={error}
           type="error"
-          onClose={() => setError(null)}
+          onClose={() => {
+            setError(null)
+            // ⭐ 清除頁面的錯誤訊息
+            if (notificationState?.clearError) {
+              notificationState.clearError()
+            }
+          }}
         />
       )}
 
       <SuccessModal
         show={showSuccessModal}
         message={successMessage}
-        onClose={() => setShowSuccessModal(false)}
+        type={successModalType}
+        onClose={() => {
+          setShowSuccessModal(false)
+          // ⭐ 清除頁面的成功訊息
+          if (notificationState?.clearSuccess) {
+            notificationState.clearSuccess()
+          }
+        }}
       />
     </div>
   )

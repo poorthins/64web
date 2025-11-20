@@ -16,8 +16,9 @@ export interface AdminSaveParams {
     metadata: {
       recordIndex?: number
       month?: number
-      fileType?: 'msds' | 'usage_evidence' | 'other'
+      fileType?: 'msds' | 'usage_evidence' | 'other' | 'heat_value_evidence' | 'annual_evidence' | 'nameplate_evidence' | 'sf6_nameplate' | 'sf6_certificate'
       allRecordIds?: string[]
+      recordId?: string
     }
   }>
 }

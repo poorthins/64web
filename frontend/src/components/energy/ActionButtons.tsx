@@ -60,10 +60,10 @@ export function ActionButtons({
       <button
         onClick={onDelete}
         disabled={disabled}
-        className="p-2 hover:bg-red-50 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+        className="p-2 text-black hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
         title={deleteTitle}
       >
-        <Trash2 style={{ width: '32px', height: '32px', color: '#000' }} />
+        <Trash2 style={{ width: '32px', height: '32px' }} />
       </button>
     </div>
   )

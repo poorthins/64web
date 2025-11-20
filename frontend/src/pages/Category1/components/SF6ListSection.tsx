@@ -98,9 +98,29 @@ interface SF6ListItemProps {
 function SF6ListItem(props: SF6ListItemProps) {
   const { index, device, thumbnails, isDisabled, onEdit, onDelete, onPreviewImage } = props
 
-  // 取得兩張圖片
-  const nameplateFile = device.nameplateFiles?.[0] || device.memoryNameplateFiles?.[0]
-  const certificateFile = device.certificateFiles?.[0] || device.memoryCertificateFiles?.[0]
+  // 取得檔案（可能有 1~2 張）
+  // 優先顯示記憶體檔案（新上傳的），沒有才顯示資料庫檔案（舊的）
+  const allFiles = [
+    ...(device.memoryNameplateFiles && device.memoryNameplateFiles.length > 0
+      ? device.memoryNameplateFiles
+      : device.nameplateFiles || []),
+    ...(device.memoryCertificateFiles && device.memoryCertificateFiles.length > 0
+      ? device.memoryCertificateFiles
+      : device.certificateFiles || [])
+  ]
+
+  console.log('📸 [SF6ListItem] 設備檔案顯示:', {
+    deviceId: device.id,
+    nameplateFilesFromDB: device.nameplateFiles?.length || 0,
+    certificateFilesFromDB: device.certificateFiles?.length || 0,
+    memoryNameplateFiles: device.memoryNameplateFiles?.length || 0,
+    memoryCertificateFiles: device.memoryCertificateFiles?.length || 0,
+    allFilesCount: allFiles.length,
+    allFiles
+  })
+
+  const file1 = allFiles[0]
+  const file2 = allFiles[1]
 
   // 圖片預覽處理
   const handleImageClick = async (file: any) => {
@@ -137,8 +157,8 @@ function SF6ListItem(props: SF6ListItemProps) {
     return null
   }
 
-  const nameplateThumbnail = getImageThumbnail(nameplateFile)
-  const certificateThumbnail = getImageThumbnail(certificateFile)
+  const thumbnail1 = getImageThumbnail(file1)
+  const thumbnail2 = getImageThumbnail(file2)
 
   return (
     <div
@@ -177,59 +197,62 @@ function SF6ListItem(props: SF6ListItemProps) {
         {device.location} / {device.model} / {device.sf6Weight.toLocaleString()} g / {device.leakageRate}%
       </div>
 
-      {/* 圖片縮圖 1: GCB銘牌照片 */}
-      {nameplateThumbnail && (
-        <div
-          onClick={() => handleImageClick(nameplateFile)}
-          style={{
-            width: '55.769px',
-            height: '55.769px',
-            borderRadius: '10px',
-            overflow: 'hidden',
-            border: '1px solid rgba(0, 0, 0, 0.25)',
-            background: '#EBEDF0',
-            cursor: 'pointer',
-            flexShrink: 0
-          }}
-        >
-          <img
-            src={nameplateThumbnail}
-            alt="GCB銘牌照片"
+      {/* 圖片縮圖容器 - 兩張圖間距 20px */}
+      <div style={{ display: 'flex', gap: '20px', flexShrink: 0 }}>
+        {/* 圖片縮圖 1 */}
+        {thumbnail1 && (
+          <div
+            onClick={() => handleImageClick(file1)}
             style={{
-              width: '100%',
-              height: '100%',
-              objectFit: 'cover'
+              width: '55.769px',
+              height: '55.769px',
+              borderRadius: '10px',
+              overflow: 'hidden',
+              border: '1px solid rgba(0, 0, 0, 0.25)',
+              background: '#EBEDF0',
+              cursor: 'pointer',
+              flexShrink: 0
             }}
-          />
-        </div>
-      )}
+          >
+            <img
+              src={thumbnail1}
+              alt="佐證資料 1"
+              style={{
+                width: '100%',
+                height: '100%',
+                objectFit: 'cover'
+              }}
+            />
+          </div>
+        )}
 
-      {/* 圖片縮圖 2: SF6證明文件 */}
-      {certificateThumbnail && (
-        <div
-          onClick={() => handleImageClick(certificateFile)}
-          style={{
-            width: '55.769px',
-            height: '55.769px',
-            borderRadius: '10px',
-            overflow: 'hidden',
-            border: '1px solid rgba(0, 0, 0, 0.25)',
-            background: '#EBEDF0',
-            cursor: 'pointer',
-            flexShrink: 0
-          }}
-        >
-          <img
-            src={certificateThumbnail}
-            alt="SF6證明文件"
+        {/* 圖片縮圖 2 */}
+        {thumbnail2 && (
+          <div
+            onClick={() => handleImageClick(file2)}
             style={{
-              width: '100%',
-              height: '100%',
-              objectFit: 'cover'
+              width: '55.769px',
+              height: '55.769px',
+              borderRadius: '10px',
+              overflow: 'hidden',
+              border: '1px solid rgba(0, 0, 0, 0.25)',
+              background: '#EBEDF0',
+              cursor: 'pointer',
+              flexShrink: 0
             }}
-          />
-        </div>
-      )}
+          >
+            <img
+              src={thumbnail2}
+              alt="佐證資料 2"
+              style={{
+                width: '100%',
+                height: '100%',
+                objectFit: 'cover'
+              }}
+            />
+          </div>
+        )}
+      </div>
 
       {/* 操作按鈕 */}
       <ActionButtons

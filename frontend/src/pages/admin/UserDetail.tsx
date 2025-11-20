@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { getUserDetails, UserProfile, getUserEnergyEntries, forceLogoutUser } from '../../api/adminUsers'
 import { getUserSubmissions, Submission } from '../../api/adminSubmissions'
-import { getPageRouteByName } from './data/energyConfig'
+import { getPageRouteByName, getCategoryName } from './data/energyConfig'
 import { toast } from 'react-hot-toast'
 
 const UserDetail = () => {
@@ -424,7 +424,7 @@ const UserDetail = () => {
               尚無填報記錄
             </div>
           ) : (
-            <div className="admin-submission-grid">
+            <div className="admin-submission-grid" style={{ marginBottom: '80px' }}>
               {submissions.map(sub => {
                 const status = getStatusColor(sub)
                 // 優先使用新系統的 review_notes，如果沒有則回退到舊的 review_history
@@ -438,7 +438,7 @@ const UserDetail = () => {
                     style={{ cursor: 'pointer' }}
                   >
                     <div className="admin-submission-card-title">
-                      {sub.category}
+                      {getCategoryName(sub.category)}
                     </div>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                       <div className={`admin-submission-status-dot ${status}`}></div>

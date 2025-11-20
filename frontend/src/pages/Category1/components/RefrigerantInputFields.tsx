@@ -9,7 +9,7 @@
 import { FileDropzone, MemoryFile } from '../../../components/FileDropzone'
 import { SettingsIcon } from '../../../components/icons/SettingsIcon'
 import { generateRecordId } from '../../../utils/idGenerator'
-import { RefrigerantDevice } from '../hooks/useRefrigerantDeviceManager'
+import type { RefrigerantDevice } from '../RefrigerantPage'
 
 // ==================== 樣式常數 ====================
 const STYLES = {
@@ -57,6 +57,8 @@ interface RefrigerantInputFieldsProps {
   onSave: () => void
   editingDeviceId: string | null
   isReadOnly: boolean
+  thumbnails: Record<string, string>
+  onImageClick: (src: string) => void
 }
 
 // ==================== 主組件 ====================
@@ -65,7 +67,9 @@ export function RefrigerantInputFields({
   onFieldChange,
   onSave,
   editingDeviceId,
-  isReadOnly
+  isReadOnly,
+  thumbnails,
+  onImageClick
 }: RefrigerantInputFieldsProps) {
   return (
     <>
@@ -212,7 +216,17 @@ export function RefrigerantInputFields({
               height="262px"
               accept="image/*,application/pdf"
               multiple={false}
-              file={device.memoryFiles[0] || null}
+              file={
+                device.memoryFiles[0] ||
+                (device.evidenceFiles?.[0] ? {
+                  id: device.evidenceFiles[0].id,
+                  file: null as any,
+                  preview: thumbnails[device.evidenceFiles[0].id] || '',
+                  file_name: device.evidenceFiles[0].file_name,
+                  file_size: device.evidenceFiles[0].file_size,
+                  mime_type: device.evidenceFiles[0].mime_type
+                } : null)
+              }
               onFileSelect={(files) => {
                 const file = files[0]
                 if (file) {
@@ -227,7 +241,19 @@ export function RefrigerantInputFields({
                   onFieldChange('memoryFiles', [memoryFile])
                 }
               }}
-              onRemove={() => onFieldChange('memoryFiles', [])}
+              onRemove={() => {
+                // 清空 memoryFiles
+                onFieldChange('memoryFiles', [])
+
+                // ⚠️ 重要：清空 evidenceFiles，否則 reload 後舊檔案會回來
+                onFieldChange('evidenceFiles', [])
+              }}
+              onFileClick={(file) => {
+                // 點擊圖片放大
+                if (file.preview) {
+                  onImageClick(file.preview)
+                }
+              }}
               disabled={isReadOnly}
               readOnly={isReadOnly}
               primaryText="點擊或拖放設備銘牌照片/汽車行照"

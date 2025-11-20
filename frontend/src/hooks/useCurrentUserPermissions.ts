@@ -7,12 +7,28 @@ import { ALL_ENERGY_CATEGORIES, ENERGY_CATEGORIES_BY_SCOPE, EnergyCategory } fro
 // Fixed: unified page_key to 'septic_tank'
 const DB_TO_FRONTEND_MAP: Record<string, string> = {
   'electricity': 'electricity',
-  'diesel_generator': 'diesel_generator' // 柴油發電機保持一致
+  'diesel_generator': 'diesel_generator', // 柴油發電機保持一致
+  'sf6': 'sf6',
+  'refrigerant': 'refrigerant',
+  'gasoline': 'gasoline',
+  'diesel': 'diesel',
+  'urea': 'urea',
+  'septic_tank': 'septic_tank',
+  'generator_test': 'generator_test',
+  'wd40': 'wd40'
 };
 
 const FRONTEND_TO_DB_MAP: Record<string, string> = {
   'electricity': 'electricity',
-  'diesel_generator': 'diesel_generator' // 柴油發電機保持一致
+  'diesel_generator': 'diesel_generator', // 柴油發電機保持一致
+  'sf6': 'sf6',
+  'refrigerant': 'refrigerant',
+  'gasoline': 'gasoline',
+  'diesel': 'diesel',
+  'urea': 'urea',
+  'septic_tank': 'septic_tank',
+  'generator_test': 'generator_test',
+  'wd40': 'wd40'
 };
 
 export interface UseCurrentUserPermissionsState {

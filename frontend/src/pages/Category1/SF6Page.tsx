@@ -1,21 +1,19 @@
 import { useState, useEffect } from 'react';
 import { EntryStatus } from '../../components/StatusSwitcher';
 import ConfirmClearModal from '../../components/ConfirmClearModal'
-import SuccessModal from '../../components/SuccessModal'
 import SharedPageLayout from '../../layouts/SharedPageLayout'
 import { useEditPermissions } from '../../hooks/useEditPermissions';
 import { useFrontendStatus } from '../../hooks/useFrontendStatus';
 import { useApprovalStatus } from '../../hooks/useApprovalStatus';
 import { useReviewMode } from '../../hooks/useReviewMode'
 import { useEnergyData } from '../../hooks/useEnergyData'
-import { useMultiRecordSubmit } from '../../hooks/useMultiRecordSubmit'
 import { useEnergyClear } from '../../hooks/useEnergyClear'
-import { useSubmitGuard } from '../../hooks/useSubmitGuard'
 import { useGhostFileCleaner } from '../../hooks/useGhostFileCleaner'
-import { useRecordFileMapping } from '../../hooks/useRecordFileMapping'
 import { useRole } from '../../hooks/useRole'
 import { useAdminSave } from '../../hooks/useAdminSave'
-import { EvidenceFile, getFileUrl } from '../../api/files';
+import { EvidenceFile, getFileUrl, adminDeleteEvidence, deleteEvidence } from '../../api/files';
+import { submitEnergyEntry } from '../../api/v2/entryAPI';
+import { uploadEvidenceFile } from '../../api/v2/fileAPI';
 import Toast from '../../components/Toast';
 import { SF6Record } from './shared/mobile/mobileEnergyTypes'
 import { LAYOUT_CONSTANTS } from './shared/mobile/mobileEnergyConstants'
@@ -43,7 +41,7 @@ export default function SF6Page() {
   const [year] = useState(new Date().getFullYear())
   const [initialStatus, setInitialStatus] = useState<EntryStatus>('submitted')
   const [currentEntryId, setCurrentEntryId] = useState<string | null>(null)
-  const { executeSubmit, submitting } = useSubmitGuard()
+  const [submitting, setSubmitting] = useState(false)
 
   // ========== 審核模式 ==========
   const { isReviewMode, reviewEntryId, reviewUserId } = useReviewMode()
@@ -68,11 +66,7 @@ export default function SF6Page() {
     success,
     setError,
     setSuccess,
-    showSuccessModal,
-    successModalType,
     showClearConfirmModal,
-    setShowSuccessModal,
-    setSuccessModalType,
     setShowClearConfirmModal
   } = useSF6Notifications()
 
@@ -95,11 +89,6 @@ export default function SF6Page() {
   // 角色檢查
   const { role } = useRole()
 
-  // 審核模式下只有管理員可編輯
-  const isReadOnly = isReviewMode && role !== 'admin'
-
-  const editPermissions = useEditPermissions(currentStatus, isReadOnly, role ?? undefined)
-
   // 資料載入 Hook
   const entryIdToLoad = isReviewMode && reviewEntryId ? reviewEntryId : undefined
   const {
@@ -112,24 +101,17 @@ export default function SF6Page() {
   // 審核狀態 Hook
   const { reload: reloadApprovalStatus, ...approvalStatus } = useApprovalStatus(pageKey, year)
 
-  // 管理員儲存 Hook
-  const { save: adminSave } = useAdminSave(pageKey, reviewEntryId)
+  // 審核通過或審核模式下只有管理員可編輯
+  const isReadOnly = approvalStatus.isApproved || (isReviewMode && role !== 'admin')
 
-  // 提交 Hook（多記錄專用）- 使用回調避免抽象洩漏
-  const {
-    submit,
-    save,
-    submitting: submitLoading
-  } = useMultiRecordSubmit(pageKey, year, {
-    onSubmitSuccess: () => {
-      setSuccessModalType('submit')
-      setShowSuccessModal(true)
-    },
-    onSaveSuccess: () => {
-      setSuccessModalType('save')
-      setShowSuccessModal(true)
-    }
-  })
+  const editPermissions = useEditPermissions(currentStatus, isReadOnly, role ?? undefined)
+
+  // 管理員儲存 Hook
+  const { save: adminSave, saving: adminSaving } = useAdminSave(pageKey, reviewEntryId)
+
+  // 提交狀態管理
+  const [submitError, setSubmitError] = useState<string | null>(null)
+  const [submitSuccess, setSubmitSuccess] = useState<string | null>(null)
 
   // 清除 Hook
   const {
@@ -139,15 +121,6 @@ export default function SF6Page() {
 
   // 幽靈檔案清理 Hook
   const { cleanFiles } = useGhostFileCleaner()
-
-  // 檔案映射 Hook
-  const {
-    uploadRecordFiles,
-    getRecordFiles,
-    loadFileMapping,
-    getFileMappingForPayload,
-    removeRecordMapping
-  } = useRecordFileMapping(pageKey, currentEntryId)
 
   // ========== 資料載入邏輯 ==========
   // 第一步：Entry 載入後解析資料
@@ -176,12 +149,6 @@ export default function SF6Page() {
           }))
 
           setSavedDevices(updated)
-
-          // 載入檔案映射表
-          const payload = loadedEntry.payload || loadedEntry.extraPayload
-          if (payload) {
-            loadFileMapping(payload)
-          }
         }
       }
     }
@@ -203,11 +170,14 @@ export default function SF6Page() {
 
           setSavedDevices(prev => {
             return prev.map((device) => {
-              const filesForThisDevice = getRecordFiles(device.id, validSF6Files)
+              // 分別取得銘牌和證明文件
+              const nameplateFiles = validSF6Files.filter(f => f.record_id === `${device.id}-nameplate`)
+              const certificateFiles = validSF6Files.filter(f => f.record_id === `${device.id}-certificate`)
+
               return {
                 ...device,
-                nameplateFiles: filesForThisDevice,
-                certificateFiles: [],
+                nameplateFiles,
+                certificateFiles,
                 memoryNameplateFiles: [],
                 memoryCertificateFiles: []
               }
@@ -222,116 +192,240 @@ export default function SF6Page() {
   }, [loadedFiles, pageKey, dataLoading])
 
   // ========== 事件處理 ==========
-  const handleSubmit = async () => {
-    await executeSubmit(async () => {
-      // 計算總 SF6 重量
-      const totalWeight = savedDevices.reduce((sum, device) => sum + device.sf6Weight, 0)
 
-      // 準備提交資料
-      const cleanedDeviceData = savedDevices.map(({
-        id,
-        location,
-        sf6Weight,
-        model,
-        leakageRate,
-        groupId
-      }) => ({
-        id,
-        location,
-        sf6Weight,
-        model,
-        leakageRate,
-        groupId
-      }))
+  // 準備乾淨的設備資料（移除前端專用欄位）
+  const prepareCleanedDeviceData = () => {
+    return savedDevices.map(({
+      id,
+      location,
+      sf6Weight,
+      model,
+      leakageRate,
+      groupId
+    }) => ({
+      id,
+      location,
+      sf6Weight,
+      model,
+      leakageRate,
+      groupId
+    }))
+  }
 
-      // 準備記錄資料（用於檔案上傳）
-      const recordData = savedDevices.map((device) => {
-        return {
-          id: device.id,
-          memoryFiles: [
-            ...(device.memoryNameplateFiles || []),
-            ...(device.memoryCertificateFiles || [])
-          ],
-          allRecordIds: [device.id]
-        }
+  // 處理設備檔案上傳（銘牌和證明文件）
+  const handleDeviceFilesUpload = async (entryId: string) => {
+    console.log('📤 [handleDeviceFilesUpload] 開始處理檔案，設備數量:', savedDevices.length)
+
+    for (const device of savedDevices) {
+      console.log('📤 [handleDeviceFilesUpload] 處理設備:', {
+        deviceId: device.id,
+        memoryNameplateFilesCount: device.memoryNameplateFiles?.length || 0,
+        memoryCertificateFilesCount: device.memoryCertificateFiles?.length || 0
       })
 
-      // 使用 hook 的 submit 函數
-      await submit({
-        entryInput: {
-          page_key: pageKey,
-          period_year: year,
-          unit: SF6_CONFIG.unit,
-          monthly: { '1': totalWeight },
-          notes: `${SF6_CONFIG.title}使用共 ${savedDevices.length} 台設備`,
-          extraPayload: {
-            [SF6_CONFIG.dataFieldName]: cleanedDeviceData,
-            fileMapping: getFileMappingForPayload()
+      // 銘牌照片：先檢查有沒有新檔案（file.size > 0 的才是真的新檔案）
+      if (device.memoryNameplateFiles && device.memoryNameplateFiles.length > 0) {
+        const newFiles = device.memoryNameplateFiles.filter(f => f.file && f.file.size > 0)
+
+        if (newFiles.length > 0) {
+          // 有新檔案才刪除舊的
+          const oldNameplateFiles = loadedFiles.filter(f =>
+            f.record_id === `${device.id}-nameplate` && f.file_type === 'other'
+          )
+          for (const oldFile of oldNameplateFiles) {
+            try {
+              await deleteEvidence(oldFile.id)
+            } catch {
+              // Continue on error
+            }
           }
-        },
-        recordData,
-        uploadRecordFiles,
-        onSuccess: async (entry_id) => {
-          setCurrentEntryId(entry_id)
-          await reload()
+
+          // 上傳新檔案
+          for (const file of newFiles) {
+            await uploadEvidenceFile(file.file, {
+              page_key: pageKey,
+              period_year: year,
+              file_type: 'other',
+              entry_id: entryId,
+              record_id: `${device.id}-nameplate`,
+              standard: '64'
+            })
+          }
+        }
+      }
+
+      // 證明文件：先檢查有沒有新檔案（file.size > 0 的才是真的新檔案）
+      if (device.memoryCertificateFiles && device.memoryCertificateFiles.length > 0) {
+        const newFiles = device.memoryCertificateFiles.filter(f => f.file && f.file.size > 0)
+
+        if (newFiles.length > 0) {
+          // 有新檔案才刪除舊的
+          const oldCertificateFiles = loadedFiles.filter(f =>
+            f.record_id === `${device.id}-certificate` && f.file_type === 'other'
+          )
+          for (const oldFile of oldCertificateFiles) {
+            try {
+              await deleteEvidence(oldFile.id)
+            } catch {
+              // Continue on error
+            }
+          }
+
+          // 上傳新檔案
+          for (const file of newFiles) {
+            await uploadEvidenceFile(file.file, {
+              page_key: pageKey,
+              period_year: year,
+              file_type: 'other',
+              entry_id: entryId,
+              record_id: `${device.id}-certificate`,
+              standard: '64'
+            })
+          }
+        }
+      }
+    }
+  }
+
+  // 統一提交函數（提交和暫存）
+  const submitData = async (isDraft: boolean) => {
+    if (savedDevices.length === 0) {
+      throw new Error('請至少新增一個設備')
+    }
+
+    setSubmitting(true)
+    try {
+      const totalWeight = savedDevices.reduce((sum, device) => sum + device.sf6Weight, 0)
+      const cleanedDeviceData = prepareCleanedDeviceData()
+
+      // 1. 提交 entry
+      const response = await submitEnergyEntry({
+        page_key: pageKey,
+        period_year: year,
+        unit: SF6_CONFIG.unit,
+        monthly: { '1': totalWeight },
+        status: isDraft ? 'saved' : 'submitted',
+        notes: `${SF6_CONFIG.title}使用共 ${savedDevices.length} 台設備`,
+        payload: {
+          [SF6_CONFIG.dataFieldName]: cleanedDeviceData
         }
       })
 
-      await handleSubmitSuccess();
+      // 2. 上傳檔案
+      await handleDeviceFilesUpload(response.entry_id)
+
+      setCurrentEntryId(response.entry_id)
+      setSubmitSuccess(isDraft ? '暫存成功' : '提交成功')
+
+      await reload()
+
+      if (!isDraft) {
+        await handleSubmitSuccess()
+      }
+
       reloadApprovalStatus()
-    }).catch(error => {
-      setError(error instanceof Error ? error.message : '提交失敗，請重試');
-    })
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  const handleSubmit = async () => {
+    try {
+      await submitData(false)
+    } catch (error) {
+      setError(error instanceof Error ? error.message : '提交失敗')
+      setSubmitError(error instanceof Error ? error.message : '提交失敗')
+    }
   };
 
+  // 收集管理員儲存所需的檔案（上傳和刪除清單）
+  const collectFilesForAdminSave = () => {
+    const filesToUpload: Array<{
+      file: File
+      metadata: {
+        recordIndex: number
+        fileType: 'other'
+        recordId?: string
+      }
+    }> = []
+    const filesToDelete: string[] = []
+
+    savedDevices.forEach((device, index) => {
+      // 銘牌照片：只上傳新檔案（file.size > 0 的才是真的新檔案）
+      if (device.memoryNameplateFiles && device.memoryNameplateFiles.length > 0) {
+        const newFiles = device.memoryNameplateFiles.filter((mf: MemoryFile) => mf.file && mf.file.size > 0)
+
+        if (newFiles.length > 0) {
+          newFiles.forEach((mf: MemoryFile) => {
+            filesToUpload.push({
+              file: mf.file,
+              metadata: {
+                recordIndex: index,
+                fileType: 'other',
+                recordId: `${device.id}-nameplate`
+              }
+            })
+          })
+
+          // 刪除舊的銘牌檔案
+          const oldNameplateFiles = loadedFiles.filter(f =>
+            f.record_id === `${device.id}-nameplate` && f.file_type === 'other'
+          )
+          oldNameplateFiles.forEach(f => filesToDelete.push(f.id))
+        }
+      }
+
+      // 證明文件：只上傳新檔案（file.size > 0 的才是真的新檔案）
+      if (device.memoryCertificateFiles && device.memoryCertificateFiles.length > 0) {
+        const newFiles = device.memoryCertificateFiles.filter((mf: MemoryFile) => mf.file && mf.file.size > 0)
+
+        if (newFiles.length > 0) {
+          newFiles.forEach((mf: MemoryFile) => {
+            filesToUpload.push({
+              file: mf.file,
+              metadata: {
+                recordIndex: index,
+                fileType: 'other',
+                recordId: `${device.id}-certificate`
+              }
+            })
+          })
+
+          // 刪除舊的證明文件
+          const oldCertificateFiles = loadedFiles.filter(f =>
+            f.record_id === `${device.id}-certificate` && f.file_type === 'other'
+          )
+          oldCertificateFiles.forEach(f => filesToDelete.push(f.id))
+        }
+      }
+    })
+
+    return { filesToUpload, filesToDelete }
+  }
+
+  // 刪除舊檔案
+  const deleteOldFiles = async (fileIds: string[]) => {
+    if (fileIds.length > 0) {
+      for (const fileId of fileIds) {
+        try {
+          await adminDeleteEvidence(fileId)
+        } catch {
+          // Continue on error
+        }
+      }
+    }
+  }
+
   const handleSave = async () => {
-    await executeSubmit(async () => {
-      setError(null)
-      setSuccess(null)
+    // 管理員審核模式
+    if (isReviewMode && reviewEntryId) {
+      setSubmitting(true)
+      try {
+        const totalWeight = savedDevices.reduce((sum, device) => sum + device.sf6Weight, 0)
+        const cleanedDeviceData = prepareCleanedDeviceData()
+        const { filesToUpload, filesToDelete } = collectFilesForAdminSave()
 
-      // 計算總 SF6 重量
-      const totalWeight = savedDevices.reduce((sum, device) => sum + device.sf6Weight, 0)
-
-      // 準備資料
-      const cleanedDeviceData = savedDevices.map(({
-        id,
-        location,
-        sf6Weight,
-        model,
-        leakageRate,
-        groupId
-      }) => ({
-        id,
-        location,
-        sf6Weight,
-        model,
-        leakageRate,
-        groupId
-      }))
-
-      // 審核模式：使用 useAdminSave hook
-      if (isReviewMode && reviewEntryId) {
-        console.log('📝 管理員審核模式：使用 useAdminSave hook', reviewEntryId)
-
-        // 準備檔案列表（從當前編輯設備收集）
-        const filesToUpload = [
-          ...currentEditingGroup.memoryNameplateFiles.map((mf: MemoryFile) => ({
-            file: mf.file,
-            metadata: {
-              recordIndex: 0,
-              allRecordIds: [currentEditingGroup.record.id],
-              fileType: 'other' as const
-            }
-          })),
-          ...currentEditingGroup.memoryCertificateFiles.map((mf: MemoryFile) => ({
-            file: mf.file,
-            metadata: {
-              recordIndex: 0,
-              allRecordIds: [currentEditingGroup.record.id],
-              fileType: 'other' as const
-            }
-          }))
-        ]
+        await deleteOldFiles(filesToDelete)
 
         await adminSave({
           updateData: {
@@ -339,8 +433,7 @@ export default function SF6Page() {
             amount: totalWeight,
             payload: {
               monthly: { '1': totalWeight },
-              [SF6_CONFIG.dataFieldName]: cleanedDeviceData,
-              fileMapping: getFileMappingForPayload()
+              [SF6_CONFIG.dataFieldName]: cleanedDeviceData
             }
           },
           files: filesToUpload
@@ -348,48 +441,22 @@ export default function SF6Page() {
 
         await reload()
         reloadApprovalStatus()
-        setSuccess('✅ 儲存成功！資料已更新')
-        return
+        setSuccess('管理員儲存成功')
+        setSubmitSuccess('管理員儲存成功')
+      } finally {
+        setSubmitting(false)
       }
+      return
+    }
 
-      // 非審核模式：準備記錄資料
-      const recordData = savedDevices.map((device) => {
-        return {
-          id: device.id,
-          memoryFiles: [
-            ...(device.memoryNameplateFiles || []),
-            ...(device.memoryCertificateFiles || [])
-          ],
-          allRecordIds: [device.id]
-        }
-      })
-
-      // 使用 hook 的 save 函數
-      await save({
-        entryInput: {
-          page_key: pageKey,
-          period_year: year,
-          unit: SF6_CONFIG.unit,
-          monthly: { '1': totalWeight },
-          notes: `${SF6_CONFIG.title}使用共 ${savedDevices.length} 台設備`,
-          extraPayload: {
-            [SF6_CONFIG.dataFieldName]: cleanedDeviceData,
-            fileMapping: getFileMappingForPayload()
-          }
-        },
-        recordData,
-        uploadRecordFiles,
-        onSuccess: async (entry_id) => {
-          setCurrentEntryId(entry_id)
-          await reload()
-        }
-      })
-
-      reloadApprovalStatus()
-    }).catch(error => {
+    // 一般暫存
+    try {
+      await submitData(true)
+    } catch (error) {
       console.error('❌ 暫存失敗:', error)
       setError(error instanceof Error ? error.message : '暫存失敗')
-    })
+      setSubmitError(error instanceof Error ? error.message : '暫存失敗')
+    }
   };
 
   const handleClear = () => {
@@ -436,18 +503,35 @@ export default function SF6Page() {
   // 只為圖片檔案生成縮圖
   useEffect(() => {
     savedDevices.forEach(async (device) => {
-      const evidence = device.nameplateFiles?.[0] || device.certificateFiles?.[0]
-      if (evidence &&
-          evidence.mime_type.startsWith('image/') &&
-          !thumbnails[evidence.id]) {
+      // 載入銘牌照片縮圖
+      const nameplateFile = device.nameplateFiles?.[0]
+      if (nameplateFile &&
+          nameplateFile.mime_type.startsWith('image/') &&
+          !thumbnails[nameplateFile.id]) {
         try {
-          const url = await getFileUrl(evidence.file_path)
+          const url = await getFileUrl(nameplateFile.file_path)
           setThumbnails(prev => ({
             ...prev,
-            [evidence.id]: url
+            [nameplateFile.id]: url
           }))
         } catch (error) {
-          console.warn('Failed to generate thumbnail for', evidence.file_name, error)
+          console.warn('Failed to generate thumbnail for', nameplateFile.file_name, error)
+        }
+      }
+
+      // 載入證明文件縮圖
+      const certificateFile = device.certificateFiles?.[0]
+      if (certificateFile &&
+          certificateFile.mime_type.startsWith('image/') &&
+          !thumbnails[certificateFile.id]) {
+        try {
+          const url = await getFileUrl(certificateFile.file_path)
+          setThumbnails(prev => ({
+            ...prev,
+            [certificateFile.id]: url
+          }))
+        } catch (error) {
+          console.warn('Failed to generate thumbnail for', certificateFile.file_name, error)
         }
       }
     })
@@ -503,7 +587,13 @@ export default function SF6Page() {
           unit: SF6_CONFIG.unit,
           role,
           onSave: handleSave,
-          isSaving: submitLoading
+          isSaving: adminSaving || submitting
+        }}
+        notificationState={{
+          success: submitSuccess,
+          error: submitError,
+          clearSuccess: () => setSubmitSuccess(null),
+          clearError: () => setSubmitError(null)
         }}
       >
         {/* 使用數據區塊 - 使用新組件 SF6InputFields */}
@@ -528,6 +618,8 @@ export default function SF6Page() {
           iconColor={SF6_CONFIG.iconColor}
           title="GCB 氣體斷路氣設備資料"
           icon={<SettingsIcon />}
+          saveButtonNewText="+ 新增設備"
+          saveButtonText="變更儲存"
           renderInputFields={() => (
             <SF6InputFields
               record={currentEditingGroup.record}
@@ -549,7 +641,7 @@ export default function SF6Page() {
           isReadOnly={isReadOnly}
           approvalStatus={approvalStatus}
           onEditDevice={(deviceId) => loadDeviceToEditor(deviceId, setSuccess)}
-          onDeleteDevice={(deviceId) => deleteSavedDevice(deviceId, removeRecordMapping, setSuccess)}
+          onDeleteDevice={(deviceId) => deleteSavedDevice(deviceId)}
           onPreviewImage={(src: string) => setLightboxSrc(src)}
           iconColor={SF6_CONFIG.iconColor}
         />
@@ -585,14 +677,6 @@ export default function SF6Page() {
             onClose={() => setSuccess(null)}
           />
         )}
-
-        {/* 提交成功彈窗 */}
-        <SuccessModal
-          show={showSuccessModal}
-          message={success || ''}
-          type={successModalType}
-          onClose={() => setShowSuccessModal(false)}
-        />
       </SharedPageLayout>
     </>
   );

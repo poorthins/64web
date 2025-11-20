@@ -14,6 +14,7 @@ export interface MobileEnergyRecord {
   groupId?: string
   deviceType?: string  // 柴油發電機專用
   deviceName?: string  // 設備名稱
+  specId?: string      // WD-40 專用：規格 ID
 }
 
 export interface CurrentEditingGroup {

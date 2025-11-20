@@ -63,9 +63,28 @@ export const energyCategories = [...ENERGY_CONFIG]
  * 根據 page_key 取得類別名稱
  */
 export function getCategoryName(pageKey: string, fallbackCategory?: string): string {
-  // 先嘗試用 pageKey 查詢
-  const category = ENERGY_CONFIG.find(c => c.id === pageKey)
+  // 先嘗試用 pageKey 查詢（如果傳入的是 page_key）
+  let category = ENERGY_CONFIG.find(c => c.id === pageKey)
   if (category) return category.name
+
+  // 如果找不到，嘗試用顯示名稱查找（處理資料庫中直接存顯示名稱的情況）
+  if (!category) {
+    category = ENERGY_CONFIG.find(c => c.name === pageKey)
+    if (category) return category.name
+  }
+
+  // ⭐ 向後相容：處理資料庫舊格式名稱
+  if (!category) {
+    const legacyNameMap: Record<string, string> = {
+      '柴油': 'diesel',                // 舊名稱 → page_key
+      '柴油(發電機)': 'diesel_generator'
+    }
+    const mappedPageKey = legacyNameMap[pageKey]
+    if (mappedPageKey) {
+      category = ENERGY_CONFIG.find(c => c.id === mappedPageKey)
+      if (category) return category.name
+    }
+  }
 
   // 如果有提供 fallbackCategory，嘗試用它查詢
   if (fallbackCategory) {
@@ -95,6 +114,18 @@ export function getPageRouteByName(categoryName: string): string | null {
   // 如果找不到，再嘗試用顯示名稱查找
   if (!category) {
     category = ENERGY_CONFIG.find(c => c.name === categoryName)
+  }
+
+  // ⭐ 向後相容：處理資料庫舊格式名稱
+  if (!category) {
+    const legacyNameMap: Record<string, string> = {
+      '柴油': 'diesel',                // 舊名稱 → page_key
+      '柴油(發電機)': 'diesel_generator'
+    }
+    const pageKey = legacyNameMap[categoryName]
+    if (pageKey) {
+      category = ENERGY_CONFIG.find(c => c.id === pageKey)
+    }
   }
 
   return category?.route ?? null

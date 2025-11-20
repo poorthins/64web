@@ -32,6 +32,9 @@ export function useSubmitGuard() {
 
     try {
       await fn()
+    } catch (error) {
+      // 重新拋出錯誤,讓上層可以處理
+      throw error
     } finally {
       guardRef.current = false
       setSubmitting(false)

@@ -1,7 +1,6 @@
 import { useState, useEffect, useMemo } from 'react';
 import { EntryStatus } from '../../components/StatusSwitcher';
 import ConfirmClearModal from '../../components/ConfirmClearModal'
-import SuccessModal from '../../components/SuccessModal'
 import SharedPageLayout from '../../layouts/SharedPageLayout'
 import { useEditPermissions } from '../../hooks/useEditPermissions';
 import { useFrontendStatus } from '../../hooks/useFrontendStatus';
@@ -38,8 +37,6 @@ export default function UreaPage() {
   const [initialStatus, setInitialStatus] = useState<EntryStatus>('submitted')
   const [currentEntryId, setCurrentEntryId] = useState<string | null>(null)
   const { executeSubmit, submitting } = useSubmitGuard()
-  const [showSuccessModal, setShowSuccessModal] = useState(false)
-  const [successModalType, setSuccessModalType] = useState<'save' | 'submit'>('submit')
   const [showClearConfirmModal, setShowClearConfirmModal] = useState(false)
 
   // 圖片放大 lightbox
@@ -50,6 +47,9 @@ export default function UreaPage() {
 
   // ⭐ 尿素特有：SDS 安全資料表
   const [sdsFile, setSdsFile] = useState<MemoryFile | null>(null);
+
+  // ⭐ 追蹤待刪除的檔案 ID（編輯模式刪除舊檔案時使用）
+  const [filesToDelete, setFilesToDelete] = useState<string[]>([]);
 
   // 前端狀態管理 Hook
   const frontendStatus = useFrontendStatus({
@@ -90,17 +90,12 @@ export default function UreaPage() {
   const {
     submit,
     save,
-    submitting: submitLoading
-  } = useMultiRecordSubmit(pageKey, year, {
-    onSubmitSuccess: () => {
-      setSuccessModalType('submit')
-      setShowSuccessModal(true)
-    },
-    onSaveSuccess: () => {
-      setSuccessModalType('save')
-      setShowSuccessModal(true)
-    }
-  })
+    submitting: submitLoading,
+    error: submitError,
+    success: submitSuccess,
+    clearError: clearSubmitError,
+    clearSuccess: clearSubmitSuccess
+  } = useMultiRecordSubmit(pageKey, year)
 
   // 清除 Hook
   const {
@@ -290,6 +285,11 @@ export default function UreaPage() {
     }))
   }
 
+  // 記錄要刪除的檔案 ID（編輯模式刪除舊檔案）
+  const handleDeleteEvidence = (fileId: string) => {
+    setFilesToDelete(prev => [...prev, fileId])
+  }
+
   // 保存群組：新增或更新
   const saveCurrentGroup = () => {
     const { groupId, records, memoryFiles } = currentEditingGroup
@@ -317,11 +317,18 @@ export default function UreaPage() {
 
     const targetGroupId = isEditMode ? groupId : generateRecordId()
 
-    // 將 groupId 和 memoryFiles 套用到所有記錄
-    const recordsWithGroupId = records.map(r => ({
+    // ⭐ 過濾出有效記錄（有日期或數量的記錄）
+    const validRecords = records.filter(r =>
+      r.date.trim() !== '' || r.quantity > 0
+    )
+
+    // 將 groupId 套用到有效記錄
+    // ⚠️ 注意：不要把 memoryFiles 存到 savedGroups，因為這些檔案只應該在提交時上傳一次
+    // 如果存到 savedGroups，重新載入後會導致重複顯示（memoryFiles + evidenceFiles）
+    const recordsWithGroupId = validRecords.map(r => ({
       ...r,
       groupId: targetGroupId,
-      memoryFiles: [...memoryFiles]
+      memoryFiles: isEditMode ? [] : [...memoryFiles]  // 編輯模式清空，新增模式保留
     }))
 
     if (isEditMode) {
@@ -536,6 +543,19 @@ export default function UreaPage() {
 
         await reload()
 
+        // 批次刪除被移除的檔案
+        if (filesToDelete.length > 0) {
+          for (const fileId of filesToDelete) {
+            try {
+              await deleteEvidence(fileId)
+              console.log('✅ 已刪除檔案:', fileId)
+            } catch (error) {
+              console.error('❌ 刪除檔案失敗:', fileId, error)
+            }
+          }
+          setFilesToDelete([])  // 清空待刪除列表
+        }
+
         reloadApprovalStatus()
         setCurrentEditingGroup({ groupId: null, records: createEmptyRecords(), memoryFiles: [] })
         setSuccess('✅ 儲存成功！資料已更新')
@@ -568,6 +588,19 @@ export default function UreaPage() {
           // ⭐ 簡化為 2 行（原本 ~55 行）
           setCurrentEntryId(entry_id)
           await reload()
+
+          // 批次刪除被移除的檔案
+          if (filesToDelete.length > 0) {
+            for (const fileId of filesToDelete) {
+              try {
+                await deleteEvidence(fileId)
+                console.log('✅ 已刪除檔案:', fileId)
+              } catch (error) {
+                console.error('❌ 刪除檔案失敗:', fileId, error)
+              }
+            }
+            setFilesToDelete([])  // 清空待刪除列表
+          }
         }
       })
 
@@ -748,6 +781,12 @@ export default function UreaPage() {
         onSave: handleSave,
         isSaving: submitLoading
       }}
+      notificationState={{
+        success: submitSuccess,
+        error: submitError,
+        clearSuccess: clearSubmitSuccess,
+        clearError: clearSubmitError
+      }}
     >
       {/* ⭐ SDS 安全資料表上傳區（尿素特有） */}
       <SDSUploadSection
@@ -776,6 +815,7 @@ export default function UreaPage() {
         thumbnails={thumbnails}
         onPreviewImage={(src) => setLightboxSrc(src)}
         onError={(msg) => setError(msg)}
+        onDeleteEvidence={handleDeleteEvidence}
         iconColor={UREA_CONFIG.iconColor}
       />
 
@@ -822,14 +862,6 @@ export default function UreaPage() {
           onClose={() => setSuccess(null)}
         />
       )}
-
-      {/* 提交成功彈窗 */}
-      <SuccessModal
-        show={showSuccessModal}
-        message={success || ''}
-        type={successModalType}
-        onClose={() => setShowSuccessModal(false)}
-      />
     </SharedPageLayout>
     </>
   );

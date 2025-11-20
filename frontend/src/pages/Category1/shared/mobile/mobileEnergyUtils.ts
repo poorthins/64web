@@ -35,7 +35,8 @@ export const prepareSubmissionData = (energyData: MobileEnergyRecord[]) => {
     id: r.id,
     date: r.date,
     quantity: r.quantity,
-    groupId: r.groupId
+    groupId: r.groupId,
+    ...(r.specId !== undefined && { specId: r.specId })  // ⭐ 保留 specId（WD40 專用）
   }))
 
   // 建立群組 → recordIds 映射表

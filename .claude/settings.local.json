@@ -58,7 +58,22 @@
       "Bash(mkdir:*)",
       "Bash(Stop-Process -Id 18684 -Force)",
       "Bash(dir:*)",
-      "Bash(npm --prefix frontend run build)"
+      "Bash(npm --prefix frontend run build)",
+      "Bash(del \"C:\\Users\\Tim\\Desktop\\python\\64web\\frontend\\src\\pages\\Category1\\WD40Page.tsx\")",
+      "Bash(npx --prefix frontend tsc:*)",
+      "Bash(npm --prefix frontend list:*)",
+      "Bash(cat:*)",
+      "Bash(node:*)",
+      "Bash(npm --version:*)",
+      "Bash(test-evidence.txt)",
+      "Bash(pip install:*)",
+      "Bash(python app.py:*)",
+      "Bash(curl:*)",
+      "Bash(pytest:*)",
+      "Bash(python -m pytest:*)",
+      "Bash(paste:*)",
+      "Bash(python:*)",
+      "Bash(cp:*)"
     ],
     "deny": [],
     "ask": []

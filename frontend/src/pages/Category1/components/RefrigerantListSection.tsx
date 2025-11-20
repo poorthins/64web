@@ -11,7 +11,7 @@
 import { useMemo } from 'react'
 import { ChevronDown, ChevronRight } from 'lucide-react'
 import { getFileUrl } from '../../../api/files'
-import { RefrigerantDevice } from '../hooks/useRefrigerantDeviceManager'
+import type { RefrigerantDevice } from '../RefrigerantPage'
 import { ActionButtons } from '../../../components/energy/ActionButtons'
 
 // ==================== 介面定義 ====================
@@ -56,8 +56,8 @@ export function RefrigerantListSection({
       <div style={{ marginTop: '116.75px', marginLeft: '367px' }}>
         <div className="flex items-center gap-[29px]">
           <div className="w-[42px] h-[42px] rounded-[10px] flex items-center justify-center flex-shrink-0" style={{ backgroundColor: "#6197C5" }}>
-            <svg width="29" height="29" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M4 6h16M4 12h16M4 18h16" />
+            <svg xmlns="http://www.w3.org/2000/svg" width="34" height="34" viewBox="0 0 34 34" fill="none">
+              <path d="M11.3333 8.5H29.75M11.3333 17H29.75M11.3333 25.5H29.75M4.25 8.5H4.26417M4.25 17H4.26417M4.25 25.5H4.26417" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
             </svg>
           </div>
           <div className="flex flex-col justify-center h-[86px]">
@@ -69,7 +69,7 @@ export function RefrigerantListSection({
       </div>
 
       {/* 列表 */}
-      <div className="flex flex-col items-center" style={{ marginTop: '34px', marginBottom: '32px', gap: '24px' }}>
+      <div className="flex flex-col items-center" style={{ marginTop: '34px', marginBottom: '120px', gap: '24px' }}>
         {Object.entries(groupedDevices).map(([equipmentType, deviceGroup]) => {
           const photoCount = deviceGroup.reduce((sum, device) => {
             const hasEvidence = (device.evidenceFiles?.length || 0) > 0
@@ -77,18 +77,25 @@ export function RefrigerantListSection({
             return sum + (hasEvidence ? 1 : 0) + (hasMemory ? 1 : 0)
           }, 0)
 
+          // 检查该组内是否有设备缺少照片
+          const hasDeviceWithoutPhoto = deviceGroup.some(device => {
+            const hasEvidence = (device.evidenceFiles?.length || 0) > 0
+            const hasMemory = (device.memoryFiles?.length || 0) > 0
+            return !hasEvidence && !hasMemory
+          })
+
           return (
             <div key={equipmentType} style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
               {/* 分組頭部 */}
               <div
                 onClick={() => onToggleGroup(equipmentType)}
                 style={{
-                  width: '785px',
+                  width: '924px',
                   height: '87px',
                   flexShrink: 0,
                   borderRadius: '28px',
                   border: '1px solid rgba(0, 0, 0, 0.25)',
-                  background: '#FFF',
+                  background: hasDeviceWithoutPhoto ? '#E5FB76' : '#FFF',
                   display: 'flex',
                   alignItems: 'center',
                   paddingLeft: '30px',
@@ -104,26 +111,75 @@ export function RefrigerantListSection({
                 )}
 
                 <div style={{ flex: 1 }}>
-                  <span style={{ fontSize: '20px', fontWeight: 600, color: '#000' }}>
+                  <span style={{
+                    fontSize: '24px',
+                    fontWeight: 400,
+                    color: '#000',
+                    fontFamily: 'Inter'
+                  }}>
                     {equipmentType}
                   </span>
                 </div>
 
                 <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                  <span style={{ fontSize: '18px', color: '#666' }}>{deviceGroup.length} 筆</span>
+                  <span style={{
+                    fontSize: '28px',
+                    fontWeight: 700,
+                    color: '#000',
+                    fontFamily: 'Inter'
+                  }}>
+                    {deviceGroup.length}
+                  </span>
+                  <span style={{
+                    fontSize: '24px',
+                    fontWeight: 400,
+                    color: '#000',
+                    fontFamily: 'Inter'
+                  }}>
+                    筆
+                  </span>
                 </div>
 
-                <div style={{ width: '1px', height: '40px', background: 'rgba(0, 0, 0, 0.15)' }} />
+                <div style={{
+                  fontSize: '24px',
+                  fontWeight: 400,
+                  color: '#000',
+                  fontFamily: 'Inter'
+                }}>
+                  /
+                </div>
 
                 <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                  <span style={{ fontSize: '18px', color: '#666' }}>銘牌照片</span>
-                  <span style={{ fontSize: '18px', fontWeight: 600, color: '#000' }}>{photoCount} 張</span>
+                  <span style={{
+                    fontSize: '24px',
+                    fontWeight: 400,
+                    color: '#000',
+                    fontFamily: 'Inter'
+                  }}>
+                    銘牌照片
+                  </span>
+                  <span style={{
+                    fontSize: '28px',
+                    fontWeight: 500,
+                    color: '#000',
+                    fontFamily: 'Inter'
+                  }}>
+                    {photoCount}
+                  </span>
+                  <span style={{
+                    fontSize: '24px',
+                    fontWeight: 400,
+                    color: '#000',
+                    fontFamily: 'Inter'
+                  }}>
+                    張
+                  </span>
                 </div>
               </div>
 
               {/* 展開的設備列表 */}
               {expandedGroups.has(equipmentType) && (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', paddingLeft: '40px' }}>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', paddingLeft: '24px' }}>
                   {deviceGroup.map((device) => {
                     const evidenceFile = device.evidenceFiles?.[0]
                     const memoryFile = device.memoryFiles?.[0]
@@ -135,11 +191,11 @@ export function RefrigerantListSection({
                       <div
                         key={device.id}
                         style={{
-                          width: '745px',
+                          width: '900px',
                           minHeight: '70px',
                           borderRadius: '20px',
                           border: '1px solid rgba(0, 0, 0, 0.15)',
-                          background: '#F9FAFB',
+                          background: hasPhoto ? '#F9FAFB' : '#E5FB76',
                           display: 'flex',
                           alignItems: 'center',
                           paddingLeft: '20px',
@@ -195,33 +251,37 @@ export function RefrigerantListSection({
                         )}
 
                         {/* 設備資訊 */}
-                        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                          <div style={{ display: 'flex', gap: '12px', fontSize: '15px' }}>
-                            <span style={{ fontWeight: 600, color: '#000' }}>
-                              {device.brandModel || '未填廠牌/型號'}
-                            </span>
-                            <span style={{ color: '#666' }}>·</span>
-                            <span style={{ color: '#666' }}>
-                              {device.equipmentType || '未分類'}
-                            </span>
-                          </div>
-                          <div style={{ display: 'flex', gap: '12px', fontSize: '14px', color: '#666' }}>
-                            <span>
-                              {device.refrigerantType || '未填冷媒類型'}
-                            </span>
-                            <span>·</span>
-                            <span>
-                              {device.fillAmount > 0
-                                ? `${device.fillAmount} ${device.unit === 'kg' ? '公斤' : '公克'}`
-                                : '未填充量'}
-                            </span>
-                            {device.equipmentLocation && (
-                              <>
-                                <span>·</span>
-                                <span>{device.equipmentLocation}</span>
-                              </>
-                            )}
-                          </div>
+                        <div style={{
+                          flex: 1,
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '12px',
+                          color: '#000',
+                          fontFamily: 'Inter',
+                          fontSize: '24px',
+                          fontWeight: 300
+                        }}>
+                          <span>
+                            {device.brandModel || '未填廠牌/型號'}
+                          </span>
+                          <span>/</span>
+                          <span>
+                            {device.refrigerantType || '未填冷媒類型'}
+                          </span>
+                          <span>/</span>
+                          <span>
+                            {device.fillAmount > 0
+                              ? `${device.fillAmount} ${device.unit === 'kg' ? 'kg' : 'g'}`
+                              : '未填充量'}
+                          </span>
+                          {device.equipmentLocation && (
+                            <>
+                              <span>/</span>
+                              <span>
+                                {device.equipmentLocation}
+                              </span>
+                            </>
+                          )}
                         </div>
 
                         {/* 操作按鈕 */}

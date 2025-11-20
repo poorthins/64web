@@ -6,8 +6,6 @@ import { designTokens } from '../utils/designTokens'
 interface SuccessModalProps {
   /** 是否顯示 Modal */
   show: boolean
-  /** 成功訊息內容 */
-  message: string
   /** 關閉的回調函數 */
   onClose: () => void
   /** 類型：save (儲存) 或 submit (提交) */
@@ -30,7 +28,6 @@ interface SuccessModalProps {
  */
 export const SuccessModal: React.FC<SuccessModalProps> = ({
   show,
-  message,
   onClose,
   type = 'submit'
 }) => {
@@ -74,19 +71,11 @@ export const SuccessModal: React.FC<SuccessModalProps> = ({
 
             {/* 標題 */}
             <h3
-              className="text-lg font-medium mb-2"
+              className="text-lg font-medium mb-4"
               style={{ color: designTokens.colors.textPrimary }}
             >
               {title}
             </h3>
-
-            {/* 成功訊息 */}
-            <p
-              className="mb-4 font-medium text-lg"
-              style={{ color: designTokens.colors.textPrimary }}
-            >
-              {message}
-            </p>
 
             {/* 提示資訊卡片 */}
             <div

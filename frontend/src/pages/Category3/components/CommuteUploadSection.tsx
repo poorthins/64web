@@ -1,5 +1,6 @@
 import React from 'react';
 import { IconUpload } from '../../../components/icons';
+import { Trash2 } from 'lucide-react';
 import FileDropzone from '../../../components/FileDropzone';
 import { EvidenceFile, getFileUrl } from '../../../api/files';
 import type { MemoryFile } from '../../../services/documentHandler';
@@ -106,22 +107,19 @@ export const CommuteUploadSection: React.FC<CommuteUploadSectionProps> = ({
       {/* 內容區塊 - SDS 樣式上傳框容器 */}
       <div className="flex justify-center" style={{ marginTop: '34px', marginBottom: '32px' }}>
         <div
-          className="relative"
           style={{
             width: '1005px',
-            height: '449px',
+            minHeight: '449px',
             backgroundColor: '#EBEDF0',
-            borderRadius: '37px'
+            borderRadius: '37px',
+            paddingTop: '68px',
+            paddingBottom: '68px',
+            paddingLeft: '49px',
+            paddingRight: '49px'
           }}
         >
-          {/* FileDropzone 組件 - 絕對定位 */}
-          <div
-            className="absolute"
-            style={{
-              top: '68px',
-              left: '49px'
-            }}
-          >
+          {/* FileDropzone 組件 */}
+          <div>
             <FileDropzone
               width="904px"
               height="210px"
@@ -135,51 +133,48 @@ export const CommuteUploadSection: React.FC<CommuteUploadSectionProps> = ({
               secondaryText="僅支援上傳 1 個 Excel 檔案（.xlsx, .xls），最大 10MB"
             />
           </div>
+
+          {/* 已上傳檔案列表 - 在上傳框內 */}
+          {excelFile.length > 0 && (
+            <div style={{ marginTop: '32px' }}>
+              <h4 className="text-[20px] font-semibold mb-4" style={{ color: '#000', fontFamily: 'Inter' }}>已上傳檔案</h4>
+              <div className="space-y-3">
+                {excelFile.map((file) => (
+                  <div
+                    key={file.id}
+                    className="flex items-center justify-between p-4 bg-white rounded-lg border border-gray-200"
+                    style={{ width: '904px' }}
+                  >
+                    <div className="flex items-center gap-3">
+                      <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke={iconColor} strokeWidth="2">
+                        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                        <polyline points="14 2 14 8 20 8" />
+                        <line x1="12" y1="18" x2="12" y2="12" />
+                        <line x1="9" y1="15" x2="15" y2="15" />
+                      </svg>
+                      <div>
+                        <p className="text-[16px] font-medium">{file.file_name}</p>
+                        <p className="text-[14px] text-gray-500">
+                          {(file.file_size / 1024).toFixed(2)} KB
+                        </p>
+                      </div>
+                    </div>
+                    {!isReadOnly && !disabled && (
+                      <button
+                        onClick={() => onExcelFilesChange(excelFile.filter(f => f.id !== file.id))}
+                        className="p-2 text-black hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                        title="刪除檔案"
+                      >
+                        <Trash2 style={{ width: '32px', height: '32px' }} />
+                      </button>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
       </div>
-
-      {/* 已上傳檔案列表 */}
-      {excelFile.length > 0 && (
-        <div className="flex justify-center" style={{ marginTop: '32px', marginBottom: '32px' }}>
-          <div style={{ width: '1005px' }}>
-            <h4 className="text-[20px] font-semibold mb-4">已上傳檔案</h4>
-            <div className="space-y-3">
-              {excelFile.map((file) => (
-                <div
-                  key={file.id}
-                  className="flex items-center justify-between p-4 bg-white rounded-lg border border-gray-200"
-                >
-                  <div className="flex items-center gap-3">
-                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke={iconColor} strokeWidth="2">
-                      <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
-                      <polyline points="14 2 14 8 20 8" />
-                      <line x1="12" y1="18" x2="12" y2="12" />
-                      <line x1="9" y1="15" x2="15" y2="15" />
-                    </svg>
-                    <div>
-                      <p className="text-[16px] font-medium">{file.file_name}</p>
-                      <p className="text-[14px] text-gray-500">
-                        {(file.file_size / 1024).toFixed(2)} KB
-                      </p>
-                    </div>
-                  </div>
-                  {!isReadOnly && !disabled && (
-                    <button
-                      onClick={() => onExcelFilesChange(excelFile.filter(f => f.id !== file.id))}
-                      className="text-red-500 hover:text-red-700 transition-colors"
-                    >
-                      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                        <polyline points="3 6 5 6 21 6" />
-                        <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
-                      </svg>
-                    </button>
-                  )}
-                </div>
-              ))}
-            </div>
-          </div>
-        </div>
-      )}
 
       {/* 底部佔位空間，避免被 BottomActionBar 擋住 */}
       <div className="h-20"></div>

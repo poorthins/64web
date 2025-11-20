@@ -12,8 +12,8 @@ export interface FileMetadata {
   recordIndex?: number  // 用於多筆記錄頁面（如柴油），表示記錄索引 (0, 1, 2...) - 舊做法
   recordId?: string  // 用於多筆記錄頁面，穩定的記錄 ID（如 "fire_extinguisher_123"）- 新做法
   allRecordIds?: string[]  // ⭐ 群組的所有 recordId（用於 N:1 共享佐證）
-  fileType?: 'msds' | 'usage_evidence' | 'other' | 'heat_value_evidence' | 'annual_evidence' | 'nameplate_evidence'  // ⭐ 新增檔案類型欄位
-  category?: 'msds' | 'usage_evidence' | 'other' | 'heat_value_evidence' | 'annual_evidence' | 'nameplate_evidence'  // 向後相容（已廢棄）
+  fileType?: 'msds' | 'usage_evidence' | 'other' | 'heat_value_evidence' | 'annual_evidence' | 'nameplate_evidence' | 'sf6_nameplate' | 'sf6_certificate'  // ⭐ 新增 SF6 檔案類型
+  category?: 'msds' | 'usage_evidence' | 'other' | 'heat_value_evidence' | 'annual_evidence' | 'nameplate_evidence' | 'sf6_nameplate' | 'sf6_certificate'  // 向後相容（已廢棄）
 }
 
 export interface UploadOptions {
@@ -34,7 +34,7 @@ export interface EvidenceFile {
   record_index?: number | null  // 記錄索引（用於多筆記錄頁面）- 舊做法
   record_id?: string | null  // 記錄 ID（穩定 ID）- 舊做法
   record_ids?: string[] | null  // 記錄 IDs（多對一關係）- 新做法
-  file_type: 'msds' | 'usage_evidence' | 'other' | 'heat_value_evidence' | 'annual_evidence' | 'nameplate_evidence'  // 檔案類型欄位 (必填)
+  file_type: 'msds' | 'usage_evidence' | 'other' | 'heat_value_evidence' | 'annual_evidence' | 'nameplate_evidence' | 'sf6_nameplate' | 'sf6_certificate'  // 檔案類型欄位 (必填)
   // Join fields from energy_entries
   status?: 'saved' | 'submitted' | 'approved' | 'rejected'  // From energy_entries
   period_year?: number  // From energy_entries

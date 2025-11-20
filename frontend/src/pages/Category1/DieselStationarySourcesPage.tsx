@@ -1,7 +1,6 @@
 import { useState, useEffect, useMemo } from 'react';
 import { EntryStatus } from '../../components/StatusSwitcher';
 import ConfirmClearModal from '../../components/ConfirmClearModal'
-import SuccessModal from '../../components/SuccessModal'
 import ErrorModal from '../../components/ErrorModal'
 import SharedPageLayout from '../../layouts/SharedPageLayout'
 import { useEditPermissions } from '../../hooks/useEditPermissions';
@@ -37,8 +36,6 @@ export default function DieselStationarySourcesPage() {
   const [initialStatus, setInitialStatus] = useState<EntryStatus>('submitted')
   const [currentEntryId, setCurrentEntryId] = useState<string | null>(null)
   const { executeSubmit, submitting } = useSubmitGuard()
-  const [showSuccessModal, setShowSuccessModal] = useState(false)
-  const [successModalType, setSuccessModalType] = useState<'save' | 'submit'>('submit')
   const [showClearConfirmModal, setShowClearConfirmModal] = useState(false)
 
   // 柴油發電機專用：設備類型
@@ -89,17 +86,11 @@ export default function DieselStationarySourcesPage() {
     submit,
     save,
     submitting: submitLoading,
-    clearError: clearSubmitError
-  } = useMultiRecordSubmit(pageKey, year, {
-    onSubmitSuccess: () => {
-      setSuccessModalType('submit')
-      setShowSuccessModal(true)
-    },
-    onSaveSuccess: () => {
-      setSuccessModalType('save')
-      setShowSuccessModal(true)
-    }
-  })
+    error: submitError,
+    success: submitSuccess,
+    clearError: clearSubmitError,
+    clearSuccess: clearSubmitSuccess
+  } = useMultiRecordSubmit(pageKey, year)
 
   const {
     clear,
@@ -279,9 +270,9 @@ export default function DieselStationarySourcesPage() {
 
     const finalDeviceType = deviceType === '其他' ? customDeviceType : deviceType
 
-    // 過濾有效記錄
+    // ⭐ 過濾出有效記錄（有日期或數量的記錄）
     const validRecords = currentEditingGroup.records.filter(r =>
-      r.date && r.quantity > 0
+      r.date.trim() !== '' || r.quantity > 0
     )
 
     if (validRecords.length === 0) {
@@ -538,6 +529,12 @@ export default function DieselStationarySourcesPage() {
         show: !isReviewMode || role === 'admin',
         accentColor: DIESEL_GENERATOR_CONFIG.iconColor
       }}
+      notificationState={{
+        success: submitSuccess,
+        error: submitError,
+        clearSuccess: clearSubmitSuccess,
+        clearError: clearSubmitError
+      }}
     >
       {/* 使用數據區 */}
       <MobileEnergyUsageSection
@@ -598,13 +595,6 @@ export default function DieselStationarySourcesPage() {
         onConfirm={handleClear}
         onCancel={() => setShowClearConfirmModal(false)}
         isClearing={clearLoading}
-      />
-
-      {/* 成功彈窗 */}
-      <SuccessModal
-        show={showSuccessModal}
-        message={successModalType === 'save' ? '資料已成功儲存' : '資料已成功提交審核'}
-        onClose={() => setShowSuccessModal(false)}
       />
 
       {/* 圖片放大 Lightbox */}

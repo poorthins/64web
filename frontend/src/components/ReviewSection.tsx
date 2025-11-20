@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react'
+import { createPortal } from 'react-dom'
 import { useSearchParams, useNavigate } from 'react-router-dom'
 import { useSubmissions } from '../pages/admin/hooks/useSubmissions'
 import { reviewEntry } from '../api/reviewEnhancements'
@@ -44,7 +45,7 @@ const ReviewSection: React.FC<ReviewSectionProps> = ({
   // 只在審核模式下顯示
   const isReviewMode = searchParams.get('mode') === 'review'
 
-  // 如果不是審核模式，不渲染組件
+  // 如果不是審核模式,不渲染組件
   if (!isReviewMode) return null
 
   // 處理通過審核
@@ -198,7 +199,14 @@ const ReviewSection: React.FC<ReviewSectionProps> = ({
         {/* 管理員專用：儲存修改按鈕 */}
         {role === 'admin' && onSave && (
           <button
-            onClick={onSave}
+            onClick={async () => {
+              try {
+                await onSave()
+              } catch (error) {
+                console.error('❌ 儲存失敗:', error)
+                alert('❌ 儲存失敗：' + (error instanceof Error ? error.message : '未知錯誤'))
+              }
+            }}
             disabled={isSaving}
             className="flex-1 px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-200 flex items-center justify-center font-medium"
           >
