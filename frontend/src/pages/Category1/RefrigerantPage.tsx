@@ -4,7 +4,7 @@ import SharedPageLayout from '../../layouts/SharedPageLayout'
 import ConfirmClearModal from '../../components/ConfirmClearModal'
 import SuccessModal from '../../components/SuccessModal'
 import { EntryStatus } from '../../components/StatusSwitcher';
-import { ImageLightbox } from './shared/mobile/components/ImageLightbox'
+import { ImageLightbox } from './common/ImageLightbox'
 import Toast from '../../components/Toast';
 import { useFrontendStatus } from '../../hooks/useFrontendStatus';
 import { useApprovalStatus } from '../../hooks/useApprovalStatus';
@@ -21,6 +21,7 @@ import { RefrigerantInputFields } from './components/RefrigerantInputFields'
 import { RefrigerantListSection } from './components/RefrigerantListSection'
 import { generateRecordId } from '../../utils/idGenerator'
 import { calculateTotalWeightInKg } from '../../utils/unitConversions'
+import { useThumbnailLoader } from '../../hooks/useThumbnailLoader'
 import type { MemoryFile } from '../../components/FileDropzone'
 import type { EvidenceFile } from '../../api/files'
 
@@ -171,11 +172,14 @@ export default function RefrigerantPage() {
   const [submitError, setSubmitError] = useState<string | null>(null)
   const [submitSuccess, setSubmitSuccess] = useState<string | null>(null)
 
-  // 縮圖管理（用於圖片預覽）
-  const [thumbnails, setThumbnails] = useState<Record<string, string>>({})
-
   // 展開/收合狀態管理
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set())
+
+  // 縮圖載入（使用統一 hook，批次載入 + 自動過濾已載入）
+  const thumbnails = useThumbnailLoader({
+    records: savedDevices,
+    fileExtractor: (device) => device.evidenceFiles || []
+  })
 
   // 載入資料
   useEffect(() => {
@@ -227,24 +231,6 @@ export default function RefrigerantPage() {
       }
     }
   }, [loadedFiles, pageKey, dataLoading, savedDevices.length])
-
-  // ⭐ 生成縮圖（只為圖片檔案）
-  useEffect(() => {
-    savedDevices.forEach(async (device) => {
-      const evidenceFile = device.evidenceFiles?.[0]
-      if (evidenceFile && evidenceFile.mime_type.startsWith('image/') && !thumbnails[evidenceFile.id]) {
-        try {
-          const url = await getFileUrl(evidenceFile.file_path)
-          setThumbnails(prev => ({
-            ...prev,
-            [evidenceFile.id]: url
-          }))
-        } catch {
-          // Silently ignore thumbnail errors
-        }
-      }
-    })
-  }, [savedDevices, thumbnails])
 
   // 初始化時展開所有分組
   useEffect(() => {

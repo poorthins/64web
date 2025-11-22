@@ -8,7 +8,7 @@
 
 import { FileDropzone, MemoryFile } from '../../../components/FileDropzone'
 import { generateRecordId } from '../../../utils/idGenerator'
-import { SF6Record } from '../shared/mobile/mobileEnergyTypes'
+import { SF6Record } from '../common/mobileEnergyTypes'
 
 export interface SF6InputFieldsProps {
   record: SF6Record
@@ -69,6 +69,7 @@ export function SF6InputFields({
           onChange={(value) => onRecordChange('sf6Weight', value)}
           disabled={isReadOnly}
           placeholder="0"
+          max={999999999}
         />
 
         {/* 型號 */}
@@ -223,7 +224,15 @@ function SF6NumberField({
         max={max}
         step="0.01"
         value={value || ''}
-        onChange={(e) => onChange(parseFloat(e.target.value) || 0)}
+        onChange={(e) => {
+          const inputValue = parseFloat(e.target.value) || 0
+          // ⭐ 防止數字溢位：限制在 min-max 範圍內
+          let clampedValue = Math.max(inputValue, min)
+          if (max !== undefined) {
+            clampedValue = Math.min(clampedValue, max)
+          }
+          onChange(clampedValue)
+        }}
         onWheel={(e) => e.currentTarget.blur()}
         disabled={disabled}
         placeholder={placeholder}

@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { CheckCircle, AlertCircle, X } from 'lucide-react'
 
 export type ToastType = 'success' | 'error' | 'info'
@@ -51,16 +52,17 @@ const Toast: React.FC<ToastProps> = ({ message, type, duration = 3000, onClose }
 
   const styles = getTypeStyles()
 
-  return (
+  return createPortal(
     <div
       className={`
-        fixed top-4 right-4 z-50 max-w-md w-full
+        fixed top-4 right-4 max-w-md w-full
         transform transition-all duration-300 ease-in-out
-        ${isVisible 
-          ? 'translate-x-0 opacity-100' 
+        ${isVisible
+          ? 'translate-x-0 opacity-100'
           : 'translate-x-full opacity-0'
         }
       `}
+      style={{ zIndex: 25000 }}
     >
       <div
         className={`
@@ -72,13 +74,13 @@ const Toast: React.FC<ToastProps> = ({ message, type, duration = 3000, onClose }
         <div className="flex-shrink-0 mt-0.5">
           {styles.icon}
         </div>
-        
+
         <div className="flex-1 min-w-0">
           <p className="text-sm font-medium">
             {message}
           </p>
         </div>
-        
+
         <button
           onClick={() => {
             setIsVisible(false)
@@ -89,7 +91,8 @@ const Toast: React.FC<ToastProps> = ({ message, type, duration = 3000, onClose }
           <X className="w-4 h-4" />
         </button>
       </div>
-    </div>
+    </div>,
+    document.body
   )
 }
 

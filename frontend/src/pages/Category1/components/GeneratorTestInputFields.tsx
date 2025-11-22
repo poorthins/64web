@@ -101,10 +101,16 @@ export function GeneratorTestInputFields({
                   <input
                     type="number"
                     value={test.generatorPower || ''}
-                    onChange={(e) => onFieldChange('generatorPower', parseFloat(e.target.value) || 0)}
+                    onChange={(e) => {
+                      const inputValue = parseFloat(e.target.value) || 0
+                      // ⭐ 防止數字溢位
+                      const clampedValue = Math.min(inputValue, 999999999)
+                      onFieldChange('generatorPower', clampedValue)
+                    }}
                     disabled={isReadOnly}
                     placeholder="輸入功率"
                     min="0"
+                    max="999999999"
                     step="0.1"
                     style={{
                       width: '352px',
@@ -129,10 +135,16 @@ export function GeneratorTestInputFields({
                   <input
                     type="number"
                     value={test.testFrequency || ''}
-                    onChange={(e) => onFieldChange('testFrequency', parseFloat(e.target.value) || 0)}
+                    onChange={(e) => {
+                      const inputValue = parseFloat(e.target.value) || 0
+                      // ⭐ 防止數字溢位
+                      const clampedValue = Math.min(inputValue, 999999999)
+                      onFieldChange('testFrequency', clampedValue)
+                    }}
                     disabled={isReadOnly}
                     placeholder="輸入頻率"
                     min="0"
+                    max="999999999"
                     step="1"
                     style={{
                       width: '352px',
@@ -157,10 +169,16 @@ export function GeneratorTestInputFields({
                   <input
                     type="number"
                     value={test.testDuration || ''}
-                    onChange={(e) => onFieldChange('testDuration', parseFloat(e.target.value) || 0)}
+                    onChange={(e) => {
+                      const inputValue = parseFloat(e.target.value) || 0
+                      // ⭐ 防止數字溢位
+                      const clampedValue = Math.min(inputValue, 999999999)
+                      onFieldChange('testDuration', clampedValue)
+                    }}
                     disabled={isReadOnly}
                     placeholder="輸入時間"
                     min="0"
+                    max="999999999"
                     step="1"
                     style={{
                       width: '352px',

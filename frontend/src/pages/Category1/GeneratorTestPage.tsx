@@ -14,11 +14,12 @@ import { EvidenceFile, getFileUrl, adminDeleteEvidence } from '../../api/files';
 import { submitEnergyEntry } from '../../api/v2/entryAPI';
 import { uploadEvidenceFile, deleteEvidenceFile } from '../../api/v2/fileAPI';
 import { generateRecordId } from '../../utils/idGenerator';
-import { LAYOUT_CONSTANTS } from './shared/mobile/mobileEnergyConstants'
-import { GENERATOR_TEST_CONFIG } from './shared/mobileEnergyConfig'
-import { ImageLightbox } from './shared/mobile/components/ImageLightbox'
+import { LAYOUT_CONSTANTS } from './common/mobileEnergyConstants'
+import { GENERATOR_TEST_CONFIG } from './common/mobileEnergyConfig'
+import { ImageLightbox } from './common/ImageLightbox'
 import { GeneratorTestInputFields } from './components/GeneratorTestInputFields'
 import { GeneratorTestListSection } from './components/GeneratorTestListSection'
+import { useThumbnailLoader } from '../../hooks/useThumbnailLoader'
 import type { MemoryFile } from '../../components/FileDropzone';
 
 // 發電機測試資料結構
@@ -103,8 +104,11 @@ export default function GeneratorTestPage() {
   const [submitError, setSubmitError] = useState<string | null>(null)
   const [submitSuccess, setSubmitSuccess] = useState<string | null>(null)
 
-  // 縮圖管理
-  const [thumbnails, setThumbnails] = useState<Record<string, string>>({})
+  // 縮圖載入（使用統一 hook）
+  const thumbnails = useThumbnailLoader({
+    records: savedTests,
+    fileExtractor: (test) => test.evidenceFiles || []
+  })
 
   // ===== 資料載入 =====
   useEffect(() => {
@@ -158,24 +162,6 @@ export default function GeneratorTestPage() {
       }
     }
   }, [loadedFiles, pageKey, dataLoading, savedTests.length])
-
-  // 生成縮圖（只為圖片檔案）
-  useEffect(() => {
-    savedTests.forEach(async (test) => {
-      const evidenceFile = test.evidenceFiles?.[0]
-      if (evidenceFile && evidenceFile.mime_type.startsWith('image/') && !thumbnails[evidenceFile.id]) {
-        try {
-          const url = await getFileUrl(evidenceFile.file_path)
-          setThumbnails(prev => ({
-            ...prev,
-            [evidenceFile.id]: url
-          }))
-        } catch (error) {
-          console.warn('Failed to generate thumbnail', error)
-        }
-      }
-    })
-  }, [savedTests])
 
   // ===== CRUD 函數 =====
 

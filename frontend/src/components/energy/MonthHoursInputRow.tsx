@@ -151,7 +151,7 @@ export function MonthHoursInputRow({
           <button
             onClick={() => onDelete(recordId)}
             disabled={disabled}
-            className="p-2 text-black hover:text-red-600 hover:bg-red-50 rounded transition-colors"
+            className="p-2 text-black hover:text-red-600 hover:bg-red-50 rounded transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
             title="刪除此記錄"
           >
             <Trash2 style={{ width: '32px', height: '32px' }} />

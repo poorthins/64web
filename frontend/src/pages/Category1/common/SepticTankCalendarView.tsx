@@ -30,6 +30,13 @@ const COLOR_EMPTY = '#FFFFFF'         // 未填寫（什麼都沒有）
 export function SepticTankCalendarView(props: SepticTankCalendarViewProps) {
   const { savedGroups, onEditMonth, isReadOnly, approvalStatus } = props
 
+  console.log('[SepticTankCalendarView] savedGroups:', savedGroups.map(r => ({
+    month: r.month,
+    hours: r.hours,
+    evidenceFiles: r.evidenceFiles?.length || 0,
+    memoryFiles: r.memoryFiles?.length || 0
+  })))
+
   // 建立月份到群組的映射 (每個月只會出現一次)
   const monthDataMap = new Map<number, {
     hours: number
@@ -41,6 +48,8 @@ export function SepticTankCalendarView(props: SepticTankCalendarViewProps) {
     if (record.month >= 1 && record.month <= 12) {
       const hasFiles = (record.evidenceFiles && record.evidenceFiles.length > 0) ||
                        (record.memoryFiles && record.memoryFiles.length > 0)
+
+      console.log(`[SepticTankCalendarView] 月份 ${record.month}: hours=${record.hours}, evidenceFiles=${record.evidenceFiles?.length || 0}, memoryFiles=${record.memoryFiles?.length || 0}, hasFiles=${hasFiles}`)
 
       const existing = monthDataMap.get(record.month)
       if (existing) {
@@ -57,8 +66,14 @@ export function SepticTankCalendarView(props: SepticTankCalendarViewProps) {
     }
   }
 
+  console.log('[SepticTankCalendarView] monthDataMap:', Array.from(monthDataMap.entries()).map(([month, data]) => ({
+    month,
+    hours: data.hours,
+    hasFiles: data.hasFiles
+  })))
+
   const handleEditClick = (month: number) => {
-    if (isReadOnly || approvalStatus.isApproved) return
+    // ⭐ 允許審核通過後仍然可以點鉛筆（唯讀查看）
     onEditMonth(month)
   }
 
@@ -148,22 +163,25 @@ export function SepticTankCalendarView(props: SepticTankCalendarViewProps) {
           >
           {Array.from({ length: 12 }, (_, i) => i + 1).map(month => {
             const monthData = monthDataMap.get(month)
-            const hasData = monthData && monthData.hours > 0
+            const hasValidData = monthData && monthData.hours > 0  // ⭐ 有效數據（hours > 0）
+            const hasAnyRecord = monthData !== undefined            // ⭐ 有任何記錄（包括 hours = 0）
             const hasFiles = monthData && monthData.hasFiles
-            const isDisabled = isReadOnly || approvalStatus.isApproved
+            // ⭐ 審核通過後允許查看，但不允許修改
+            const canEdit = !isReadOnly || approvalStatus.isApproved  // 審核通過後仍可點鉛筆（唯讀查看）
+            const isDisabled = isReadOnly && !approvalStatus.isApproved  // 只有審核模式（非管理員）才禁用
 
-            // 判斷 4 種狀態的背景顏色
+            // 判斷 4 種狀態的背景顏色（基於 hasValidData）
             let backgroundColor = COLOR_EMPTY  // 未填寫
-            if (hasData && hasFiles) {
+            if (hasValidData && hasFiles) {
               backgroundColor = COLOR_COMPLETE  // 資料完整
-            } else if (hasData && !hasFiles) {
+            } else if (hasValidData && !hasFiles) {
               backgroundColor = COLOR_NO_FILES  // 缺少佐證資料
-            } else if (!hasData && hasFiles) {
-              backgroundColor = COLOR_NO_DATA   // 缺少數據（罕見情況）
+            } else if (!hasValidData && hasFiles) {
+              backgroundColor = COLOR_NO_DATA   // 缺少數據（hours = 0 但有佐證）
             }
 
-            // 只要有數據就顯示內容
-            const shouldShowContent = hasData
+            // 只有 hours > 0 才顯示內容
+            const shouldShowContent = hasValidData
 
             return (
               <div
@@ -215,6 +233,7 @@ export function SepticTankCalendarView(props: SepticTankCalendarViewProps) {
                     padding: '16px 12px'
                   }}
                 >
+                  {/* 內容顯示：只有 hours > 0 才顯示數字 */}
                   {shouldShowContent && (
                     <>
                       <div
@@ -243,18 +262,18 @@ export function SepticTankCalendarView(props: SepticTankCalendarViewProps) {
                       >
                         hr
                       </div>
-
-                      {/* 編輯按鈕 (右下角，只要有數據就顯示) */}
-                      {!isDisabled && (
-                        <button
-                          onClick={() => handleEditClick(month)}
-                          className="absolute bottom-2.5 right-2.5 hover:opacity-80 transition-opacity"
-                          title="編輯此群組"
-                        >
-                          <Pencil size={24} strokeWidth={2} color="#1E1E1E" />
-                        </button>
-                      )}
                     </>
+                  )}
+
+                  {/* 編輯/查看按鈕：只要有記錄就顯示（包括 hours = 0） */}
+                  {hasAnyRecord && canEdit && (
+                    <button
+                      onClick={() => handleEditClick(month)}
+                      className="absolute bottom-2.5 right-2.5 hover:opacity-80 transition-opacity"
+                      title={approvalStatus.isApproved ? "查看此群組" : "編輯此群組"}
+                    >
+                      <Pencil size={24} strokeWidth={2} color="#1E1E1E" />
+                    </button>
                   )}
                 </div>
               </div>

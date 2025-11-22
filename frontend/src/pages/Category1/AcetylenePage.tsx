@@ -136,7 +136,7 @@ const AcetylenePage = () => {
   const isReadOnly = isReviewMode && role !== 'admin'
 
   // 編輯權限控制
-  const editPermissions = useEditPermissions(currentStatus, isReadOnly, role)
+  const editPermissions = useEditPermissions(currentStatus ?? undefined, isReadOnly, role ?? undefined)
 
   // 判斷是否有資料
   const hasAnyData = useMemo(() => {
@@ -1019,26 +1019,18 @@ const AcetylenePage = () => {
       {/* 底部操作欄 - 唯讀模式和 approved 狀態下隱藏 */}
       {!isReadOnly && !approvalStatus.isApproved && !isReviewMode && (
         <BottomActionBar
-          currentStatus={currentStatus}
-          currentEntryId={currentEntryId}
-          isUpdating={false}
-          hasSubmittedBefore={hasSubmittedBefore}
-          hasAnyData={hasAnyData}
-          banner={banner}
-          editPermissions={editPermissions}
+          currentStatus={currentStatus ?? 'submitted'}
           submitting={submitting}
-          saving={submitting}
           onSubmit={handleSubmit}
           onSave={handleSave}
           onClear={() => setShowClearConfirmModal(true)}
-          designTokens={designTokens}
         />
       )}
 
       {/* 審核區塊 - 只在審核模式顯示 */}
       {isReviewMode && (
         <ReviewSection
-          entryId={reviewEntryId || currentEntryId}
+          entryId={reviewEntryId || currentEntryId || ''}
           userId={reviewUserId || "current_user"}
           category="乙炔"
           userName={reviewUserId || "用戶"}

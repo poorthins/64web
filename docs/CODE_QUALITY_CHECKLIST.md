@@ -311,6 +311,113 @@ export const calculateWeightInKg = (
 ) => unit === 'gram' ? amount / 1000 : amount
 ```
 
+---
+
+### 實際範例：useThumbnailLoader
+
+**背景：** 2025-01-20 發現 9 個頁面有重複的縮圖載入邏輯
+
+**觸發條件分析：**
+- ✅ 規則 1（Rule of Three）：9 頁 >> 3 頁門檻
+- ✅ 規則 2（Cross-Page Usage）：9 頁 → 應放 `src/hooks/`
+- ✅ 規則 3（Complex Logic）：SF6Page 版本 45 行，包含批次載入、錯誤處理
+- 🔴 P0 Critical：Duplicated Code（9 頁重複）
+
+**Before（9 頁重複，共 135 行）：**
+
+```typescript
+// RefrigerantPage.tsx, SF6Page.tsx, DieselPage.tsx... 等 9 頁
+const [thumbnails, setThumbnails] = useState<Record<string, string>>({})
+
+useEffect(() => {
+  savedDevices.forEach(async (device) => {
+    const evidenceFile = device.evidenceFiles?.[0]
+    if (evidenceFile && evidenceFile.mime_type.startsWith('image/') && !thumbnails[evidenceFile.id]) {
+      try {
+        const url = await getFileUrl(evidenceFile.file_path)
+        setThumbnails(prev => ({ ...prev, [evidenceFile.id]: url }))
+      } catch {
+        // Silently ignore
+      }
+    }
+  })
+}, [savedDevices, thumbnails])  // ❌ RefrigerantPage 有依賴陣列 bug
+```
+
+**After（1 個 hook，50 行）：**
+
+```typescript
+// src/hooks/useThumbnailLoader.ts（新建）
+export function useThumbnailLoader<T>({
+  records,
+  fileExtractor,
+  enabled = true
+}: UseThumbnailLoaderOptions<T>): Record<string, string> {
+  const [thumbnails, setThumbnails] = useState<Record<string, string>>({})
+
+  useEffect(() => {
+    if (!enabled) return
+
+    const loadThumbnails = async () => {
+      const tasks: Array<{ fileId: string; loadFn: () => Promise<string> }> = []
+
+      // 收集所有需要載入的圖片檔案
+      records.forEach((record) => {
+        const files = fileExtractor(record)
+        files.forEach((file) => {
+          if (file.mime_type.startsWith('image/') && !thumbnails[file.id]) {
+            tasks.push({
+              fileId: file.id,
+              loadFn: () => getFileUrl(file.file_path)
+            })
+          }
+        })
+      })
+
+      if (tasks.length === 0) return
+
+      // 批次執行（一次最多 3 個並發，避免 API 轟炸）
+      const BATCH_SIZE = 3
+      for (let i = 0; i < tasks.length; i += BATCH_SIZE) {
+        const batch = tasks.slice(i, i + BATCH_SIZE)
+        const results = await Promise.allSettled(batch.map(task => task.loadFn()))
+
+        results.forEach((result, index) => {
+          if (result.status === 'fulfilled') {
+            setThumbnails(prev => ({ ...prev, [batch[index].fileId]: result.value }))
+          }
+        })
+      }
+    }
+
+    loadThumbnails()
+  }, [records, enabled])  // ✅ 正確依賴陣列，不含 thumbnails
+
+  return thumbnails
+}
+
+// 使用範例（9 頁統一）
+const thumbnails = useThumbnailLoader({
+  records: savedDevices,  // 或 savedGroups（Type 2）
+  fileExtractor: (device) => device.evidenceFiles || []
+})
+```
+
+**成果：**
+- ✅ 程式碼減少：135 行 → 50 行（-85 行，63% 減少）
+- ✅ 修復 bug：RefrigerantPage 的 `[savedDevices, thumbnails]` 依賴陣列錯誤
+- ✅ 統一邏輯：所有頁面使用相同的批次載入邏輯（BATCH_SIZE = 3）
+- ✅ 泛型設計：支援 Type 1（devices）和 Type 2（groups）
+- ✅ 提升效能：批次載入避免 API 轟炸
+
+**位置：** `frontend/src/hooks/useThumbnailLoader.ts`
+
+**受益頁面（9 頁）：**
+- Type 1: RefrigerantPage, SF6Page, GeneratorTestPage
+- Type 2: DieselPage, GasolinePage, UreaPage, WD40Page, SepticTankPage, DieselStationarySourcesPage
+
+---
+
 ### 提取檢查清單
 
 每次重構時，問自己以下問題：
@@ -345,6 +452,101 @@ src/
     └── shared/
         └── helpers.ts        # ✅ 2-3 個能源頁面共用的小工具
 ```
+
+---
+
+## 🎨 UI/UX 標準
+
+### 刪除操作確認原則
+
+**標準：**
+- ❌ **禁止：** 列表項目的刪除操作出現確認彈窗（例如：`window.confirm()`）
+- ✅ **正確：** 直接刪除，並顯示成功訊息（使用 Toast 或通知系統）
+- ✅ **正確：** 如果需要防止誤刪，應使用「撤銷」功能而非確認彈窗
+
+**理由：**
+- 用戶已經點擊垃圾桶圖標，意圖明確
+- 重複確認降低操作效率
+- 列表項目通常可以重新新增，風險較低
+
+**範例：**
+```typescript
+// ❌ 錯誤：出現確認彈窗
+const deleteSavedGroup = (groupId: string) => {
+  if (!window.confirm('確定要刪除此群組嗎？')) return
+  setSavedGroups(prev => prev.filter(r => r.groupId !== groupId))
+  setSuccess('群組已刪除')
+}
+
+// ✅ 正確：直接刪除 + 成功訊息
+const deleteSavedGroup = (groupId: string) => {
+  setSavedGroups(prev => prev.filter(r => r.groupId !== groupId))
+  setSuccess('群組已刪除')
+}
+```
+
+**例外情況（需要確認彈窗）：**
+- ✅ 清空所有資料（如「清空」按鈕）
+- ✅ 刪除後無法復原的重要資料（如已提交的 entry）
+- ✅ 刪除操作會影響其他使用者或系統的資料
+
+---
+
+## 🎨 UI/UX 標準
+
+### 縮圖佔位符標準（Thumbnail Placeholder Standard）
+
+**標準：** 所有能源頁面的縮圖顯示必須使用統一佔位符
+
+**必須使用：**
+```typescript
+import { THUMBNAIL_PLACEHOLDER_SVG, THUMBNAIL_BACKGROUND, THUMBNAIL_BORDER } from '../../../utils/energy/thumbnailConstants'
+
+// ✅ 正確：永久容器 + 統一佔位符
+<div style={{
+  background: THUMBNAIL_BACKGROUND,  // #EBEDF0
+  border: THUMBNAIL_BORDER,
+  display: 'flex',
+  alignItems: 'center',
+  justifyContent: 'center'
+}}>
+  {thumbnail ? (
+    <img src={thumbnail} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+  ) : (
+    THUMBNAIL_PLACEHOLDER_SVG
+  )}
+</div>
+```
+
+**禁止：**
+```typescript
+// ❌ 錯誤：條件渲染（導致 layout shift）
+{thumbnail && <div><img src={thumbnail} /></div>}
+
+// ❌ 錯誤：白色背景或 emoji
+<div style={{ background: '#FFF' }} />
+<span>📷</span>
+```
+
+**效果：**
+- ✅ 載入過程無 layout shift（容器永遠存在）
+- ✅ 視覺一致（所有頁面相同）
+- ✅ 程式碼不重複（SVG 只定義一次）
+
+**檢查方式：**
+```bash
+# 搜尋條件渲染縮圖（可能有問題）
+grep -r "{thumbnail &&" frontend/src/pages/Category1/
+
+# 搜尋白色背景佔位符（需更新）
+grep -r "background.*#FFF" frontend/src/pages/Category1/ | grep -i thumbnail
+```
+
+**參考：**
+- 定義檔案：`frontend/src/utils/energy/thumbnailConstants.tsx`
+- Type 1 範例：`pages/Category1/components/RefrigerantListSection.tsx`
+- Type 2 範例：`components/energy/GroupListItem.tsx`
+- SOP文件：`docs/type1-sop.md` 步驟 8、`docs/type2-sop.md` 步驟 9
 
 ---
 
@@ -408,6 +610,12 @@ npm --prefix frontend test
 - [ ] 已檢查三次原則（3+ 次出現的程式碼已提取）
 - [ ] 已檢查跨頁面使用（共用邏輯已移到 shared/ 或 hooks/）
 - [ ] 已檢查高複雜度邏輯（>20 行邏輯已提取到 utils/）
+
+### UI/UX
+- [ ] 列表項目刪除操作無確認彈窗（直接刪除 + 成功訊息）
+- [ ] 重要操作保留確認彈窗（清空全部、刪除已提交 entry）
+- [ ] 縮圖佔位符使用統一標準（THUMBNAIL_PLACEHOLDER_SVG + #EBEDF0）
+- [ ] 縮圖容器永久顯示（無條件渲染 `{thumbnail && ...}`）
 
 ### 驗證
 - [ ] TypeScript 編譯通過（`npx --prefix frontend tsc --noEmit`）

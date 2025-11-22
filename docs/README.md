@@ -2,8 +2,8 @@
 
 > 每次打開這個文件，就知道現在要做什麼
 
-**上次更新：** 2025-01-19
-**當前進度：** 3 / 16 頁完成 ✅（Type 1 批次完成 🎉）
+**上次更新：** 2025-01-21
+**當前進度：** 8 / 16 頁完成 ✅（Type 1 ✅ 完成，Type 2 ✅ 完成 🎉）
 
 ---
 
@@ -15,15 +15,14 @@
 [x] 重構 RefrigerantPage（第 1/16 頁）- Type 1 ✅ 完成
 [x] 重構 SF6Page（第 2/16 頁）- Type 1 ✅ 完成
 [x] 重構 GeneratorTestPage（第 3/16 頁）- Type 1 ✅ 完成
-[ ] 開始 Type 2 批次（第 4-8/16 頁）- Type 2（一筆佐證 → 多筆資料）
+[x] 完成 Type 2 批次（第 4-8/16 頁）- Type 2（一筆佐證 → 多筆資料）✅ 完成
 ```
 
-**Type 1 已完成！下一步：Type 2**
-1. 打開 [page-classification.md](page-classification.md) → 研究 Type 2 特徵
-2. 看 Type 2 的資料結構（groupId + 多筆 records）
-3. 研究現有頁面（DieselPage 作為 Type 2 Pilot）
-4. 規劃 Type 2 重構策略
-5. 執行重構並更新 [PROGRESS.md](PROGRESS.md)
+**Type 1 & Type 2 已完成！下一步：Type 3 或 Type 5**
+1. 選擇方向：Type 3（規格 + 使用記錄）或 Type 5（Excel 上傳，最簡單）
+2. 打開 [page-classification.md](page-classification.md) 研究選定類型特徵
+3. 打開對應的 SOP（type3-sop.md 或 type5-sop.md，如果尚未建立則需先建立）
+4. 執行重構並更新 [PROGRESS.md](PROGRESS.md)
 
 ---
 
@@ -36,6 +35,7 @@
 | **[data-contracts-v2.md](data-contracts-v2.md)** | 前後端資料格式定義 | 寫 API 或組資料時 |
 | **[PROGRESS.md](PROGRESS.md)** | 進度追蹤 + 心得記錄 | 完成一頁後更新 |
 | **[type1-sop.md](type1-sop.md)** | Type 1 頁面重構步驟 | 重構 Type 1 頁面時 |
+| **[type2-sop.md](type2-sop.md)** | Type 2 頁面重構步驟 | 重構 Type 2 頁面時 |
 
 ---
 
@@ -52,6 +52,9 @@
 - `frontend/src/api/v2/entryAPI.ts` - 提交 API
 - `frontend/src/api/v2/fileAPI.ts` - 檔案上傳 API
 - `frontend/src/api/v2/carbonAPI.ts` - 碳排放計算 API
+
+**新共用 Hooks（✅ Type 2 使用）：**
+- `frontend/src/hooks/useType2Helpers.ts` - Type 2 頁面共用輔助函數（6 個函數，減少 365 行重複代碼）
 
 **舊 Hooks（❌ 重構後刪除）：**
 - `useMultiRecordSubmit` - 舊的提交 hook（Type A 用）✅ RefrigerantPage 已移除
@@ -88,10 +91,10 @@
 ## 📊 進度總覽
 
 **Type 1（一筆佐證 → 一筆資料）：** 3 / 3 ✅ (RefrigerantPage ✅, SF6Page ✅, GeneratorTestPage ✅)
-**Type 2（一筆佐證 → 多筆資料）：** 0 / 5 🔜
-**Type 3（規格 + 使用記錄）：** 0 / 5
-**Type 4（電錶 + 帳單）：** 0 / 2
-**Type 5（Excel 上傳）：** 0 / 1
+**Type 2（一筆佐證 → 多筆資料）：** 5 / 5 ✅ (DieselPage ✅, DieselStationarySourcesPage ✅, GasolinePage ✅, UreaPage ✅, SepticTankPage ✅)
+**Type 3（規格 + 使用記錄）：** 0 / 5 🔜
+**Type 4（電錶 + 帳單）：** 0 / 2 🔜
+**Type 5（Excel 上傳）：** 0 / 1 🔜
 
 ---
 

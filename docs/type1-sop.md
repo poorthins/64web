@@ -198,7 +198,51 @@ const recordFiles = refrigerantFiles.filter(f => f.record_id === device.id)
 
 ---
 
-### 步驟 8：測試（3 分鐘）
+### 步驟 8：確保縮圖使用統一佔位符（2 分鐘）⭐ UI/UX 標準
+
+**確認列表組件使用統一縮圖佔位符：**
+
+```typescript
+import { THUMBNAIL_PLACEHOLDER_SVG, THUMBNAIL_BACKGROUND, THUMBNAIL_BORDER } from '../../../utils/energy/thumbnailConstants'
+
+// ✅ 正確：永久容器 + 統一佔位符
+<div style={{
+  background: THUMBNAIL_BACKGROUND,
+  border: THUMBNAIL_BORDER,
+  display: 'flex',
+  alignItems: 'center',
+  justifyContent: 'center'
+}}>
+  {thumbnail ? (
+    <img src={thumbnail} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+  ) : (
+    THUMBNAIL_PLACEHOLDER_SVG
+  )}
+</div>
+
+// ❌ 錯誤：條件渲染（會導致 layout shift）
+{thumbnail && <div><img src={thumbnail} /></div>}
+
+// ❌ 錯誤：白色背景或 emoji
+<div style={{ background: '#FFF' }} />
+<span>📷</span>
+```
+
+**標準：**
+- ✅ 永遠渲染容器（不用 `{thumbnail && ...}`）
+- ✅ 背景色 `THUMBNAIL_BACKGROUND`（#EBEDF0）
+- ✅ 邊框 `THUMBNAIL_BORDER`
+- ✅ 無縮圖時顯示 `THUMBNAIL_PLACEHOLDER_SVG`
+- ✅ 引用 `thumbnailConstants.tsx`（不重複定義）
+
+**效果：**
+- 載入過程無 layout shift（容器永遠存在）
+- 視覺一致（所有頁面相同）
+- 程式碼不重複（SVG 只寫一次）
+
+---
+
+### 步驟 9：測試（3 分鐘）
 
 **執行 TypeScript 檢查：**
 ```bash
@@ -344,6 +388,99 @@ const handleSave = async () => {
   await submitData(true)
 }
 ```
+
+---
+
+## 🔔 通知行為規範（2025-01-21 新增）
+
+### 核心原則
+
+**靜默操作（Silent Operations）** - 前端內存操作，不跳通知：
+- ✅ 點「變更儲存」（更新群組到內存）
+- ✅ 點「+新增」（新增群組到內存）
+- ✅ 點「刪除群組」（從內存刪除）
+- ✅ 點「載入到編輯區」（將群組資料載入編輯區）
+
+**通知操作（Notified Operations）** - 後端提交，必須跳通知：
+- 🟢 使用者點「提交」→ 綠色 SuccessModal（提交成功！）
+- 🔵 使用者點「暫存」→ 藍色 SuccessModal（儲存成功！）
+- 🔵 管理員點「儲存」→ 藍色 SuccessModal（儲存成功！）
+- 🟡 使用者點「清除」→ 通知（視情況）
+
+### 實作模式
+
+**步驟 1：群組操作移除通知**
+
+在 `saveCurrentGroup()`, `deleteSavedGroup()`, `loadGroupToEditor()` 中：
+
+```typescript
+// ❌ 舊寫法
+const saveCurrentGroup = () => {
+  setSavedGroups(prev => [...prev, newGroup])
+  setSuccess('群組已更新') // ← 刪除這行
+}
+
+// ✅ 新寫法
+const saveCurrentGroup = () => {
+  setSavedGroups(prev => [...prev, newGroup])
+  // 不顯示通知（只是前端內存操作）
+}
+```
+
+**步驟 2：SharedPageLayout 通知整合**
+
+確保 SharedPageLayout 的 Line 118 識別「儲存」關鍵字：
+
+```typescript
+// SharedPageLayout.tsx Line 118
+if (message.includes('暫存') || message.includes('儲存')) {
+  setSuccessModalType('save')  // 藍色彈窗
+  setSuccessMessage(message)
+  setShowSuccessModal(true)
+} else {
+  setSuccessModalType('submit') // 綠色彈窗
+  setSuccessMessage(message)
+  setShowSuccessModal(true)
+}
+```
+
+**步驟 3：管理員儲存確保通知**
+
+管理員模式的 handleSave 必須觸發「儲存成功」：
+
+```typescript
+const handleSave = async () => {
+  if (isReviewMode && reviewEntryId) {
+    // 管理員審核模式
+    const failedFiles = await adminSave.save({
+      updateData: { unit, amount, payload },
+      files: allFiles
+    })
+
+    // ✅ 必須設置 success 觸發藍色彈窗
+    setSuccess('✅ 儲存成功！資料已更新')
+    return
+  }
+
+  // 一般暫存模式
+  await submitData(true)
+}
+```
+
+### 已完成頁面
+
+- ✅ **UreaPage** - 2025-01-21
+- ✅ **DieselPage** - 2025-01-21
+- ✅ **DieselStationarySourcesPage** - 2025-01-21
+- ✅ **GasolinePage** - 2025-01-21（本來就沒有群組通知）
+- ✅ **WD40Page** - 2025-01-21
+- ✅ **SepticTankPage** - 2025-01-21
+
+### 後續頁面適用
+
+所有 Type2 頁面（電力、蒸氣等）也需遵循此規範：
+- 前端操作（新增、刪除、編輯列表項）→ 不通知
+- 後端提交（提交、暫存、管理員儲存）→ 通知
 
 ---
 

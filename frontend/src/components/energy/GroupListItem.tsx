@@ -8,6 +8,7 @@
 import { FileTypeIcon } from './FileTypeIcon'
 import { ActionButtons } from './ActionButtons'
 import { getFileType } from '../../utils/energy/fileTypeDetector'
+import { THUMBNAIL_PLACEHOLDER_SVG, THUMBNAIL_BACKGROUND } from '../../utils/energy/thumbnailConstants'
 import { EvidenceFile } from '../../api/files'
 import { MemoryFile } from '../../services/documentHandler'
 
@@ -32,8 +33,12 @@ export interface GroupListItemProps {
   onDelete: (groupId: string) => void
   /** 檔案點擊預覽回調（圖片） */
   onFileClick?: (file: EvidenceFile | MemoryFile) => void
-  /** 是否禁用 */
+  /** 是否禁用（同時控制編輯和刪除，向後兼容） */
   disabled?: boolean
+  /** 單獨禁用編輯按鈕 */
+  disableEdit?: boolean
+  /** 單獨禁用刪除按鈕 */
+  disableDelete?: boolean
   /** 列表項寬度（px），預設 924 */
   width?: number
   /** 列表項高度（px），預設 87 */
@@ -69,6 +74,8 @@ export function GroupListItem({
   onDelete,
   onFileClick,
   disabled = false,
+  disableEdit,
+  disableDelete,
   width = 924,
   height = 87,
 }: GroupListItemProps): JSX.Element {
@@ -122,18 +129,28 @@ export function GroupListItem({
         }}
       >
         {/* 圖片：顯示縮圖 */}
-        {isImage ? (
-          thumbnailUrl || memoryFile?.preview ? (
-            <img
-              src={memoryFile?.preview || thumbnailUrl || ''}
-              alt="preview"
-              style={{ width: '100%', height: '100%', objectFit: 'cover' }}
-            />
-          ) : (
-            <span className="text-[24px]">🖼️</span>
-          )
+        {thumbnailUrl || memoryFile?.preview ? (
+          <img
+            src={memoryFile?.preview || thumbnailUrl || ''}
+            alt="preview"
+            style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+          />
+        ) : isImage ? (
+          // 圖片但縮圖還沒載入：顯示統一佔位符
+          <div
+            style={{
+              width: '100%',
+              height: '100%',
+              background: THUMBNAIL_BACKGROUND,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+            }}
+          >
+            {THUMBNAIL_PLACEHOLDER_SVG}
+          </div>
         ) : (
-          // 非圖片：顯示檔案類型圖示
+          // 非圖片檔案：顯示檔案類型 icon
           <FileTypeIcon fileType={fileType} size={36} />
         )}
       </div>
@@ -161,6 +178,8 @@ export function GroupListItem({
         onEdit={() => onEdit(groupId)}
         onDelete={() => onDelete(groupId)}
         disabled={disabled}
+        disableEdit={disableEdit}
+        disableDelete={disableDelete}
         editTitle="編輯群組"
         deleteTitle="刪除群組"
       />

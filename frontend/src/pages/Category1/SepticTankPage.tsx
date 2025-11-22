@@ -7,21 +7,20 @@ import { useFrontendStatus } from '../../hooks/useFrontendStatus';
 import { useApprovalStatus } from '../../hooks/useApprovalStatus';
 import { useReviewMode } from '../../hooks/useReviewMode'
 import { useEnergyData } from '../../hooks/useEnergyData'
-import { useMultiRecordSubmit } from '../../hooks/useMultiRecordSubmit'
 import { useEnergyClear } from '../../hooks/useEnergyClear'
 import { useSubmitGuard } from '../../hooks/useSubmitGuard'
 import { useGhostFileCleaner } from '../../hooks/useGhostFileCleaner'
-import { useRecordFileMapping } from '../../hooks/useRecordFileMapping'
 import { useRole } from '../../hooks/useRole'
 import { useAdminSave } from '../../hooks/useAdminSave'
-import { getFileUrl } from '../../api/files';
-import Toast from '../../components/Toast';
+import { submitEnergyEntry } from '../../api/v2/entryAPI'
 import { generateRecordId } from '../../utils/idGenerator';
-import { LAYOUT_CONSTANTS } from './shared/mobile/mobileEnergyConstants'
-import { SEPTIC_TANK_CONFIG } from './shared/mobileEnergyConfig'
-import { ImageLightbox } from './shared/mobile/components/ImageLightbox'
-import { SepticTankUsageSection, SepticTankRecord, SepticTankCurrentEditingGroup } from './shared/mobile/components/SepticTankUsageSection'
-import { SepticTankCalendarView } from './shared/mobile/components/SepticTankCalendarView'
+import { LAYOUT_CONSTANTS } from './common/mobileEnergyConstants'
+import { SEPTIC_TANK_CONFIG } from './common/mobileEnergyConfig'
+import { ImageLightbox } from './common/ImageLightbox'
+import { SepticTankUsageSection, SepticTankRecord, SepticTankCurrentEditingGroup } from './common/SepticTankUsageSection'
+import { SepticTankCalendarView } from './common/SepticTankCalendarView'
+import { useThumbnailLoader } from '../../hooks/useThumbnailLoader'
+import { useType2Helpers } from '../../hooks/useType2Helpers'
 import type { MemoryFile } from '../../services/documentHandler';
 
 // ⭐ 創建空白記錄（預設 3 格）
@@ -35,57 +34,7 @@ const createEmptyRecords = (): SepticTankRecord[] => {
   }))
 }
 
-// ⭐ 按 groupId 分組記錄
-const groupRecordsByGroupId = (records: SepticTankRecord[]): Map<string, SepticTankRecord[]> => {
-  const map = new Map<string, SepticTankRecord[]>()
-  records.forEach(record => {
-    if (!record.groupId) return
-    if (!map.has(record.groupId)) {
-      map.set(record.groupId, [])
-    }
-    map.get(record.groupId)!.push(record)
-  })
-  return map
-}
-
-// ⭐ 收集檔案用於上傳（審核模式專用）
-const collectFilesToUpload = (groupMap: Map<string, SepticTankRecord[]>): Array<{
-  file: File
-  metadata: {
-    recordIndex: number
-    allRecordIds: string[]
-    fileType?: 'msds' | 'usage_evidence' | 'other'
-  }
-}> => {
-  const filesToUpload: Array<{
-    file: File
-    metadata: {
-      recordIndex: number
-      allRecordIds: string[]
-      fileType?: 'msds' | 'usage_evidence' | 'other'
-    }
-  }> = []
-
-  groupMap.forEach((records) => {
-    const firstRecord = records[0]
-    if (firstRecord?.memoryFiles && firstRecord.memoryFiles.length > 0) {
-      firstRecord.memoryFiles.forEach((mf: MemoryFile) => {
-        filesToUpload.push({
-          file: mf.file,
-          metadata: {
-            recordIndex: 0,
-            allRecordIds: records.map(r => r.id),
-            fileType: 'other'
-          }
-        })
-      })
-    }
-  })
-
-  return filesToUpload
-}
-
-// ⭐ 準備提交資料的輔助函數
+// ⭐ 準備提交資料的輔助函數（簡化版）
 const prepareSubmissionData = (records: SepticTankRecord[]) => {
   // 計算總工時
   const totalHours = records.reduce((sum, r) => sum + (r.hours || 0), 0)
@@ -98,30 +47,9 @@ const prepareSubmissionData = (records: SepticTankRecord[]) => {
     groupId: r.groupId
   }))
 
-  // 按 groupId 分組去重（避免重複上傳檔案）
-  const groupMap = groupRecordsByGroupId(records)
-
-  const deduplicatedRecordData: Array<{
-    id: string
-    memoryFiles: MemoryFile[]
-    allRecordIds: string[]
-  }> = []
-
-  groupMap.forEach((records) => {
-    const firstRecord = records[0]
-    if (firstRecord?.memoryFiles && firstRecord.memoryFiles.length > 0) {
-      deduplicatedRecordData.push({
-        id: firstRecord.id,
-        memoryFiles: firstRecord.memoryFiles,
-        allRecordIds: records.map(r => r.id)
-      })
-    }
-  })
-
   return {
     totalHours,
-    cleanedData,
-    deduplicatedRecordData
+    cleanedData
   }
 }
 
@@ -140,7 +68,6 @@ export default function SepticTankPage() {
   const [lightboxSrc, setLightboxSrc] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
-  const [thumbnails, setThumbnails] = useState<{ [key: string]: string }>({});
 
   // 前端狀態管理 Hook
   const frontendStatus = useFrontendStatus({
@@ -156,11 +83,6 @@ export default function SepticTankPage() {
   // 角色檢查
   const { role } = useRole()
 
-  // 審核模式下只有管理員可編輯
-  const isReadOnly = isReviewMode && role !== 'admin'
-
-  const editPermissions = useEditPermissions(currentStatus, isReadOnly, role ?? undefined)
-
   // 資料載入 Hook
   const entryIdToLoad = isReviewMode && reviewEntryId ? reviewEntryId : undefined
   const {
@@ -171,22 +93,24 @@ export default function SepticTankPage() {
     reload
   } = useEnergyData(pageKey, year, entryIdToLoad)
 
-  // 審核狀態 Hook
+  // 審核狀態 Hook（必須在 isReadOnly 之前）
   const { reload: reloadApprovalStatus, ...approvalStatus } = useApprovalStatus(pageKey, year)
+
+  // 審核模式下只有管理員可編輯
+  // ⭐ 唯讀條件：審核通過 OR 審核模式（非管理員）
+  const isReadOnly =
+    approvalStatus.isApproved ||  // 審核通過後唯讀
+    (isReviewMode && role !== 'admin')  // 審核模式（非管理員）唯讀
+
+  const editPermissions = useEditPermissions(currentStatus, isReadOnly, role ?? undefined)
 
   // 管理員儲存 Hook
   const { save: adminSave } = useAdminSave(pageKey, reviewEntryId)
 
-  // 提交 Hook（多記錄專用）
-  const {
-    submit,
-    save,
-    submitting: submitLoading,
-    error: submitError,
-    success: submitSuccess,
-    clearError: clearSubmitError,
-    clearSuccess: clearSubmitSuccess
-  } = useMultiRecordSubmit(pageKey, year)
+  // 獨立狀態（替代 useMultiRecordSubmit）
+  const [submitError, setSubmitError] = useState<string | null>(null)
+  const [submitSuccess, setSubmitSuccess] = useState<string | null>(null)
+  const [filesToDelete, setFilesToDelete] = useState<string[]>([])
 
   // 清除 Hook
   const {
@@ -197,15 +121,6 @@ export default function SepticTankPage() {
   // 幽靈檔案清理 Hook
   const { cleanFiles } = useGhostFileCleaner()
 
-  // 檔案映射 Hook
-  const {
-    uploadRecordFiles,
-    getRecordFiles,
-    loadFileMapping,
-    getFileMappingForPayload,
-    removeRecordMapping
-  } = useRecordFileMapping(pageKey, currentEntryId)
-
   // ⭐ 新架構：分離「當前編輯」和「已保存群組」
   const [currentEditingGroup, setCurrentEditingGroup] = useState<SepticTankCurrentEditingGroup>({
     groupId: null,
@@ -215,6 +130,21 @@ export default function SepticTankPage() {
 
   // 已保存的群組
   const [savedGroups, setSavedGroups] = useState<SepticTankRecord[]>([])
+
+  // 縮圖載入（使用統一 hook，Type 2：從群組中提取 evidenceFiles）
+  // ⭐ 合併 savedGroups 和 currentEditingGroup 的記錄以載入所有縮圖
+  const allRecordsForThumbnails = useMemo(() => {
+    const editingRecords = currentEditingGroup.groupId !== null ? currentEditingGroup.records : []
+    return [...savedGroups, ...editingRecords]
+  }, [savedGroups, currentEditingGroup.groupId, currentEditingGroup.records])
+
+  const thumbnails = useThumbnailLoader({
+    records: allRecordsForThumbnails,
+    fileExtractor: (record) => record.evidenceFiles || []
+  })
+
+  // ⭐ Type 2 共用輔助函數
+  const helpers = useType2Helpers<SepticTankRecord>(pageKey, year)
 
   // 保留舊的命名（提交時用）
   const septicTankData = useMemo(() => {
@@ -240,18 +170,13 @@ export default function SepticTankPage() {
           const updated = dataArray.map((item: any) => ({
             ...item,
             id: String(item.id || generateRecordId()),
+            groupId: item.groupId || generateRecordId(), // ⭐ 自動生成缺失的 groupId
             evidenceFiles: [],
             memoryFiles: [],
           }))
 
           // 載入到 savedGroups
           setSavedGroups(updated)
-
-          // 載入檔案映射表
-          const payload = loadedEntry.payload || loadedEntry.extraPayload
-          if (payload) {
-            loadFileMapping(payload)
-          }
         }
       }
     }
@@ -260,7 +185,9 @@ export default function SepticTankPage() {
 
   // 第二步：檔案載入後分配到記錄
   useEffect(() => {
-    if (dataLoading || loadedFiles.length === 0) return
+    if (dataLoading || loadedFiles.length === 0) {
+      return
+    }
 
     const processFiles = async () => {
       if (savedGroups.length > 0) {
@@ -270,12 +197,33 @@ export default function SepticTankPage() {
 
         if (usageFiles.length > 0) {
           const validFiles = await cleanFiles(usageFiles)
+
           setSavedGroups(prev =>
-            prev.map(item => ({
-              ...item,
-              evidenceFiles: getRecordFiles(item.id, validFiles),
-              memoryFiles: []
-            }))
+            prev.map(item => {
+              // ⭐ Type 2 關鍵：支援新舊兩種格式
+              // - 新版：record_ids (JSON 陣列)
+              // - 舊版：record_id (逗號分隔字串)
+              const filesForThisRecord = validFiles.filter(f => {
+                // 優先使用新版 record_ids 陣列
+                if (f.record_ids && Array.isArray(f.record_ids)) {
+                  return f.record_ids.includes(item.id)
+                }
+
+                // 回退到舊版 record_id 字串
+                if (f.record_id) {
+                  const recordIds = f.record_id.split(',').map(id => id.trim())
+                  return recordIds.includes(item.id)
+                }
+
+                return false
+              })
+
+              return {
+                ...item,
+                evidenceFiles: filesForThisRecord
+                // ⚠️ 不要清除 memoryFiles！
+              }
+            })
           )
         }
       }
@@ -333,8 +281,9 @@ export default function SepticTankPage() {
         return
       }
 
+      // ⭐ 修改：允許 hours = 0（只要不是 null/undefined）
       const hasValidData = records.some(r =>
-        r.month >= 1 && r.month <= 12 && r.hours > 0
+        r.month >= 1 && r.month <= 12 && r.hours !== null && r.hours !== undefined
       )
       if (!hasValidData) {
         setError('請至少填寫一筆有效數據（月份和工時）')
@@ -344,9 +293,9 @@ export default function SepticTankPage() {
 
     const targetGroupId = isEditMode ? groupId : generateRecordId()
 
-    // ⭐ 過濾出有效記錄（有月份或工時的記錄）
+    // ⭐ 修改：過濾出有效記錄（月份有效且 hours 不是 null/undefined）
     const validRecords = records.filter(r =>
-      (r.month >= 1 && r.month <= 12) || r.hours > 0
+      r.month >= 1 && r.month <= 12 && r.hours !== null && r.hours !== undefined
     )
 
     // 將 groupId 和 memoryFiles 套用到有效記錄
@@ -357,18 +306,18 @@ export default function SepticTankPage() {
     }))
 
     // ⭐ 方案 B：自動覆蓋重複的月份
-    // 收集當前要保存的所有月份
+    // ⭐ 修改：收集所有有效月份（包括 hours = 0）
     const monthsToSave = recordsWithGroupId
-      .filter(r => r.month >= 1 && r.month <= 12 && r.hours > 0)
+      .filter(r => r.month >= 1 && r.month <= 12)
       .map(r => r.month)
 
     // 判斷是否保留舊記錄
     const shouldKeepRecord = (r: SepticTankRecord): boolean => {
-      // 如果是當前編輯的群組，刪除（稍後會被新記錄替換）
-      if (isEditMode && r.groupId === groupId) return false
-      // 如果月份在新記錄中，刪除（覆蓋）
-      if (monthsToSave.includes(r.month)) return false
-      // 其他保留
+      // ⭐ 修正：只刪除當前編輯的群組的記錄
+      // 其他群組的記錄保留（即使月份相同也允許，因為不同設施可以有相同月份）
+      if (r.groupId === targetGroupId) return false
+
+      // 其他群組保留
       return true
     }
 
@@ -377,11 +326,7 @@ export default function SepticTankPage() {
       return [...recordsWithGroupId, ...filtered]
     })
 
-    if (isEditMode) {
-      setSuccess('群組已更新')
-    } else {
-      setSuccess('群組已新增')
-    }
+    // 不顯示通知（只是前端內存操作）
 
     // 清空編輯區
     setCurrentEditingGroup({
@@ -418,8 +363,6 @@ export default function SepticTankPage() {
       records: groupRecords,
       memoryFiles: groupRecords[0]?.memoryFiles || []
     })
-
-    setSuccess('群組已載入到編輯區')
   }
 
   // 從月曆檢視編輯月份（找到月份所屬的群組並載入）
@@ -438,83 +381,74 @@ export default function SepticTankPage() {
 
   // 刪除已保存的群組
   const deleteSavedGroup = (groupId: string) => {
-    if (!window.confirm('確定要刪除此群組嗎？')) return
-
     setSavedGroups(prev => prev.filter(r => r.groupId !== groupId))
-    removeRecordMapping(groupId)
-    setSuccess('群組已刪除')
+    // 不顯示通知（只是前端內存操作）
   }
 
-  const handleSubmit = async () => {
-    await executeSubmit(async () => {
-      const { totalHours, cleanedData, deduplicatedRecordData } = prepareSubmissionData(septicTankData)
+  // 記錄要刪除的檔案 ID（編輯模式刪除舊檔案）
+  const handleDeleteEvidence = (fileId: string) => {
+    setFilesToDelete(prev => [...prev, fileId])
+  }
 
-      await submit({
-        entryInput: {
-          page_key: pageKey,
+  // ⭐ 統一提交函數（提交和暫存）
+  const submitData = async (isDraft: boolean) => {
+    if (savedGroups.length === 0) {
+      throw new Error('請至少新增一個群組')
+    }
+
+    await executeSubmit(async () => {
+      setSubmitError(null)
+      setSubmitSuccess(null)
+
+      try {
+        const { totalHours, cleanedData } = prepareSubmissionData(savedGroups)
+
+        const response = await submitEnergyEntry({
+          page_key: 'septic_tank',
           period_year: year,
           unit: SEPTIC_TANK_CONFIG.unit,
           monthly: { '1': totalHours },
-          notes: `${SEPTIC_TANK_CONFIG.title}使用共 ${septicTankData.length} 筆記錄`,
-          extraPayload: {
-            [SEPTIC_TANK_CONFIG.dataFieldName]: cleanedData,
-            fileMapping: getFileMappingForPayload()
+          status: isDraft ? 'saved' : 'submitted',
+          notes: `${SEPTIC_TANK_CONFIG.title}使用共 ${savedGroups.length} 筆記錄`,
+          payload: {
+            septicTankData: cleanedData
           }
-        },
-        recordData: deduplicatedRecordData,
-        uploadRecordFiles,
-        onSuccess: async (entry_id) => {
-          setCurrentEntryId(entry_id)
-          await reload()
-        }
-      })
+        })
 
-      await handleSubmitSuccess();
-      reloadApprovalStatus()
-    }).catch(error => {
-      setError(error instanceof Error ? error.message : '提交失敗，請重試');
+        const groupsMap = helpers.buildGroupsMap(savedGroups)
+        await helpers.uploadGroupFiles(groupsMap, response.entry_id)
+
+        setCurrentEntryId(response.entry_id)
+        setSubmitSuccess(isDraft ? '暫存成功' : '提交成功')
+
+        // ⭐ 修正：先刪除標記的檔案，再 reload（避免新舊並存）
+        await helpers.deleteMarkedFiles(filesToDelete, setFilesToDelete)
+        await reload()
+        if (!isDraft) {
+          await handleSubmitSuccess()
+        }
+        reloadApprovalStatus()
+
+      } catch (error) {
+        setSubmitError(error instanceof Error ? error.message : '操作失敗')
+        throw error
+      }
     })
-  };
+  }
+
+  const handleSubmit = () => submitData(false)
 
   const handleSave = async () => {
-    await executeSubmit(async () => {
-      setError(null)
-      setSuccess(null)
+    // 審核模式：使用 useAdminSave hook
+    if (isReviewMode && reviewEntryId) {
+      await executeSubmit(async () => {
+        setSubmitError(null)
+        setSubmitSuccess(null)
 
-      // 審核模式：使用 useAdminSave hook
-      if (isReviewMode && reviewEntryId) {
-        console.log('📝 管理員審核模式：使用 useAdminSave hook', reviewEntryId)
-
-        // 準備完整資料集
-        let completeDataSet = [...savedGroups]
-
-        const hasEditingData = currentEditingGroup.records.some(r =>
-          r.month >= 1 && r.month <= 12 && r.hours > 0
-        ) || currentEditingGroup.memoryFiles.length > 0
-
-        if (hasEditingData) {
-          const targetGroupId = currentEditingGroup.groupId || generateRecordId()
-          const recordsWithGroupId = currentEditingGroup.records.map(r => ({
-            ...r,
-            groupId: targetGroupId,
-            memoryFiles: [...currentEditingGroup.memoryFiles]
-          }))
-
-          if (currentEditingGroup.groupId) {
-            completeDataSet = [
-              ...recordsWithGroupId,
-              ...completeDataSet.filter(r => r.groupId !== currentEditingGroup.groupId)
-            ]
-          } else {
-            completeDataSet = [...recordsWithGroupId, ...completeDataSet]
-          }
-        }
-
-        const { totalHours, cleanedData } = prepareSubmissionData(completeDataSet)
-
-        // 收集檔案（使用統一函數）
-        const groupMap = groupRecordsByGroupId(completeDataSet)
-        const filesToUpload = collectFilesToUpload(groupMap)
+        // ⭐ 先同步編輯區修改
+        const finalSavedGroups = helpers.syncEditingGroupChanges(currentEditingGroup, savedGroups, setSavedGroups)
+        const { totalHours, cleanedData } = prepareSubmissionData(finalSavedGroups)
+        const filesToUpload = helpers.collectAdminFilesToUpload(finalSavedGroups)
 
         await adminSave({
           updateData: {
@@ -522,48 +456,30 @@ export default function SepticTankPage() {
             amount: totalHours,
             payload: {
               monthly: { '1': totalHours },
-              [SEPTIC_TANK_CONFIG.dataFieldName]: cleanedData,
-              fileMapping: getFileMappingForPayload()
+              septicTankData: cleanedData
             }
           },
           files: filesToUpload
         })
 
+        // ⭐ 修正：先刪除標記的檔案，再 reload（避免新舊並存）
+        await helpers.deleteMarkedFilesAsAdmin(filesToDelete, setFilesToDelete)
         await reload()
         reloadApprovalStatus()
         setCurrentEditingGroup({ groupId: null, records: createEmptyRecords(), memoryFiles: [] })
         setSuccess('✅ 儲存成功！資料已更新')
-        return
-      }
-
-      // 非審核模式
-      const { totalHours, cleanedData, deduplicatedRecordData } = prepareSubmissionData(septicTankData)
-      await save({
-        entryInput: {
-          page_key: pageKey,
-          period_year: year,
-          unit: SEPTIC_TANK_CONFIG.unit,
-          monthly: { '1': totalHours },
-          notes: `${SEPTIC_TANK_CONFIG.title}使用共 ${septicTankData.length} 筆記錄`,
-          extraPayload: {
-            [SEPTIC_TANK_CONFIG.dataFieldName]: cleanedData,
-            fileMapping: getFileMappingForPayload()
-          }
-        },
-        recordData: deduplicatedRecordData,
-        uploadRecordFiles,
-        onSuccess: async (entry_id) => {
-          setCurrentEntryId(entry_id)
-          await reload()
-        }
+      }).catch(error => {
+        setSubmitError(error instanceof Error ? error.message : '暫存失敗')
+        throw error
       })
+      return
+    }
 
-      reloadApprovalStatus()
-    }).catch(error => {
-      console.error('❌ 暫存失敗:', error)
-      setError(error instanceof Error ? error.message : '暫存失敗')
-    })
-  };
+    // ⭐ 一般暫存模式：先同步編輯區，再調用 submitData
+    // submitData 內部會呼叫 executeSubmit，所以這裡不需要
+    helpers.syncEditingGroupChanges(currentEditingGroup, savedGroups, setSavedGroups)
+    await submitData(true)
+  }
 
   const handleClear = () => {
     setShowClearConfirmModal(true);
@@ -602,32 +518,6 @@ export default function SepticTankPage() {
       setError(error instanceof Error ? error.message : '清除失敗，請重試')
     }
   };
-
-  // 生成縮圖
-  useEffect(() => {
-    const generateThumbnails = async () => {
-      const allFiles = [
-        ...currentEditingGroup.records.flatMap(r => r.evidenceFiles || []),
-        ...savedGroups.flatMap(r => r.evidenceFiles || [])
-      ]
-
-      for (const file of allFiles) {
-        if (file.mime_type?.startsWith('image/') && !thumbnails[file.id]) {
-          try {
-            const url = await getFileUrl(file.file_path)
-            setThumbnails(prev => ({
-              ...prev,
-              [file.id]: url
-            }))
-          } catch (error) {
-            console.warn('Failed to generate thumbnail for', file.file_name, error)
-          }
-        }
-      }
-    }
-
-    generateThumbnails()
-  }, [currentEditingGroup.records, savedGroups, thumbnails])
 
   return (
     <>
@@ -678,13 +568,19 @@ export default function SepticTankPage() {
           unit: SEPTIC_TANK_CONFIG.unit,
           role,
           onSave: handleSave,
-          isSaving: submitLoading
+          isSaving: submitting
         }}
         notificationState={{
-          success: submitSuccess,
-          error: submitError,
-          clearSuccess: clearSubmitSuccess,
-          clearError: clearSubmitError
+          success: submitSuccess || success,
+          error: submitError || error,
+          clearSuccess: () => {
+            setSubmitSuccess(null);
+            setSuccess(null);
+          },
+          clearError: () => {
+            setSubmitError(null);
+            setError(null);
+          }
         }}
       >
         {/* 使用數據區塊（套用模板） */}
@@ -702,6 +598,7 @@ export default function SepticTankPage() {
           thumbnails={thumbnails}
           onPreviewImage={(src) => setLightboxSrc(src)}
           onError={(msg) => setError(msg)}
+          onDeleteEvidence={handleDeleteEvidence}
           iconColor={SEPTIC_TANK_CONFIG.iconColor}
         />
 
@@ -750,23 +647,6 @@ export default function SepticTankPage() {
           zIndex={LAYOUT_CONSTANTS.MODAL_Z_INDEX}
           onClose={() => setLightboxSrc(null)}
         />
-
-        {/* Toast 訊息 */}
-        {error && (
-          <Toast
-            message={error}
-            type="error"
-            onClose={() => setError(null)}
-          />
-        )}
-
-        {success && (
-          <Toast
-            message={success}
-            type="success"
-            onClose={() => setSuccess(null)}
-          />
-        )}
       </SharedPageLayout>
     </>
   );

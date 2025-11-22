@@ -7,8 +7,8 @@
  * - 空狀態提示
  */
 
-import { GroupListItem } from '../../../../../components/energy/GroupListItem'
-import { getFileUrl } from '../../../../../api/files'
+import { GroupListItem } from '../../../components/energy/GroupListItem'
+import { getFileUrl } from '../../../api/files'
 import type { SepticTankRecord } from './SepticTankUsageSection'
 
 export interface SepticTankGroupListSectionProps {

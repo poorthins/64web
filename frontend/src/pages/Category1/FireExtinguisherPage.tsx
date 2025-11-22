@@ -89,7 +89,7 @@ export default function FireExtinguisherPage() {
   // 管理員審核儲存 Hook
   const { save: adminSave, saving: adminSaving } = useAdminSave(pageKey, reviewEntryId)
 
-  const editPermissions = useEditPermissions(currentStatus || 'submitted', isReadOnly, role)
+  const editPermissions = useEditPermissions(currentStatus || 'submitted', isReadOnly, role ?? undefined)
 
   const submitting = submitLoading || clearing
 
@@ -309,8 +309,7 @@ export default function FireExtinguisherPage() {
               file: mf.file,
               metadata: {
                 month: 1,
-                fileType: 'other' as const,
-                allRecordIds: [record.id]
+                fileType: 'other' as const
               }
             })
           })
@@ -791,7 +790,7 @@ export default function FireExtinguisherPage() {
                         {!isReadOnly && (
                           <button
                             onClick={() => handleDeleteRecord(record.id)}
-                            className="p-2 text-red-500 hover:bg-red-50 rounded-lg transition-colors"
+                            className="p-2 text-red-500 hover:bg-red-50 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                             title="刪除此記錄"
                             disabled={submitting}
                           >
@@ -949,18 +948,11 @@ export default function FireExtinguisherPage() {
       {/* ==================== 底部操作欄 ==================== */}
       {!isReadOnly && !isReviewMode && (
         <BottomActionBar
-          currentStatus={currentStatus}
-          currentEntryId={entry?.id || null}
-          isUpdating={false}
-          hasSubmittedBefore={!!entry}
-          banner={banner}
-          editPermissions={editPermissions}
+          currentStatus={currentStatus ?? 'submitted'}
           submitting={submitting}
-          saving={submitting}
           onSubmit={handleSubmit}
           onSave={handleSave}
           onClear={handleClear}
-          designTokens={designTokens}
         />
       )}
     </>

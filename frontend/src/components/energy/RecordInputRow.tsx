@@ -26,6 +26,8 @@ export interface RecordInputRowProps {
   quantityPlaceholder?: string
   /** 數量輸入的單位（顯示在 label 中，例如 "加油量 (L)"） */
   quantityLabel?: string
+  /** 數量最大值（預設 999999999，防止資料庫溢位） */
+  maxQuantity?: number
 }
 
 /**
@@ -54,6 +56,7 @@ export function RecordInputRow({
   showDelete,
   disabled = false,
   quantityPlaceholder = '',
+  maxQuantity = 999999999, // 預設最大值 9億，符合資料庫 NUMERIC(18,6) 限制
 }: RecordInputRowProps): JSX.Element {
   return (
     <div className="flex items-center" style={{ gap: '27px' }}>
@@ -112,9 +115,15 @@ export function RecordInputRow({
       <input
         type="number"
         min="0"
+        max={maxQuantity}
         step="0.01"
         value={quantity || ''}
-        onChange={(e) => onUpdate(recordId, 'quantity', parseFloat(e.target.value) || 0)}
+        onChange={(e) => {
+          const inputValue = parseFloat(e.target.value) || 0
+          // ⭐ 防止數字溢位：限制在最大值內
+          const clampedValue = Math.min(inputValue, maxQuantity)
+          onUpdate(recordId, 'quantity', clampedValue)
+        }}
         onWheel={(e) => e.currentTarget.blur()}
         disabled={disabled}
         placeholder={quantityPlaceholder}
@@ -144,7 +153,7 @@ export function RecordInputRow({
         <button
           onClick={() => onDelete(recordId)}
           disabled={disabled}
-          className="p-2 text-black hover:text-red-600 hover:bg-red-50 rounded transition-colors"
+          className="p-2 text-black hover:text-red-600 hover:bg-red-50 rounded transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
           title="刪除此記錄"
         >
           <Trash2 style={{ width: '32px', height: '32px' }} />

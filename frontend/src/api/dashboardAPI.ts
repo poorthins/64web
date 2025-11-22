@@ -58,7 +58,7 @@ export interface AllEntry {
   title: string            // 項目名稱
   category: string         // 範疇分類 (範疇一/範疇二/範疇三)
   scope: string           // 排放範圍描述
-  status: 'pending' | 'saved' | 'submitted' | 'approved' | 'rejected' | null  // 項目狀態（saved 視為待填寫）
+  status: 'pending' | 'saved' | 'submitted' | 'approved' | 'rejected' | 'returned' | 'draft' | 'under_review' | 'needs_revision' | 'needs_fix' | null  // 後端可能回傳的所有狀態
   updatedAt?: string      // 最後更新時間
   rejectionReason?: string // 退回原因 (狀態為 rejected 時)
   entryId?: string        // 填報記錄 ID (用於取得退回原因)
@@ -74,12 +74,14 @@ const allCategories = [
   { pageKey: 'wd40', title: 'WD-40', category: '範疇一', scope: '直接排放' },
   { pageKey: 'acetylene', title: '乙炔', category: '範疇一', scope: '直接排放' },
   { pageKey: 'refrigerant', title: '冷媒', category: '範疇一', scope: '直接排放' },
-  { pageKey: 'septic_tank', title: '化糞池', category: '範疇一', scope: '直接排放' }, // Fixed: unified page_key to 'septic_tank'
+  { pageKey: 'septic_tank', title: '化糞池', category: '範疇一', scope: '直接排放' },
   { pageKey: 'natural_gas', title: '天然氣', category: '範疇一', scope: '直接排放' },
   { pageKey: 'urea', title: '尿素', category: '範疇一', scope: '直接排放' },
   { pageKey: 'diesel_generator', title: '柴油(固定源)', category: '範疇一', scope: '直接排放' },
+  { pageKey: 'generator_test', title: '發電機測試資料', category: '範疇一', scope: '直接排放' },
   { pageKey: 'diesel', title: '柴油(移動源)', category: '範疇一', scope: '直接排放' },
   { pageKey: 'gasoline', title: '汽油', category: '範疇一', scope: '直接排放' },
+  { pageKey: 'sf6', title: '六氟化硫', category: '範疇一', scope: '直接排放' },
   { pageKey: 'lpg', title: '液化石油氣', category: '範疇一', scope: '直接排放' },
   { pageKey: 'fire_extinguisher', title: '滅火器', category: '範疇一', scope: '直接排放' },
   { pageKey: 'welding_rod', title: '焊條', category: '範疇一', scope: '直接排放' },
@@ -91,12 +93,14 @@ const titleMap: Record<string, string> = {
   'wd40': 'WD-40',
   'acetylene': '乙炔',
   'refrigerant': '冷媒',
-  'septic_tank': '化糞池', // Fixed: unified page_key to 'septic_tank'
+  'septic_tank': '化糞池',
   'natural_gas': '天然氣',
   'urea': '尿素',
   'diesel_generator': '柴油(固定源)',
+  'generator_test': '發電機測試資料',
   'diesel': '柴油(移動源)',
   'gasoline': '汽油',
+  'sf6': '六氟化硫',
   'lpg': '液化石油氣',
   'fire_extinguisher': '滅火器',
   'welding_rod': '焊條',

@@ -10,12 +10,12 @@
  */
 
 import { Trash2 } from 'lucide-react'
-import { FileDropzone } from '../../../../../components/FileDropzone'
-import { FileTypeIcon } from '../../../../../components/energy/FileTypeIcon'
-import { getFileType } from '../../../../../utils/energy/fileTypeDetector'
-import type { MemoryFile } from '../../../../../services/documentHandler'
-import { GeneratorTestEditingGroup } from '../mobileEnergyTypes'
-import { LAYOUT_CONSTANTS } from '../mobileEnergyConstants'
+import { FileDropzone } from '../../../components/FileDropzone'
+import { FileTypeIcon } from '../../../components/energy/FileTypeIcon'
+import { getFileType } from '../../../utils/energy/fileTypeDetector'
+import type { MemoryFile } from '../../../services/documentHandler'
+import { GeneratorTestEditingGroup } from './mobileEnergyTypes'
+import { LAYOUT_CONSTANTS } from './mobileEnergyConstants'
 
 export interface GeneratorTestUsageSectionProps {
   // 權限

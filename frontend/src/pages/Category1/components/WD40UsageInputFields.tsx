@@ -10,7 +10,7 @@
 
 import { Trash2 } from 'lucide-react'
 import { WD40Spec } from '../hooks/useWD40SpecManager'
-import { CurrentEditingGroup } from '../shared/mobile/mobileEnergyTypes'
+import { CurrentEditingGroup } from '../common/mobileEnergyTypes'
 
 interface WD40UsageInputFieldsProps {
   currentGroup: CurrentEditingGroup
@@ -126,9 +126,15 @@ export function WD40UsageInputFields({
               <input
                 type="number"
                 min="0"
+                max="999999999"
                 step="1"
                 value={record.quantity || ''}
-                onChange={(e) => onUpdate(record.id, 'quantity', parseFloat(e.target.value) || 0)}
+                onChange={(e) => {
+                  const inputValue = parseFloat(e.target.value) || 0
+                  // ⭐ 防止數字溢位
+                  const clampedValue = Math.min(inputValue, 999999999)
+                  onUpdate(record.id, 'quantity', clampedValue)
+                }}
                 onWheel={(e) => e.currentTarget.blur()}
                 disabled={isReadOnly}
                 placeholder="0"
@@ -146,7 +152,7 @@ export function WD40UsageInputFields({
                 <button
                   onClick={() => onDelete(record.id)}
                   disabled={isReadOnly}
-                  className="p-2 text-black hover:text-red-600 hover:bg-red-50 rounded transition-colors"
+                  className="p-2 text-black hover:text-red-600 hover:bg-red-50 rounded transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                   title="刪除此記錄"
                   style={{ marginLeft: '-12px' }}
                 >

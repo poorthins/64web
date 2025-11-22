@@ -9,7 +9,7 @@
 
 import { useState } from 'react'
 import { generateRecordId } from '../../../utils/idGenerator'
-import { SF6Record, SF6EditingGroup } from '../shared/mobile/mobileEnergyTypes'
+import { SF6Record, SF6EditingGroup } from '../common/mobileEnergyTypes'
 import { MemoryFile } from '../../../components/FileDropzone'
 import { getFileUrl } from '../../../api/files'
 

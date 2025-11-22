@@ -115,8 +115,8 @@ const SharedPageLayout: React.FC<SharedPageLayoutProps> = ({
       const message = notificationState.success
 
       // 判斷通知類型
-      if (message.includes('暫存')) {
-        // 儲存操作 → 藍色彈窗
+      if (message.includes('暫存') || message.includes('儲存')) {
+        // 儲存操作 → 藍色彈窗 + "儲存成功！"標題
         setSuccessModalType('save')
         setSuccessMessage(message)
         setShowSuccessModal(true)

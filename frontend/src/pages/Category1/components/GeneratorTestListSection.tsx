@@ -10,6 +10,7 @@
 import type { GeneratorTest } from '../GeneratorTestPage'
 import { getFileUrl } from '../../../api/files'
 import { ActionButtons } from '../../../components/energy/ActionButtons'
+import { THUMBNAIL_PLACEHOLDER_SVG, THUMBNAIL_BACKGROUND, THUMBNAIL_BORDER } from '../../../utils/energy/thumbnailConstants'
 
 // ==================== 介面定義 ====================
 interface GeneratorTestListSectionProps {
@@ -123,21 +124,24 @@ export function GeneratorTestListSection({
                 {test.location || '-'} / {test.generatorPower} kW / {test.testFrequency} 次/年 / {test.testDuration} 分/次
               </div>
 
-              {/* 圖片縮圖 */}
-              {thumbnail && (
-                <div
-                  onClick={handleImageClick}
-                  style={{
-                    width: '55.769px',
-                    height: '55.769px',
-                    borderRadius: '10px',
-                    overflow: 'hidden',
-                    border: '1px solid rgba(0, 0, 0, 0.25)',
-                    background: '#EBEDF0',
-                    cursor: 'pointer',
-                    flexShrink: 0
-                  }}
-                >
+              {/* 圖片縮圖 - 永久顯示 */}
+              <div
+                onClick={thumbnail ? handleImageClick : undefined}
+                style={{
+                  width: '55.769px',
+                  height: '55.769px',
+                  borderRadius: '10px',
+                  overflow: 'hidden',
+                  border: THUMBNAIL_BORDER,
+                  background: THUMBNAIL_BACKGROUND,
+                  cursor: thumbnail ? 'pointer' : 'default',
+                  flexShrink: 0,
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center'
+                }}
+              >
+                {thumbnail ? (
                   <img
                     src={thumbnail}
                     alt="發電機銘牌"
@@ -147,8 +151,10 @@ export function GeneratorTestListSection({
                       objectFit: 'cover'
                     }}
                   />
-                </div>
-              )}
+                ) : (
+                  THUMBNAIL_PLACEHOLDER_SVG
+                )}
+              </div>
 
               {/* 操作按鈕 */}
               <ActionButtons

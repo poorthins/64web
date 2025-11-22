@@ -176,9 +176,15 @@ export function RefrigerantInputFields({
                 <input
                   type="number"
                   min="0"
+                  max="999999999"
                   step="0.01"
                   value={device.fillAmount || ''}
-                  onChange={(e) => onFieldChange('fillAmount', parseFloat(e.target.value) || 0)}
+                  onChange={(e) => {
+                    const inputValue = parseFloat(e.target.value) || 0
+                    // ⭐ 防止數字溢位
+                    const clampedValue = Math.min(inputValue, 999999999)
+                    onFieldChange('fillAmount', clampedValue)
+                  }}
                   onWheel={(e) => e.currentTarget.blur()}
                   disabled={isReadOnly}
                   placeholder="例如：120"

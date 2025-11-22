@@ -73,7 +73,9 @@
       "Bash(python -m pytest:*)",
       "Bash(paste:*)",
       "Bash(python:*)",
-      "Bash(cp:*)"
+      "Bash(cp:*)",
+      "Bash(timeout 30 npx:*)",
+      "Bash(xcopy:*)"
     ],
     "deny": [],
     "ask": []

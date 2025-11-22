@@ -444,6 +444,11 @@ async function uploadEvidenceWithValidation(file: File, meta: FileMetadata & { e
 
     console.log('💾 [uploadEvidence] Database record:', {
       file_name: file.name,
+      file_name_type: typeof file.name,
+      file_name_length: file.name?.length,
+      file_name_undefined: file.name === undefined,
+      file_name_null: file.name === null,
+      file_name_empty: file.name === '',
       fileType_input: meta.fileType,
       category: meta.category,
       month_input: meta.month,
@@ -465,6 +470,16 @@ async function uploadEvidenceWithValidation(file: File, meta: FileMetadata & { e
       console.error('Error creating file record:', dbError)
       throw handleAPIError(dbError, `建立檔案記錄失敗: ${dbError.message}`)
     }
+
+    // ⭐ 驗證資料庫實際儲存的資料
+    console.log('✅ [uploadEvidence] Database record saved:', {
+      id: dbData.id,
+      file_name: dbData.file_name,
+      file_name_is_undefined: dbData.file_name === undefined,
+      file_path: dbData.file_path,
+      record_id: dbData.record_id,
+      record_ids: dbData.record_ids
+    })
 
     return dbData
   } catch (error) {
@@ -1096,7 +1111,8 @@ export async function deleteEvidence(fileId: string): Promise<void> {
       .from('entry_files')
       .select('file_path, owner_id')
       .eq('id', fileId)
-      .eq('owner_id', user.id) // 確保只能刪除自己的檔案
+      // ✅ 移除 owner_id 檢查，改由 RLS Policy 控制權限
+      // RLS Policy 允許刪除：(1) 管理員的任何檔案 (2) 自己 entry 下的任何檔案
       .maybeSingle()  // ✅ 使用 maybeSingle() 允許 0 或 1 筆結果
 
     if (fetchError) {
@@ -1142,7 +1158,7 @@ export async function deleteEvidence(fileId: string): Promise<void> {
       .from('entry_files')
       .delete()
       .eq('id', fileId)
-      .eq('owner_id', user.id)
+      // ✅ 移除 owner_id 檢查，改由 RLS Policy 控制權限
 
     if (dbError) {
       console.error('❌ [deleteEvidence] Database deletion failed:', dbError)

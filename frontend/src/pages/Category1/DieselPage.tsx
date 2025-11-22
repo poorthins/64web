@@ -7,24 +7,25 @@ import { useFrontendStatus } from '../../hooks/useFrontendStatus';
 import { useApprovalStatus } from '../../hooks/useApprovalStatus';
 import { useReviewMode } from '../../hooks/useReviewMode'
 import { useEnergyData } from '../../hooks/useEnergyData'
-import { useMultiRecordSubmit } from '../../hooks/useMultiRecordSubmit'
 import { useEnergyClear } from '../../hooks/useEnergyClear'
 import { useSubmitGuard } from '../../hooks/useSubmitGuard'
 import { useGhostFileCleaner } from '../../hooks/useGhostFileCleaner'
-import { useRecordFileMapping } from '../../hooks/useRecordFileMapping'
 import { useSubmissions } from '../admin/hooks/useSubmissions'
 import { useRole } from '../../hooks/useRole'
 import { useAdminSave } from '../../hooks/useAdminSave'
-import { EvidenceFile, getFileUrl } from '../../api/files';
+import { EvidenceFile } from '../../api/files'
+import { submitEnergyEntry } from '../../api/v2/entryAPI'
+import { useThumbnailLoader } from '../../hooks/useThumbnailLoader'
+import { useType2Helpers } from '../../hooks/useType2Helpers'
 import Toast from '../../components/Toast';
 import { generateRecordId } from '../../utils/idGenerator';
-import { MobileEnergyRecord as DieselRecord, CurrentEditingGroup, EvidenceGroup } from './shared/mobile/mobileEnergyTypes'
-import { LAYOUT_CONSTANTS } from './shared/mobile/mobileEnergyConstants'
-import { createEmptyRecords, prepareSubmissionData } from './shared/mobile/mobileEnergyUtils'
-import { DIESEL_CONFIG } from './shared/mobileEnergyConfig'
-import { MobileEnergyUsageSection } from './shared/mobile/components/MobileEnergyUsageSection'
-import { MobileEnergyGroupListSection } from './shared/mobile/components/MobileEnergyGroupListSection'
-import { ImageLightbox } from './shared/mobile/components/ImageLightbox'
+import { MobileEnergyRecord as DieselRecord, CurrentEditingGroup, EvidenceGroup } from './common/mobileEnergyTypes'
+import { LAYOUT_CONSTANTS } from './common/mobileEnergyConstants'
+import { createEmptyRecords, prepareSubmissionData } from './common/mobileEnergyUtils'
+import { DIESEL_CONFIG } from './common/mobileEnergyConfig'
+import { MobileEnergyUsageSection } from './common/MobileEnergyUsageSection'
+import { MobileEnergyGroupListSection } from './common/MobileEnergyGroupListSection'
+import { ImageLightbox } from './common/ImageLightbox'
 import type { MemoryFile } from '../../services/documentHandler';
 
 
@@ -43,7 +44,6 @@ export default function DieselPage() {
   const [lightboxSrc, setLightboxSrc] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
-  const [thumbnails, setThumbnails] = useState<{ [key: string]: string }>({});  // ⭐ 檔案縮圖 URL
 
   // 前端狀態管理 Hook
   const frontendStatus = useFrontendStatus({
@@ -83,17 +83,6 @@ export default function DieselPage() {
   // 管理員儲存 Hook
   const { save: adminSave, saving: adminSaving } = useAdminSave(pageKey, reviewEntryId)
 
-  // 提交 Hook（多記錄專用）
-  const {
-    submit,
-    save,
-    submitting: submitLoading,
-    error: submitError,
-    success: submitSuccess,
-    clearError: clearSubmitError,
-    clearSuccess: clearSubmitSuccess
-  } = useMultiRecordSubmit(pageKey, year)
-
   // 清除 Hook
   const {
     clear,
@@ -105,22 +94,14 @@ export default function DieselPage() {
   // 幽靈檔案清理 Hook
   const { cleanFiles } = useGhostFileCleaner()
 
-  // 檔案映射 Hook
-  const {
-    uploadRecordFiles,
-    getRecordFiles,
-    loadFileMapping,
-    getFileMappingForPayload,
-    removeRecordMapping
-  } = useRecordFileMapping(pageKey, currentEntryId)
+  // ⭐ 新架构状态管理（替代旧 hooks）
+  const [submitError, setSubmitError] = useState<string | null>(null)
+  const [submitSuccess, setSubmitSuccess] = useState<string | null>(null)
+  const [filesToDelete, setFilesToDelete] = useState<string[]>([])
 
   // ⭐ 新架構：分離「當前編輯」和「已保存群組」
   // 當前正在編輯的群組（對應 Figma 上方「使用數據」區）
-  const [currentEditingGroup, setCurrentEditingGroup] = useState<{
-    groupId: string | null      // null = 新增模式，有值 = 編輯模式
-    records: DieselRecord[]     // 該群組的記錄
-    memoryFiles: MemoryFile[]   // 暫存佐證
-  }>({
+  const [currentEditingGroup, setCurrentEditingGroup] = useState<CurrentEditingGroup>({
     groupId: null,
     records: createEmptyRecords(),
     memoryFiles: []
@@ -128,6 +109,15 @@ export default function DieselPage() {
 
   // 已保存的群組（對應 Figma 下方「資料列表」區）
   const [savedGroups, setSavedGroups] = useState<DieselRecord[]>([])
+
+  // ⭐ 缩图加载（使用统一 hook，Type 2：从群组中提取 evidenceFiles）
+  const thumbnails = useThumbnailLoader({
+    records: savedGroups,
+    fileExtractor: (record) => record.evidenceFiles || []
+  })
+
+  // ⭐ Type 2 共用輔助函數
+  const helpers = useType2Helpers<DieselRecord>(pageKey, year)
 
   // ⭐ 保留舊的 dieselData（提交時用）
   const dieselData = useMemo(() => {
@@ -161,12 +151,6 @@ export default function DieselPage() {
 
           // ⭐ 載入到 savedGroups（新架構）
           setSavedGroups(updated)
-
-          // 載入檔案映射表
-          const payload = loadedEntry.payload || loadedEntry.extraPayload
-          if (payload) {
-            loadFileMapping(payload)
-          }
         }
       }
     }
@@ -188,11 +172,14 @@ export default function DieselPage() {
 
           setSavedGroups(prev => {
             return prev.map((item) => {
-              const filesForThisRecord = getRecordFiles(item.id, validDieselFiles)
+              // ⭐ Type 2 关键：使用 split(',').includes() 过滤
+              const filesForThisRecord = validDieselFiles.filter(f =>
+                f.record_id && f.record_id.split(',').includes(item.id)
+              )
               return {
                 ...item,
-                evidenceFiles: filesForThisRecord,
-                memoryFiles: []
+                evidenceFiles: filesForThisRecord
+                // ⚠️ 不清除 memoryFiles
               }
             })
           })
@@ -202,7 +189,7 @@ export default function DieselPage() {
       }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [loadedFiles, pageKey, dataLoading])
+  }, [loadedFiles, pageKey, dataLoading, savedGroups.length])
 
   // ⭐ 新架構的 Helper Functions
 
@@ -285,11 +272,11 @@ export default function DieselPage() {
         ...recordsWithGroupId,
         ...prev.filter(r => r.groupId !== groupId)
       ])
-      setSuccess('群組已更新')
+      // 不顯示通知（只是前端內存操作）
     } else {
       // 新增模式：加入已保存列表
       setSavedGroups(prev => [...recordsWithGroupId, ...prev])
-      setSuccess('群組已新增')
+      // 不顯示通知（只是前端內存操作）
     }
 
     // 清空編輯區（準備下一個群組），預設 3 格
@@ -327,75 +314,79 @@ export default function DieselPage() {
       records: groupRecords,
       memoryFiles: groupRecords[0]?.memoryFiles || []
     })
-
-    setSuccess('群組已載入到編輯區')
+    // 不顯示通知（只是前端內存操作）
   }
 
   // 刪除已保存的群組
   const deleteSavedGroup = (groupId: string) => {
-    if (!window.confirm('確定要刪除此群組嗎？')) return
-
     setSavedGroups(prev => prev.filter(r => r.groupId !== groupId))
-    removeRecordMapping(groupId)
-    setSuccess('群組已刪除')
+    // 不顯示通知（只是前端內存操作）
   }
 
-  const handleSubmit = async () => {
-    await executeSubmit(async () => {
-      // ✅ 使用統一的資料準備函數
-      const { totalQuantity, cleanedEnergyData, deduplicatedRecordData } = prepareSubmissionData(dieselData)
+  // 記錄要刪除的檔案 ID
+  const handleDeleteEvidence = (fileId: string) => {
+    setFilesToDelete(prev => [...prev, fileId])
+  }
 
-      // ⭐ 使用 hook 的 submit 函數
-      await submit({
-        entryInput: {
+  // ⭐ 統一提交函數（替代旧 hooks）
+  const submitData = async (isDraft: boolean) => {
+    if (savedGroups.length === 0) {
+      throw new Error('請至少新增一個群組')
+    }
+
+    await executeSubmit(async () => {
+      setSubmitError(null)
+      setSubmitSuccess(null)
+
+      try {
+        const { totalQuantity, cleanedEnergyData } = prepareSubmissionData(savedGroups)
+
+        const response = await submitEnergyEntry({
           page_key: pageKey,
           period_year: year,
           unit: DIESEL_CONFIG.unit,
           monthly: { '1': totalQuantity },
-          notes: `${DIESEL_CONFIG.title}使用共 ${dieselData.length} 筆記錄`,
-          extraPayload: {
-            [DIESEL_CONFIG.dataFieldName]: cleanedEnergyData,
-            fileMapping: getFileMappingForPayload()
+          status: isDraft ? 'saved' : 'submitted',
+          notes: `${DIESEL_CONFIG.title}使用共 ${savedGroups.length} 筆記錄`,
+          payload: {
+            dieselData: cleanedEnergyData
           }
-        },
-        recordData: deduplicatedRecordData,  // ⭐ 使用去重後的資料（含 allRecordIds）
-        uploadRecordFiles,
-        onSuccess: async (entry_id) => {
-          // ⭐ 簡化為只有收尾工作
-          setCurrentEntryId(entry_id)
-          await reload()
+        })
+
+        const groupsMap = helpers.buildGroupsMap(savedGroups)
+        await helpers.uploadGroupFiles(groupsMap, response.entry_id)
+        await helpers.deleteMarkedFiles(filesToDelete, setFilesToDelete)
+
+        setCurrentEntryId(response.entry_id)
+        setSubmitSuccess(isDraft ? '暫存成功' : '提交成功')
+
+        await reload()
+        if (!isDraft) {
+          await handleSubmitSuccess()
         }
-      })
+        reloadApprovalStatus()
 
-      await handleSubmitSuccess();
-
-      // 重新載入審核狀態，更新狀態橫幅
-      reloadApprovalStatus()
-    }).catch(error => {
-      setError(error instanceof Error ? error.message : '提交失敗，請重試');
+      } catch (error) {
+        setSubmitError(error instanceof Error ? error.message : '操作失敗')
+        throw error
+      }
     })
-  };
+  }
+
+  const handleSubmit = () => submitData(false)
 
   const handleSave = async () => {
     await executeSubmit(async () => {
-      setError(null)
-      setSuccess(null)
+      setSubmitError(null)
+      setSubmitSuccess(null)
 
-      // ✅ 使用統一的資料準備函數
-      const { totalQuantity, cleanedEnergyData, deduplicatedRecordData } = prepareSubmissionData(dieselData)
+      // 先同步編輯區修改
+      const finalSavedGroups = helpers.syncEditingGroupChanges(currentEditingGroup, savedGroups, setSavedGroups)
+      const { totalQuantity, cleanedEnergyData } = prepareSubmissionData(finalSavedGroups)
 
       // 審核模式：使用 useAdminSave hook
       if (isReviewMode && reviewEntryId) {
-        console.log('📝 管理員審核模式：使用 useAdminSave hook', reviewEntryId)
-
-        // ⭐ 新架構：準備檔案列表（從當前編輯群組收集）
-        const filesToUpload = currentEditingGroup.memoryFiles.map((mf: MemoryFile) => ({
-          file: mf.file,
-          metadata: {
-            recordIndex: 0,
-            allRecordIds: currentEditingGroup.records.map(r => r.id)
-          }
-        }))
+        const filesToUpload = helpers.collectAdminFilesToUpload(finalSavedGroups)
 
         await adminSave({
           updateData: {
@@ -403,51 +394,26 @@ export default function DieselPage() {
             amount: totalQuantity,
             payload: {
               monthly: { '1': totalQuantity },
-              [DIESEL_CONFIG.dataFieldName]: cleanedEnergyData,
-              fileMapping: getFileMappingForPayload()
+              dieselData: cleanedEnergyData
             }
           },
           files: filesToUpload
         })
 
+        await helpers.deleteMarkedFilesAsAdmin(filesToDelete, setFilesToDelete)
         await reload()
         reloadApprovalStatus()
-        // 清空記憶體檔案（在 reload 之後，避免檔案暫時消失）
         setCurrentEditingGroup(prev => ({ ...prev, memoryFiles: [] }))
-        setSuccess('✅ 儲存成功！資料已更新')
+        setSubmitSuccess('✅ 儲存成功！資料已更新')
         return
       }
 
-      // 非審核模式：使用統一的資料準備函數（已在函數開頭準備好）
-      // ⭐ 使用 hook 的 save 函數（跳過驗證）
-      await save({
-        entryInput: {
-          page_key: pageKey,
-          period_year: year,
-          unit: DIESEL_CONFIG.unit,
-          monthly: { '1': totalQuantity },
-          notes: `${DIESEL_CONFIG.title}使用共 ${dieselData.length} 筆記錄`,
-          extraPayload: {
-            [DIESEL_CONFIG.dataFieldName]: cleanedEnergyData,
-            fileMapping: getFileMappingForPayload()
-          }
-        },
-        recordData: deduplicatedRecordData,  // ⭐ 包含 allRecordIds
-        uploadRecordFiles,
-        onSuccess: async (entry_id) => {
-          // ⭐ 簡化為 2 行（原本 ~55 行）
-          setCurrentEntryId(entry_id)
-          await reload()
-        }
-      })
-
-      // 重新載入審核狀態，更新狀態橫幅
-      reloadApprovalStatus()
+      // 一般暫存：調用 submitData
+      await submitData(true)
     }).catch(error => {
-      console.error('❌ 暫存失敗:', error)
-      setError(error instanceof Error ? error.message : '暫存失敗')
+      setSubmitError(error instanceof Error ? error.message : '暫存失敗')
     })
-  };
+  }
 
   const handleClear = () => {
     setShowClearConfirmModal(true);
@@ -535,24 +501,6 @@ export default function DieselPage() {
     })
   }, [dieselData])
 
-  // ⭐ 只為圖片檔案生成縮圖（PDF 不需要）
-  useEffect(() => {
-    evidenceGroups.forEach(async (group) => {
-      if (group.evidence &&
-          group.evidence.mime_type.startsWith('image/') &&
-          !thumbnails[group.evidence.id]) {
-        try {
-          const url = await getFileUrl(group.evidence.file_path)
-          setThumbnails(prev => ({
-            ...prev,
-            [group.evidence!.id]: url
-          }))
-        } catch (error) {
-          console.warn('Failed to generate thumbnail for', group.evidence.file_name, error)
-        }
-      }
-    })
-  }, [evidenceGroups])
   return (
     <>
       {/* 隱藏瀏覽器原生日曆圖示和數字輸入框的上下箭頭 */}
@@ -611,13 +559,19 @@ export default function DieselPage() {
         unit: DIESEL_CONFIG.unit,
         role,
         onSave: handleSave,
-        isSaving: submitLoading
+        isSaving: submitting
       }}
       notificationState={{
-        success: submitSuccess,
-        error: submitError,
-        clearSuccess: clearSubmitSuccess,
-        clearError: clearSubmitError
+        success: submitSuccess || success,
+        error: submitError || error,
+        clearSuccess: () => {
+          setSubmitSuccess(null);
+          setSuccess(null);
+        },
+        clearError: () => {
+          setSubmitError(null);
+          setError(null);
+        }
       }}
     >
       {/* 使用數據區塊 */}
@@ -635,6 +589,7 @@ export default function DieselPage() {
         thumbnails={thumbnails}
         onPreviewImage={(src) => setLightboxSrc(src)}
         onError={(msg) => setError(msg)}
+        onDeleteEvidence={handleDeleteEvidence}
         iconColor={DIESEL_CONFIG.iconColor}
       />
 

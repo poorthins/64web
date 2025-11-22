@@ -8,10 +8,10 @@
  */
 
 import { Pencil, Trash2 } from 'lucide-react'
-import { FileTypeIcon } from '../../../../../components/energy/FileTypeIcon'
-import { getFileType } from '../../../../../utils/energy/fileTypeDetector'
-import { getFileUrl } from '../../../../../api/files'
-import type { GeneratorTestRecord } from '../mobileEnergyTypes'
+import { FileTypeIcon } from '../../../components/energy/FileTypeIcon'
+import { getFileType } from '../../../utils/energy/fileTypeDetector'
+import { getFileUrl } from '../../../api/files'
+import type { GeneratorTestRecord } from './mobileEnergyTypes'
 
 export interface GeneratorTestGroupListSectionProps {
   savedGroups: GeneratorTestRecord[]

@@ -18,13 +18,14 @@ import { useAdminSave } from '../../hooks/useAdminSave'
 import { EvidenceFile, getFileUrl } from '../../api/files';
 import Toast from '../../components/Toast';
 import { generateRecordId } from '../../utils/idGenerator';
-import { MobileEnergyRecord, EvidenceGroup } from './shared/mobile/mobileEnergyTypes'
-import { LAYOUT_CONSTANTS } from './shared/mobile/mobileEnergyConstants'
-import { createEmptyRecords, prepareSubmissionData } from './shared/mobile/mobileEnergyUtils'
-import { WD40_CONFIG } from './shared/mobileEnergyConfig'
-import { MobileEnergyUsageSection } from './shared/mobile/components/MobileEnergyUsageSection'
-import { MobileEnergyGroupListSection } from './shared/mobile/components/MobileEnergyGroupListSection'
-import { ImageLightbox } from './shared/mobile/components/ImageLightbox'
+import { MobileEnergyRecord, EvidenceGroup } from './common/mobileEnergyTypes'
+import { LAYOUT_CONSTANTS } from './common/mobileEnergyConstants'
+import { createEmptyRecords, prepareSubmissionData } from './common/mobileEnergyUtils'
+import { WD40_CONFIG } from './common/mobileEnergyConfig'
+import { MobileEnergyUsageSection } from './common/MobileEnergyUsageSection'
+import { MobileEnergyGroupListSection } from './common/MobileEnergyGroupListSection'
+import { ImageLightbox } from './common/ImageLightbox'
+import { useThumbnailLoader } from '../../hooks/useThumbnailLoader'
 import type { MemoryFile } from '../../services/documentHandler';
 import { useWD40SpecManager } from './hooks/useWD40SpecManager'
 import { WD40SpecInputFields } from './components/WD40SpecInputFields'
@@ -45,7 +46,6 @@ export default function WD40Page() {
 
   // 圖片放大 lightbox
   const [lightboxSrc, setLightboxSrc] = useState<string | null>(null);
-  const [thumbnails, setThumbnails] = useState<{ [key: string]: string }>({});
 
   // ⭐ 本地通知狀態（用於操作級別的通知，如保存規格、編輯群組等）
   const [error, setError] = useState<string | null>(null);
@@ -144,6 +144,16 @@ export default function WD40Page() {
   })
 
   const [savedGroups, setSavedGroups] = useState<MobileEnergyRecord[]>([])
+
+  // 縮圖載入（WD40 特殊：合併規格 + 使用記錄）
+  const allRecordsForThumbnails = useMemo(() => {
+    return [...savedSpecs, ...savedGroups]
+  }, [savedSpecs, savedGroups])
+
+  const thumbnails = useThumbnailLoader({
+    records: allRecordsForThumbnails,
+    fileExtractor: (record) => record.evidenceFiles || []
+  })
 
   const wd40Data = useMemo(() => {
     return savedGroups
@@ -348,10 +358,10 @@ export default function WD40Page() {
         ...recordsWithGroupId,
         ...prev.filter(r => r.groupId !== groupId)
       ])
-      setSuccess('群組已更新')
+      // 不顯示通知（只是前端內存操作）
     } else {
       setSavedGroups(prev => [...recordsWithGroupId, ...prev])
-      setSuccess('群組已新增')
+      // 不顯示通知（只是前端內存操作）
     }
 
     setCurrentEditingGroup({
@@ -382,16 +392,12 @@ export default function WD40Page() {
       records: groupRecords,
       memoryFiles: groupRecords[0]?.memoryFiles || []
     })
-
-    setSuccess('群組已載入到編輯區')
   }
 
   const deleteSavedGroup = (groupId: string) => {
-    if (!window.confirm('確定要刪除此群組嗎？')) return
-
     setSavedGroups(prev => prev.filter(r => r.groupId !== groupId))
     removeRecordMapping(groupId)
-    setSuccess('群組已刪除')
+    // 不顯示通知（只是前端內存操作）
   }
 
   // ==================== 提交邏輯 ====================
@@ -629,44 +635,6 @@ export default function WD40Page() {
       return 0
     })
   }, [wd40Data])
-
-  // 生成縮圖
-  useEffect(() => {
-    // 規格佐證縮圖
-    savedSpecs.forEach(async (spec) => {
-      const evidenceFile = spec.evidenceFiles?.[0]
-      if (evidenceFile &&
-          evidenceFile.mime_type.startsWith('image/') &&
-          !thumbnails[evidenceFile.id]) {
-        try {
-          const url = await getFileUrl(evidenceFile.file_path)
-          setThumbnails(prev => ({
-            ...prev,
-            [evidenceFile.id]: url
-          }))
-        } catch (error) {
-          console.warn('Failed to generate thumbnail for spec', spec.name, error)
-        }
-      }
-    })
-
-    // 使用佐證縮圖
-    evidenceGroups.forEach(async (group) => {
-      if (group.evidence &&
-          group.evidence.mime_type.startsWith('image/') &&
-          !thumbnails[group.evidence.id]) {
-        try {
-          const url = await getFileUrl(group.evidence.file_path)
-          setThumbnails(prev => ({
-            ...prev,
-            [group.evidence!.id]: url
-          }))
-        } catch (error) {
-          console.warn('Failed to generate thumbnail for group', group.groupId, error)
-        }
-      }
-    })
-  }, [savedSpecs, evidenceGroups])
 
   return (
     <>

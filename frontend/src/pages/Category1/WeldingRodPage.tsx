@@ -96,7 +96,7 @@ const WeldingRodPage = () => {
   const pageKey = 'welding_rod'
   
   // 編輯權限控制
-  const editPermissions = useEditPermissions(frontendCurrentStatus || 'submitted', isReviewMode, role)
+  const editPermissions = useEditPermissions(frontendCurrentStatus || 'submitted', isReviewMode, role ?? undefined)
 
   const monthNames = [
     '1月', '2月', '3月', '4月', '5月', '6月',
@@ -1203,16 +1203,10 @@ const WeldingRodPage = () => {
       {!isReviewMode && !approvalStatus.isApproved && (
         <BottomActionBar
           currentStatus={frontendCurrentStatus || 'submitted'}
-          currentEntryId={currentEntryId}
-          isUpdating={false}
-          editPermissions={editPermissions}
           submitting={submitting}
-          saving={submitting}
           onSubmit={handleSubmit}
           onSave={handleSave}
           onClear={() => setShowClearConfirmModal(true)}
-          designTokens={designTokens}
-          hasSubmittedBefore={hasSubmittedBefore}
         />
       )}
 

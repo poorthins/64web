@@ -1,35 +1,36 @@
 import { useState, useEffect, useMemo } from 'react';
 import { EntryStatus } from '../../components/StatusSwitcher';
 import ConfirmClearModal from '../../components/ConfirmClearModal'
-import ErrorModal from '../../components/ErrorModal'
 import SharedPageLayout from '../../layouts/SharedPageLayout'
 import { useEditPermissions } from '../../hooks/useEditPermissions';
 import { useFrontendStatus } from '../../hooks/useFrontendStatus';
 import { useApprovalStatus } from '../../hooks/useApprovalStatus';
 import { useReviewMode } from '../../hooks/useReviewMode'
 import { useEnergyData } from '../../hooks/useEnergyData'
-import { useMultiRecordSubmit } from '../../hooks/useMultiRecordSubmit'
 import { useEnergyClear } from '../../hooks/useEnergyClear'
 import { useSubmitGuard } from '../../hooks/useSubmitGuard'
 import { useGhostFileCleaner } from '../../hooks/useGhostFileCleaner'
-import { useRecordFileMapping } from '../../hooks/useRecordFileMapping'
 import { useSubmissions } from '../admin/hooks/useSubmissions'
 import { useRole } from '../../hooks/useRole'
 import { useAdminSave } from '../../hooks/useAdminSave'
-import { EvidenceFile, getFileUrl } from '../../api/files';
+import { EvidenceFile } from '../../api/files'
+import { submitEnergyEntry } from '../../api/v2/entryAPI'
+import { useThumbnailLoader } from '../../hooks/useThumbnailLoader'
+import { useType2Helpers } from '../../hooks/useType2Helpers'
 import Toast from '../../components/Toast';
 import { generateRecordId } from '../../utils/idGenerator';
-import { MobileEnergyRecord as DieselGeneratorRecord } from './shared/mobile/mobileEnergyTypes'
-import { createEmptyRecords, prepareSubmissionData } from './shared/mobile/mobileEnergyUtils'
-import { DIESEL_GENERATOR_CONFIG } from './shared/mobileEnergyConfig'
-import { MobileEnergyUsageSection } from './shared/mobile/components/MobileEnergyUsageSection'
-import { MobileEnergyGroupListSection } from './shared/mobile/components/MobileEnergyGroupListSection'
-import { ImageLightbox } from './shared/mobile/components/ImageLightbox'
+import { MobileEnergyRecord as DieselGeneratorRecord, CurrentEditingGroup, EvidenceGroup } from './common/mobileEnergyTypes'
+import { LAYOUT_CONSTANTS } from './common/mobileEnergyConstants'
+import { createEmptyRecords, prepareSubmissionData } from './common/mobileEnergyUtils'
+import { DIESEL_GENERATOR_CONFIG } from './common/mobileEnergyConfig'
+import { MobileEnergyUsageSection } from './common/MobileEnergyUsageSection'
+import { MobileEnergyGroupListSection } from './common/MobileEnergyGroupListSection'
+import { ImageLightbox } from './common/ImageLightbox'
 import type { MemoryFile } from '../../services/documentHandler';
 
 
 export default function DieselStationarySourcesPage() {
-  const { isReviewMode, reviewEntryId } = useReviewMode()
+  const { isReviewMode, reviewEntryId, reviewUserId } = useReviewMode()
 
   const pageKey = DIESEL_GENERATOR_CONFIG.pageKey
   const [year] = useState(new Date().getFullYear())
@@ -46,7 +47,6 @@ export default function DieselStationarySourcesPage() {
   const [lightboxSrc, setLightboxSrc] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
-  const [thumbnails, setThumbnails] = useState<{ [key: string]: string }>({});
 
   // 前端狀態管理 Hook
   const frontendStatus = useFrontendStatus({
@@ -82,43 +82,46 @@ export default function DieselStationarySourcesPage() {
   // 管理員儲存 Hook
   const { save: adminSave, saving: adminSaving } = useAdminSave(pageKey, reviewEntryId)
 
-  const {
-    submit,
-    save,
-    submitting: submitLoading,
-    error: submitError,
-    success: submitSuccess,
-    clearError: clearSubmitError,
-    clearSuccess: clearSubmitSuccess
-  } = useMultiRecordSubmit(pageKey, year)
-
+  // 清除 Hook
   const {
     clear,
     clearing: clearLoading,
+    error: clearError,
     clearError: clearClearError
   } = useEnergyClear(currentEntryId, currentStatus)
 
+  // 幽靈檔案清理 Hook
   const { cleanFiles } = useGhostFileCleaner()
-  const {
-    uploadRecordFiles,
-    getRecordFiles,
-    loadFileMapping,
-    getFileMappingForPayload,
-    removeRecordMapping
-  } = useRecordFileMapping(pageKey, currentEntryId)
 
-  // 分離「當前編輯」和「已保存群組」
-  const [currentEditingGroup, setCurrentEditingGroup] = useState<{
-    groupId: string | null
-    records: DieselGeneratorRecord[]
-    memoryFiles: MemoryFile[]
-  }>({
+  // ⭐ 新架构状态管理（替代旧 hooks）
+  const [submitError, setSubmitError] = useState<string | null>(null)
+  const [submitSuccess, setSubmitSuccess] = useState<string | null>(null)
+  const [filesToDelete, setFilesToDelete] = useState<string[]>([])
+
+  // ⭐ 新架構：分離「當前編輯」和「已保存群組」
+  // 當前正在編輯的群組（對應 Figma 上方「使用數據」區）
+  const [currentEditingGroup, setCurrentEditingGroup] = useState<CurrentEditingGroup>({
     groupId: null,
     records: createEmptyRecords(),
     memoryFiles: []
   })
 
+  // 已保存的群組（對應 Figma 下方「資料列表」區）
   const [savedGroups, setSavedGroups] = useState<DieselGeneratorRecord[]>([])
+
+  // ⭐ 缩图加载（使用统一 hook，Type 2：从群组中提取 evidenceFiles）
+  const thumbnails = useThumbnailLoader({
+    records: savedGroups,
+    fileExtractor: (record) => record.evidenceFiles || []
+  })
+
+  // ⭐ Type 2 共用輔助函數
+  const helpers = useType2Helpers<DieselGeneratorRecord>(pageKey, year)
+
+  // ⭐ 保留舊的 dieselGeneratorData（提交時用）
+  const dieselGeneratorData = useMemo(() => {
+    return savedGroups
+  }, [savedGroups])
 
   // 載入記錄資料
   useEffect(() => {
@@ -143,20 +146,15 @@ export default function DieselStationarySourcesPage() {
             memoryFiles: [],
           }))
 
+          // ⭐ 載入到 savedGroups（新架構）
           setSavedGroups(updated)
-
-          // 載入檔案映射表
-          const payload = loadedEntry.payload || loadedEntry.extraPayload
-          if (payload) {
-            loadFileMapping(payload)
-          }
         }
       }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loadedEntry, dataLoading])
 
-  // 檔案載入後分配到記錄
+  // 第二步：檔案載入後分配到記錄
   useEffect(() => {
     if (dataLoading) return
 
@@ -167,15 +165,18 @@ export default function DieselStationarySourcesPage() {
 
       if (dieselGeneratorFiles.length > 0) {
         const cleanAndAssignFiles = async () => {
-          const validFiles = await cleanFiles(dieselGeneratorFiles)
+          const validDieselGeneratorFiles = await cleanFiles(dieselGeneratorFiles)
 
           setSavedGroups(prev => {
             return prev.map((item) => {
-              const filesForThisRecord = getRecordFiles(item.id, validFiles)
+              // ⭐ Type 2 关键：使用 split(',').includes() 过滤
+              const filesForThisRecord = validDieselGeneratorFiles.filter(f =>
+                f.record_id && f.record_id.split(',').includes(item.id)
+              )
               return {
                 ...item,
-                evidenceFiles: filesForThisRecord,
-                memoryFiles: []
+                evidenceFiles: filesForThisRecord
+                // ⚠️ 不清除 memoryFiles
               }
             })
           })
@@ -185,57 +186,30 @@ export default function DieselStationarySourcesPage() {
       }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [loadedFiles, dataLoading])
+  }, [loadedFiles, pageKey, dataLoading, savedGroups.length])
 
-  // 生成縮圖
-  useEffect(() => {
-    const generateThumbnails = async () => {
-      const newThumbnails: { [key: string]: string } = {}
-
-      for (const record of savedGroups) {
-        if (record.evidenceFiles && record.evidenceFiles.length > 0) {
-          for (const file of record.evidenceFiles) {
-            if (file.mime_type?.startsWith('image/') && !newThumbnails[file.id]) {
-              try {
-                const url = await getFileUrl(file.file_path)
-                newThumbnails[file.id] = url
-              } catch (err) {
-                console.error('Failed to load thumbnail:', err)
-              }
-            }
-          }
-        }
-      }
-
-      setThumbnails(prev => ({ ...prev, ...newThumbnails }))
-    }
-
-    if (savedGroups.length > 0) {
-      generateThumbnails()
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [savedGroups])
+  // 記錄要刪除的檔案 ID
+  const handleDeleteEvidence = (fileId: string) => {
+    setFilesToDelete(prev => [...prev, fileId])
+  }
 
   // ==================== 操作函式 ====================
 
   // 新增記錄到當前群組
   const addRecordToCurrentGroup = () => {
-    setCurrentEditingGroup(prev => {
-      const newRecords = [...prev.records, {
+    setCurrentEditingGroup(prev => ({
+      ...prev,
+      records: [...prev.records, {
         id: generateRecordId(),
         date: '',
         quantity: 0,
         evidenceFiles: [],
         memoryFiles: [],
-        groupId: prev.groupId,
+        groupId: prev.groupId || undefined,
         deviceType: deviceType === '其他' ? customDeviceType : deviceType,
         deviceName: ''
       }]
-      return {
-        ...prev,
-        records: newRecords
-      }
-    })
+    }))
   }
 
   // 更新當前群組記錄
@@ -320,7 +294,7 @@ export default function DieselStationarySourcesPage() {
     setDeviceType('')
     setCustomDeviceType('')
 
-    setSuccess(isEditMode ? '群組已更新' : '群組已新增')
+    // 不顯示通知（只是前端內存操作）
   }
 
   const handleEditGroup = (groupId: string) => {
@@ -350,30 +324,68 @@ export default function DieselStationarySourcesPage() {
   // 刪除群組
   const handleDeleteGroup = (groupId: string) => {
     setSavedGroups(prev => prev.filter(r => r.groupId !== groupId))
-    removeRecordMapping(groupId)
-    setSuccess('群組已刪除')
+    // 不顯示通知（只是前端內存操作）
   }
 
-  const handleSave = async () => {
+  // ⭐ 統一提交函數（替代旧 hooks）
+  const submitData = async (isDraft: boolean) => {
     if (savedGroups.length === 0) {
-      setError('請先新增至少一個群組')
-      return
+      throw new Error('請至少新增一個群組')
     }
 
     await executeSubmit(async () => {
-      setError(null)
-      setSuccess(null)
+      setSubmitError(null)
+      setSubmitSuccess(null)
 
-      const { totalQuantity, cleanedEnergyData, deduplicatedRecordData } = prepareSubmissionData(savedGroups)
+      try {
+        const { totalQuantity, cleanedEnergyData } = prepareSubmissionData(savedGroups)
 
-      if (isReviewMode && reviewEntryId) {
-        const filesToUpload = currentEditingGroup.memoryFiles.map((mf: MemoryFile) => ({
-          file: mf.file,
-          metadata: {
-            recordIndex: 0,
-            allRecordIds: currentEditingGroup.records.map(r => r.id)
+        const response = await submitEnergyEntry({
+          page_key: pageKey,
+          period_year: year,
+          unit: DIESEL_GENERATOR_CONFIG.unit,
+          monthly: { '1': totalQuantity },
+          status: isDraft ? 'saved' : 'submitted',
+          notes: `${DIESEL_GENERATOR_CONFIG.title}使用共 ${savedGroups.length} 筆記錄`,
+          payload: {
+            dieselGeneratorData: cleanedEnergyData
           }
-        }))
+        })
+
+        const groupsMap = helpers.buildGroupsMap(savedGroups)
+        await helpers.uploadGroupFiles(groupsMap, response.entry_id)
+        await helpers.deleteMarkedFiles(filesToDelete, setFilesToDelete)
+
+        setCurrentEntryId(response.entry_id)
+        setSubmitSuccess(isDraft ? '暫存成功' : '提交成功')
+
+        await reload()
+        if (!isDraft) {
+          await handleSubmitSuccess()
+        }
+        reloadApprovalStatus()
+
+      } catch (error) {
+        setSubmitError(error instanceof Error ? error.message : '操作失敗')
+        throw error
+      }
+    })
+  }
+
+  const handleSubmit = () => submitData(false)
+
+  const handleSave = async () => {
+    await executeSubmit(async () => {
+      setSubmitError(null)
+      setSubmitSuccess(null)
+
+      // 先同步編輯區修改
+      const finalSavedGroups = helpers.syncEditingGroupChanges(currentEditingGroup, savedGroups, setSavedGroups)
+      const { totalQuantity, cleanedEnergyData } = prepareSubmissionData(finalSavedGroups)
+
+      // 審核模式：使用 useAdminSave hook
+      if (isReviewMode && reviewEntryId) {
+        const filesToUpload = helpers.collectAdminFilesToUpload(finalSavedGroups)
 
         await adminSave({
           updateData: {
@@ -381,129 +393,71 @@ export default function DieselStationarySourcesPage() {
             amount: totalQuantity,
             payload: {
               monthly: { '1': totalQuantity },
-              [DIESEL_GENERATOR_CONFIG.dataFieldName]: cleanedEnergyData,
-              fileMapping: getFileMappingForPayload()
+              dieselGeneratorData: cleanedEnergyData
             }
           },
           files: filesToUpload
         })
 
+        await helpers.deleteMarkedFilesAsAdmin(filesToDelete, setFilesToDelete)
         await reload()
         reloadApprovalStatus()
         setCurrentEditingGroup(prev => ({ ...prev, memoryFiles: [] }))
-        setSuccess('儲存成功！資料已更新')
+        setSubmitSuccess('✅ 儲存成功！資料已更新')
         return
       }
 
-      await save({
-        entryInput: {
-          page_key: pageKey,
-          period_year: year,
-          unit: DIESEL_GENERATOR_CONFIG.unit,
-          monthly: { '1': totalQuantity },
-          notes: `${DIESEL_GENERATOR_CONFIG.title}使用共 ${savedGroups.length} 筆記錄`,
-          extraPayload: {
-            [DIESEL_GENERATOR_CONFIG.dataFieldName]: cleanedEnergyData,
-            fileMapping: getFileMappingForPayload()
-          }
-        },
-        recordData: deduplicatedRecordData,
-        uploadRecordFiles,
-        onSuccess: async (entry_id) => {
-          setCurrentEntryId(entry_id)
-          await reload()
-        }
-      })
-
-      reloadApprovalStatus()
+      // 一般暫存：調用 submitData
+      await submitData(true)
     }).catch(error => {
-      console.error('暫存失敗:', error)
-      setError(error instanceof Error ? error.message : '暫存失敗')
+      setSubmitError(error instanceof Error ? error.message : '暫存失敗')
     })
   }
 
-  const handleSubmit = async () => {
-    if (savedGroups.length === 0) {
-      setError('請先新增至少一個群組')
-      return
+  const handleClear = () => {
+    setShowClearConfirmModal(true);
+  };
+
+  const handleClearConfirm = async () => {
+    try {
+      // 收集所有檔案和記憶體檔案（包含編輯中和已保存的）
+      const allFiles = [
+        ...currentEditingGroup.records.flatMap(r => r.evidenceFiles || []),
+        ...savedGroups.flatMap(r => r.evidenceFiles || [])
+      ]
+      const allMemoryFiles = [
+        currentEditingGroup.memoryFiles,
+        ...savedGroups.map(r => r.memoryFiles || [])
+      ]
+
+      // 使用 Hook 清除
+      await clear({
+        filesToDelete: allFiles,
+        memoryFilesToClean: allMemoryFiles
+      })
+
+      // 重置前端狀態（新架構），預設 3 格
+      setCurrentEditingGroup({
+        groupId: null,
+        records: createEmptyRecords(),
+        memoryFiles: []
+      })
+      setSavedGroups([])
+      setCurrentEntryId(null)
+      setDeviceType('')
+      setCustomDeviceType('')
+      setShowClearConfirmModal(false)
+
+      // 重新載入審核狀態，清除狀態橫幅
+      await reload()
+      reloadApprovalStatus()
+
+      setSuccess('資料已完全清除')
+    } catch (error) {
+      setError(error instanceof Error ? error.message : '清除失敗，請重試')
     }
+  };
 
-    await executeSubmit(async () => {
-      const { totalQuantity, cleanedEnergyData, deduplicatedRecordData } = prepareSubmissionData(savedGroups)
-
-      await submit({
-        entryInput: {
-          page_key: pageKey,
-          period_year: year,
-          unit: DIESEL_GENERATOR_CONFIG.unit,
-          monthly: { '1': totalQuantity },
-          notes: `${DIESEL_GENERATOR_CONFIG.title}使用共 ${savedGroups.length} 筆記錄`,
-          extraPayload: {
-            [DIESEL_GENERATOR_CONFIG.dataFieldName]: cleanedEnergyData,
-            fileMapping: getFileMappingForPayload()
-          }
-        },
-        recordData: deduplicatedRecordData,
-        uploadRecordFiles,
-        onSuccess: async (entry_id) => {
-          setCurrentEntryId(entry_id)
-          await reload()
-        }
-      })
-
-      await handleSubmitSuccess()
-      reloadApprovalStatus()
-    })
-  }
-
-  // 清除所有資料
-  const handleClear = async () => {
-    await clear()
-    setSavedGroups([])
-    setCurrentEditingGroup({
-      groupId: null,
-      records: createEmptyRecords(),
-      memoryFiles: []
-    })
-    setDeviceType('')
-    setCustomDeviceType('')
-    setShowClearConfirmModal(false)
-    reload()
-    reloadApprovalStatus()
-  }
-
-  const handleAdminSave = async () => {
-    if (!reviewEntryId || role !== 'admin') return
-
-    await executeSubmit(async () => {
-      const { totalQuantity, cleanedEnergyData } = prepareSubmissionData(savedGroups)
-
-      const filesToUpload = currentEditingGroup.memoryFiles.map((mf: MemoryFile) => ({
-        file: mf.file,
-        metadata: {
-          recordIndex: 0,
-          allRecordIds: currentEditingGroup.records.map(r => r.id)
-        }
-      }))
-
-      await adminSave({
-        updateData: {
-          unit: DIESEL_GENERATOR_CONFIG.unit,
-          amount: totalQuantity,
-          payload: {
-            monthly: { '1': totalQuantity },
-            [DIESEL_GENERATOR_CONFIG.dataFieldName]: cleanedEnergyData,
-            fileMapping: getFileMappingForPayload()
-          }
-        },
-        files: filesToUpload
-      })
-
-      setSuccess('資料已更新')
-      reload()
-      reloadApprovalStatus()
-    })
-  }
 
   return (
     <SharedPageLayout
@@ -522,24 +476,44 @@ export default function DieselStationarySourcesPage() {
       instructionText={DIESEL_GENERATOR_CONFIG.instructionText}
       bottomActionBar={{
         currentStatus,
-        submitting: submitting || submitLoading || clearLoading || adminSaving,
+        submitting: submitting || clearLoading || adminSaving,
         onSubmit: handleSubmit,
-        onSave: isReviewMode && role === 'admin' ? handleAdminSave : handleSave,
+        onSave: handleSave,
         onClear: () => setShowClearConfirmModal(true),
-        show: !isReviewMode || role === 'admin',
+        show: !isReadOnly && !approvalStatus.isApproved && !isReviewMode,
         accentColor: DIESEL_GENERATOR_CONFIG.iconColor
       }}
+      reviewSection={{
+        isReviewMode,
+        reviewEntryId,
+        reviewUserId,
+        currentEntryId,
+        pageKey,
+        year,
+        category: DIESEL_GENERATOR_CONFIG.title,
+        amount: savedGroups.reduce((sum, record) => sum + record.quantity, 0),
+        unit: DIESEL_GENERATOR_CONFIG.unit,
+        role,
+        onSave: handleSave,
+        isSaving: adminSaving
+      }}
       notificationState={{
-        success: submitSuccess,
-        error: submitError,
-        clearSuccess: clearSubmitSuccess,
-        clearError: clearSubmitError
+        success: submitSuccess || success,
+        error: submitError || error,
+        clearSuccess: () => {
+          setSubmitSuccess(null);
+          setSuccess(null);
+        },
+        clearError: () => {
+          setSubmitError(null);
+          setError(null);
+        }
       }}
     >
       {/* 使用數據區 */}
       <MobileEnergyUsageSection
         isReadOnly={isReadOnly}
-        submitting={submitting || submitLoading}
+        submitting={submitting}
         approvalStatus={approvalStatus}
         editPermissions={editPermissions}
         currentEditingGroup={currentEditingGroup}
@@ -551,6 +525,7 @@ export default function DieselStationarySourcesPage() {
         thumbnails={thumbnails}
         onPreviewImage={setLightboxSrc}
         onError={setError}
+        onDeleteEvidence={handleDeleteEvidence}
         iconColor={DIESEL_GENERATOR_CONFIG.iconColor}
         config={DIESEL_GENERATOR_CONFIG}
         deviceType={deviceType}
@@ -572,15 +547,14 @@ export default function DieselStationarySourcesPage() {
       />
 
       {/* Toast 訊息 */}
-      <ErrorModal
-        show={!!error}
-        message={error || ''}
-        onClose={() => {
-          setError(null)
-          clearSubmitError()
-          clearClearError()
-        }}
-      />
+      {error && (
+        <Toast
+          message={error}
+          type="error"
+          onClose={() => setError(null)}
+        />
+      )}
+
       {success && (
         <Toast
           message={success}
@@ -592,7 +566,7 @@ export default function DieselStationarySourcesPage() {
       {/* 清除確認彈窗 */}
       <ConfirmClearModal
         show={showClearConfirmModal}
-        onConfirm={handleClear}
+        onConfirm={handleClearConfirm}
         onCancel={() => setShowClearConfirmModal(false)}
         isClearing={clearLoading}
       />

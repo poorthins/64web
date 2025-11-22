@@ -12,12 +12,12 @@
  */
 
 import { Trash2 } from 'lucide-react'
-import { FileDropzone } from '../../../../../components/FileDropzone'
-import { MonthHoursInputRow } from '../../../../../components/energy/MonthHoursInputRow'
-import { FileTypeIcon } from '../../../../../components/energy/FileTypeIcon'
-import { getFileType } from '../../../../../utils/energy/fileTypeDetector'
-import type { MemoryFile } from '../../../../../services/documentHandler'
-import { LAYOUT_CONSTANTS } from '../mobileEnergyConstants'
+import { FileDropzone } from '../../../components/FileDropzone'
+import { MonthHoursInputRow } from '../../../components/energy/MonthHoursInputRow'
+import { FileTypeIcon } from '../../../components/energy/FileTypeIcon'
+import { getFileType } from '../../../utils/energy/fileTypeDetector'
+import type { MemoryFile } from '../../../services/documentHandler'
+import { LAYOUT_CONSTANTS } from './mobileEnergyConstants'
 
 // ⭐ 化糞池專用記錄類型
 export interface SepticTankRecord {
@@ -56,6 +56,7 @@ export interface SepticTankUsageSectionProps {
   thumbnails: Record<string, string>
   onPreviewImage: (src: string) => void
   onError: (msg: string) => void
+  onDeleteEvidence?: (fileId: string) => void
 
   // 樣式
   iconColor: string
@@ -76,6 +77,7 @@ export function SepticTankUsageSection(props: SepticTankUsageSectionProps) {
     thumbnails,
     onPreviewImage,
     onError,
+    onDeleteEvidence,
     iconColor
   } = props
 
@@ -243,25 +245,28 @@ export function SepticTankUsageSection(props: SepticTankUsageSectionProps) {
 
                         {/* 檔名 */}
                         <div className="flex-1 overflow-hidden">
-                          <p className="text-[14px] font-medium text-black truncate">{file.file_name}</p>
-                          <p className="text-[12px] text-gray-500">{(file.file_size / 1024).toFixed(1)} KB</p>
+                          <p className="text-[14px] font-medium text-black truncate">
+                            {file.file_name || file.fileName || '未命名檔案'}
+                          </p>
+                          <p className="text-[12px] text-gray-500">
+                            {file.file_size ? (file.file_size / 1024).toFixed(1) : '0.0'} KB
+                          </p>
                         </div>
 
                         {/* 刪除按鈕 */}
                         <button
                           onClick={() => {
-                            // 從當前編輯群組的第一筆記錄移除檔案
+                            // ⭐ 標記檔案為待刪除（審核模式）
+                            if (onDeleteEvidence) {
+                              onDeleteEvidence(file.id)
+                            }
+                            // ⭐ 修正：從當前編輯群組的**所有記錄**移除檔案（Type 2 共用佐證）
                             setCurrentEditingGroup(prev => ({
                               ...prev,
-                              records: prev.records.map((record, idx) => {
-                                if (idx === 0) {
-                                  return {
-                                    ...record,
-                                    evidenceFiles: record.evidenceFiles?.filter((f: any) => f.id !== file.id) || []
-                                  }
-                                }
-                                return record
-                              })
+                              records: prev.records.map((record) => ({
+                                ...record,
+                                evidenceFiles: record.evidenceFiles?.filter((f: any) => f.id !== file.id) || []
+                              }))
                             }))
                           }}
                           disabled={isReadOnly || approvalStatus.isApproved}

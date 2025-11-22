@@ -13,6 +13,7 @@ import { ChevronDown, ChevronRight } from 'lucide-react'
 import { getFileUrl } from '../../../api/files'
 import type { RefrigerantDevice } from '../RefrigerantPage'
 import { ActionButtons } from '../../../components/energy/ActionButtons'
+import { THUMBNAIL_PLACEHOLDER_SVG, THUMBNAIL_BACKGROUND } from '../../../utils/energy/thumbnailConstants'
 
 // ==================== 介面定義 ====================
 interface RefrigerantListSectionProps {
@@ -239,14 +240,14 @@ export function RefrigerantListSection({
                               width: '50px',
                               height: '50px',
                               borderRadius: '8px',
-                              background: '#E5E7EB',
+                              background: THUMBNAIL_BACKGROUND,
                               display: 'flex',
                               alignItems: 'center',
                               justifyContent: 'center',
                               flexShrink: 0
                             }}
                           >
-                            <span style={{ fontSize: '20px' }}>📷</span>
+                            {THUMBNAIL_PLACEHOLDER_SVG}
                           </div>
                         )}
 

@@ -140,12 +140,16 @@ def create_energy_entry(
             entry_data['extraPayload'] = extraPayload
 
         logger.info(f"Creating/Updating energy entry for user {user_id}, page_key: {page_key}")
+        print(f"[DEBUG] About to UPSERT with owner_id={user_id}, category={category}, period_year={period_year}")
+        print(f"[DEBUG] Full entry_data: {entry_data}")
 
         # 3. Upsert energy_entries (如果存在就更新,否則新增)
         result = supabase.table('energy_entries').upsert(
             entry_data,
             on_conflict='owner_id,category,period_year'  # 根據 unique constraint 更新
         ).execute()
+
+        print(f"[DEBUG] UPSERT completed. result.data: {result.data}")
 
         if not result.data or len(result.data) == 0:
             raise Exception("Failed to create/update energy entry: no data returned")

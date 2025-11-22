@@ -103,7 +103,7 @@ const NaturalGasPage = () => {
   const { save: adminSave, saving: adminSaving } = useAdminSave(pageKey, reviewEntryId)
 
   const effectiveStatus = (approvalStatus?.status || frontendStatus?.currentStatus || initialStatus) as EntryStatus
-  const editPermissions = useEditPermissions(effectiveStatus, isReadOnly, role)
+  const editPermissions = useEditPermissions(effectiveStatus, isReadOnly, role ?? undefined)
   const { cleanFiles } = useGhostFileCleaner()
 
   // 🔍 Debug: 審核狀態檢查
@@ -1714,18 +1714,10 @@ const NaturalGasPage = () => {
       {!isReadOnly && !approvalStatus.isApproved && !isReviewMode && (
         <BottomActionBar
           currentStatus={frontendStatus?.currentStatus || initialStatus}
-          currentEntryId={currentEntryId}
-          isUpdating={submitting}
-          hasSubmittedBefore={hasSubmittedBefore}
-          hasAnyData={bills.length > 0 && bills.some(bill => bill.billingUnits > 0)}
-          banner={banner}
-          editPermissions={editPermissions}
           submitting={submitting}
-          saving={submitting}
           onSubmit={handleSubmit}
           onSave={handleSave}
           onClear={() => setShowClearModal(true)}
-          designTokens={designTokens}
         />
       )}
 

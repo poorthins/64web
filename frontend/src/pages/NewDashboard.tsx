@@ -93,6 +93,14 @@ const NewDashboard = () => {
     // 只統計有權限的項目
     const visibleEntries = filterByPermissions(allEntries, (entry) => entry.pageKey)
 
+    // 🔍 Debug log
+    console.log('🔍 [NewDashboard] Dashboard 統計開始', {
+      totalCategories,
+      allEntriesCount: allEntries.length,
+      visibleEntriesCount: visibleEntries.length,
+      visibleEntries: visibleEntries.map(e => ({ pageKey: e.pageKey, status: e.status }))
+    })
+
     // 計算已完成數量（狀態為 approved）
     const completedCount = visibleEntries.filter(entry => entry.status === 'approved').length
 
@@ -105,14 +113,53 @@ const NewDashboard = () => {
       rejected: [] as AllEntry[]
     }
 
+    const unknownStatuses: string[] = []
+
     visibleEntries.forEach(entry => {
       // saved 和 null 都視為 pending（待填寫）
-      const status = (entry.status === 'saved' || !entry.status) ? 'pending' : entry.status
+      let status = (entry.status === 'saved' || !entry.status) ? 'pending' : entry.status
+
+      // ✅ 統一退回狀態
+      if (status === 'returned') {
+        status = 'rejected'
+      }
+
+      // ✅ 處理其他後端可能的狀態
+      if (status === 'draft') {
+        status = 'pending'  // 草稿視為待填寫
+      }
+      if (status === 'under_review' || status === 'needs_revision' || status === 'needs_fix') {
+        status = 'submitted'  // 審核中視為已提交
+      }
+
       if (status in statusCounts) {
         statusCounts[status as keyof typeof statusCounts]++
         itemsByStatus[status as keyof typeof itemsByStatus].push(entry)
+      } else {
+        // ⚠️ 記錄未知狀態
+        console.warn(`❌ [NewDashboard] 未知狀態: "${status}" for ${entry.pageKey}`)
+        unknownStatuses.push(`${entry.pageKey}:${status}`)
       }
     })
+
+    // 📊 Debug 統計結果
+    const statusSum = Object.values(statusCounts).reduce((a, b) => a + b, 0)
+    console.log('📊 [NewDashboard] 統計結果', {
+      statusCounts,
+      statusSum,
+      completedCount,
+      visibleEntriesCount: visibleEntries.length,
+      isMatched: statusSum === visibleEntries.length,
+      unknownStatuses
+    })
+
+    if (statusSum !== visibleEntries.length) {
+      console.error('⚠️ [NewDashboard] 統計不一致！', {
+        visibleEntries: visibleEntries.length,
+        statusSum,
+        difference: visibleEntries.length - statusSum
+      })
+    }
 
     return {
       totalCategories,

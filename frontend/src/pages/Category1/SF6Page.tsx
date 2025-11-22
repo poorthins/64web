@@ -15,13 +15,14 @@ import { EvidenceFile, getFileUrl, adminDeleteEvidence, deleteEvidence } from '.
 import { submitEnergyEntry } from '../../api/v2/entryAPI';
 import { uploadEvidenceFile } from '../../api/v2/fileAPI';
 import Toast from '../../components/Toast';
-import { SF6Record } from './shared/mobile/mobileEnergyTypes'
-import { LAYOUT_CONSTANTS } from './shared/mobile/mobileEnergyConstants'
-import { SF6_CONFIG } from './shared/mobileEnergyConfig'
-import { MobileEnergyUsageSection } from './shared/mobile/components/MobileEnergyUsageSection'
+import { SF6Record } from './common/mobileEnergyTypes'
+import { LAYOUT_CONSTANTS } from './common/mobileEnergyConstants'
+import { SF6_CONFIG } from './common/mobileEnergyConfig'
+import { MobileEnergyUsageSection } from './common/MobileEnergyUsageSection'
 import { SF6ListSection } from './components/SF6ListSection'
-import { ImageLightbox } from './shared/mobile/components/ImageLightbox'
+import { ImageLightbox } from './common/ImageLightbox'
 import { MemoryFile } from '../../components/FileDropzone'
+import { useThumbnailLoader } from '../../hooks/useThumbnailLoader'
 // 新的 hooks 和組件
 import { useSF6DeviceManager } from './hooks/useSF6DeviceManager'
 import { useSF6Notifications } from './hooks/useSF6Notifications'
@@ -72,7 +73,6 @@ export default function SF6Page() {
 
   // 其他 UI 狀態
   const [lightboxSrc, setLightboxSrc] = useState<string | null>(null);
-  const [thumbnails, setThumbnails] = useState<{ [key: string]: string }>({});
 
   // ========== 其他 Hooks ==========
   // 前端狀態管理 Hook
@@ -121,6 +121,15 @@ export default function SF6Page() {
 
   // 幽靈檔案清理 Hook
   const { cleanFiles } = useGhostFileCleaner()
+
+  // 縮圖載入（批次載入 nameplateFiles + certificateFiles）
+  const thumbnails = useThumbnailLoader({
+    records: savedDevices,
+    fileExtractor: (device) => [
+      ...(device.nameplateFiles || []),
+      ...(device.certificateFiles || [])
+    ]
+  })
 
   // ========== 資料載入邏輯 ==========
   // 第一步：Entry 載入後解析資料
@@ -214,18 +223,10 @@ export default function SF6Page() {
 
   // 處理設備檔案上傳（銘牌和證明文件）
   const handleDeviceFilesUpload = async (entryId: string) => {
-    console.log('📤 [handleDeviceFilesUpload] 開始處理檔案，設備數量:', savedDevices.length)
-
     for (const device of savedDevices) {
-      console.log('📤 [handleDeviceFilesUpload] 處理設備:', {
-        deviceId: device.id,
-        memoryNameplateFilesCount: device.memoryNameplateFiles?.length || 0,
-        memoryCertificateFilesCount: device.memoryCertificateFiles?.length || 0
-      })
-
       // 銘牌照片：先檢查有沒有新檔案（file.size > 0 的才是真的新檔案）
       if (device.memoryNameplateFiles && device.memoryNameplateFiles.length > 0) {
-        const newFiles = device.memoryNameplateFiles.filter(f => f.file && f.file.size > 0)
+        const newFiles = device.memoryNameplateFiles.filter((f: MemoryFile) => f.file && f.file.size > 0)
 
         if (newFiles.length > 0) {
           // 有新檔案才刪除舊的
@@ -256,7 +257,7 @@ export default function SF6Page() {
 
       // 證明文件：先檢查有沒有新檔案（file.size > 0 的才是真的新檔案）
       if (device.memoryCertificateFiles && device.memoryCertificateFiles.length > 0) {
-        const newFiles = device.memoryCertificateFiles.filter(f => f.file && f.file.size > 0)
+        const newFiles = device.memoryCertificateFiles.filter((f: MemoryFile) => f.file && f.file.size > 0)
 
         if (newFiles.length > 0) {
           // 有新檔案才刪除舊的
@@ -498,44 +499,6 @@ export default function SF6Page() {
       setError(error instanceof Error ? error.message : '清除失敗，請重試')
     }
   };
-
-  // ========== 輔助邏輯 ==========
-  // 只為圖片檔案生成縮圖
-  useEffect(() => {
-    savedDevices.forEach(async (device) => {
-      // 載入銘牌照片縮圖
-      const nameplateFile = device.nameplateFiles?.[0]
-      if (nameplateFile &&
-          nameplateFile.mime_type.startsWith('image/') &&
-          !thumbnails[nameplateFile.id]) {
-        try {
-          const url = await getFileUrl(nameplateFile.file_path)
-          setThumbnails(prev => ({
-            ...prev,
-            [nameplateFile.id]: url
-          }))
-        } catch (error) {
-          console.warn('Failed to generate thumbnail for', nameplateFile.file_name, error)
-        }
-      }
-
-      // 載入證明文件縮圖
-      const certificateFile = device.certificateFiles?.[0]
-      if (certificateFile &&
-          certificateFile.mime_type.startsWith('image/') &&
-          !thumbnails[certificateFile.id]) {
-        try {
-          const url = await getFileUrl(certificateFile.file_path)
-          setThumbnails(prev => ({
-            ...prev,
-            [certificateFile.id]: url
-          }))
-        } catch (error) {
-          console.warn('Failed to generate thumbnail for', certificateFile.file_name, error)
-        }
-      }
-    })
-  }, [savedDevices, thumbnails])
 
   // ========== UI 渲染 ==========
   return (

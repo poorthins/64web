@@ -7,9 +7,10 @@
  * - 編輯和刪除按鈕
  */
 
-import type { SF6Record } from '../shared/mobile/mobileEnergyTypes'
+import type { SF6Record } from '../common/mobileEnergyTypes'
 import { getFileUrl } from '../../../api/files'
 import { ActionButtons } from '../../../components/energy/ActionButtons'
+import { THUMBNAIL_PLACEHOLDER_SVG, THUMBNAIL_BACKGROUND, THUMBNAIL_BORDER } from '../../../utils/energy/thumbnailConstants'
 
 export interface SF6ListSectionProps {
   savedDevices: SF6Record[]
@@ -199,21 +200,24 @@ function SF6ListItem(props: SF6ListItemProps) {
 
       {/* 圖片縮圖容器 - 兩張圖間距 20px */}
       <div style={{ display: 'flex', gap: '20px', flexShrink: 0 }}>
-        {/* 圖片縮圖 1 */}
-        {thumbnail1 && (
-          <div
-            onClick={() => handleImageClick(file1)}
-            style={{
-              width: '55.769px',
-              height: '55.769px',
-              borderRadius: '10px',
-              overflow: 'hidden',
-              border: '1px solid rgba(0, 0, 0, 0.25)',
-              background: '#EBEDF0',
-              cursor: 'pointer',
-              flexShrink: 0
-            }}
-          >
+        {/* 圖片縮圖 1 - 永久顯示 */}
+        <div
+          onClick={thumbnail1 ? () => handleImageClick(file1) : undefined}
+          style={{
+            width: '55.769px',
+            height: '55.769px',
+            borderRadius: '10px',
+            overflow: 'hidden',
+            border: THUMBNAIL_BORDER,
+            background: THUMBNAIL_BACKGROUND,
+            cursor: thumbnail1 ? 'pointer' : 'default',
+            flexShrink: 0,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center'
+          }}
+        >
+          {thumbnail1 ? (
             <img
               src={thumbnail1}
               alt="佐證資料 1"
@@ -223,24 +227,29 @@ function SF6ListItem(props: SF6ListItemProps) {
                 objectFit: 'cover'
               }}
             />
-          </div>
-        )}
+          ) : (
+            THUMBNAIL_PLACEHOLDER_SVG
+          )}
+        </div>
 
-        {/* 圖片縮圖 2 */}
-        {thumbnail2 && (
-          <div
-            onClick={() => handleImageClick(file2)}
-            style={{
-              width: '55.769px',
-              height: '55.769px',
-              borderRadius: '10px',
-              overflow: 'hidden',
-              border: '1px solid rgba(0, 0, 0, 0.25)',
-              background: '#EBEDF0',
-              cursor: 'pointer',
-              flexShrink: 0
-            }}
-          >
+        {/* 圖片縮圖 2 - 永久顯示 */}
+        <div
+          onClick={thumbnail2 ? () => handleImageClick(file2) : undefined}
+          style={{
+            width: '55.769px',
+            height: '55.769px',
+            borderRadius: '10px',
+            overflow: 'hidden',
+            border: THUMBNAIL_BORDER,
+            background: THUMBNAIL_BACKGROUND,
+            cursor: thumbnail2 ? 'pointer' : 'default',
+            flexShrink: 0,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center'
+          }}
+        >
+          {thumbnail2 ? (
             <img
               src={thumbnail2}
               alt="佐證資料 2"
@@ -250,8 +259,10 @@ function SF6ListItem(props: SF6ListItemProps) {
                 objectFit: 'cover'
               }}
             />
-          </div>
-        )}
+          ) : (
+            THUMBNAIL_PLACEHOLDER_SVG
+          )}
+        </div>
       </div>
 
       {/* 操作按鈕 */}

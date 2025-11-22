@@ -7,24 +7,24 @@ import { useFrontendStatus } from '../../hooks/useFrontendStatus';
 import { useApprovalStatus } from '../../hooks/useApprovalStatus';
 import { useReviewMode } from '../../hooks/useReviewMode'
 import { useEnergyData } from '../../hooks/useEnergyData'
-import { useMultiRecordSubmit } from '../../hooks/useMultiRecordSubmit'
 import { useEnergyClear } from '../../hooks/useEnergyClear'
 import { useSubmitGuard } from '../../hooks/useSubmitGuard'
 import { useGhostFileCleaner } from '../../hooks/useGhostFileCleaner'
-import { useRecordFileMapping } from '../../hooks/useRecordFileMapping'
 import { useSubmissions } from '../admin/hooks/useSubmissions'
 import { useRole } from '../../hooks/useRole'
 import { useAdminSave } from '../../hooks/useAdminSave'
-import { EvidenceFile, getFileUrl } from '../../api/files';
-import Toast from '../../components/Toast';
+import { EvidenceFile, getFileUrl } from '../../api/files'
+import { submitEnergyEntry } from '../../api/v2/entryAPI'
 import { generateRecordId } from '../../utils/idGenerator';
-import { MobileEnergyRecord as GasolineRecord, CurrentEditingGroup, EvidenceGroup } from './shared/mobile/mobileEnergyTypes'
-import { LAYOUT_CONSTANTS } from './shared/mobile/mobileEnergyConstants'
-import { createEmptyRecords, prepareSubmissionData } from './shared/mobile/mobileEnergyUtils'
-import { GASOLINE_CONFIG } from './shared/mobileEnergyConfig'
-import { MobileEnergyUsageSection } from './shared/mobile/components/MobileEnergyUsageSection'
-import { MobileEnergyGroupListSection } from './shared/mobile/components/MobileEnergyGroupListSection'
-import { ImageLightbox } from './shared/mobile/components/ImageLightbox'
+import { MobileEnergyRecord as GasolineRecord, CurrentEditingGroup, EvidenceGroup } from './common/mobileEnergyTypes'
+import { LAYOUT_CONSTANTS } from './common/mobileEnergyConstants'
+import { createEmptyRecords, prepareSubmissionData } from './common/mobileEnergyUtils'
+import { GASOLINE_CONFIG } from './common/mobileEnergyConfig'
+import { MobileEnergyUsageSection } from './common/MobileEnergyUsageSection'
+import { MobileEnergyGroupListSection } from './common/MobileEnergyGroupListSection'
+import { ImageLightbox } from './common/ImageLightbox'
+import { useThumbnailLoader } from '../../hooks/useThumbnailLoader'
+import { useType2Helpers } from '../../hooks/useType2Helpers'
 import type { MemoryFile } from '../../services/documentHandler';
 
 
@@ -41,17 +41,18 @@ export default function GasolinePage() {
 
   // 圖片放大 lightbox
   const [lightboxSrc, setLightboxSrc] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [success, setSuccess] = useState<string | null>(null);
-  const [thumbnails, setThumbnails] = useState<{ [key: string]: string }>({});  // ⭐ 檔案縮圖 URL
+
+  // 新架構：簡單 state 取代舊 hooks
+  const [submitError, setSubmitError] = useState<string | null>(null)
+  const [submitSuccess, setSubmitSuccess] = useState<string | null>(null)
 
   // 前端狀態管理 Hook
   const frontendStatus = useFrontendStatus({
     initialStatus,
     entryId: currentEntryId,
     onStatusChange: () => {},
-    onError: (error) => setError(error),
-    onSuccess: (message) => setSuccess(message)
+    onError: (error) => setSubmitError(error),
+    onSuccess: (message) => setSubmitSuccess(message)
   })
 
   const { currentStatus, setCurrentStatus, handleSubmitSuccess, handleDataChanged, isInitialLoad } = frontendStatus
@@ -83,17 +84,6 @@ export default function GasolinePage() {
   // 管理員儲存 Hook
   const { save: adminSave, saving: adminSaving } = useAdminSave(pageKey, reviewEntryId)
 
-  // 提交 Hook（多記錄專用）
-  const {
-    submit,
-    save,
-    submitting: submitLoading,
-    error: submitError,
-    success: submitSuccess,
-    clearError: clearSubmitError,
-    clearSuccess: clearSubmitSuccess
-  } = useMultiRecordSubmit(pageKey, year)
-
   // 清除 Hook
   const {
     clear,
@@ -105,14 +95,8 @@ export default function GasolinePage() {
   // 幽靈檔案清理 Hook
   const { cleanFiles } = useGhostFileCleaner()
 
-  // 檔案映射 Hook
-  const {
-    uploadRecordFiles,
-    getRecordFiles,
-    loadFileMapping,
-    getFileMappingForPayload,
-    removeRecordMapping
-  } = useRecordFileMapping(pageKey, currentEntryId)
+  // 檔案刪除追蹤
+  const [filesToDelete, setFilesToDelete] = useState<string[]>([])
 
   // ⭐ 新架構：分離「當前編輯」和「已保存群組」
   // 當前正在編輯的群組（對應 Figma 上方「使用數據」區）
@@ -128,6 +112,15 @@ export default function GasolinePage() {
 
   // 已保存的群組（對應 Figma 下方「資料列表」區）
   const [savedGroups, setSavedGroups] = useState<GasolineRecord[]>([])
+
+  // 縮圖載入（使用統一 hook，Type 2：從群組中提取 evidenceFiles）
+  const thumbnails = useThumbnailLoader({
+    records: savedGroups,
+    fileExtractor: (record) => record.evidenceFiles || []
+  })
+
+  // ⭐ Type 2 共用輔助函數
+  const helpers = useType2Helpers<GasolineRecord>(pageKey, year)
 
   // ⭐ 保留舊的 gasolineData（提交時用）
   const gasolineData = useMemo(() => {
@@ -161,48 +154,34 @@ export default function GasolinePage() {
 
           // ⭐ 載入到 savedGroups（新架構）
           setSavedGroups(updated)
-
-          // 載入檔案映射表
-          const payload = loadedEntry.payload || loadedEntry.extraPayload
-          if (payload) {
-            loadFileMapping(payload)
-          }
         }
       }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loadedEntry, dataLoading])
 
-  // 第二步：檔案載入後分配到記錄
+  // 第二步：檔案載入後映射到記錄
   useEffect(() => {
-    if (dataLoading) return
+    if (loadedFiles && loadedFiles.length > 0 && pageKey && !dataLoading) {
+      const validFiles = loadedFiles.filter(f => f.page_key === pageKey)
 
-    if (loadedFiles.length > 0 && savedGroups.length > 0) {
-      const dieselFiles = loadedFiles.filter(f =>
-        f.file_type === 'other' && f.page_key === pageKey
-      )
-
-      if (dieselFiles.length > 0) {
-        const cleanAndAssignFiles = async () => {
-          const validDieselFiles = await cleanFiles(dieselFiles)
-
-          setSavedGroups(prev => {
-            return prev.map((item) => {
-              const filesForThisRecord = getRecordFiles(item.id, validDieselFiles)
-              return {
-                ...item,
-                evidenceFiles: filesForThisRecord,
-                memoryFiles: []
-              }
-            })
+      if (validFiles.length > 0 && savedGroups.length > 0) {
+        setSavedGroups(prev => {
+          return prev.map((item) => {
+            // ⭐ Type 2 關鍵：使用 split(',').includes() 過濾
+            const filesForThisRecord = validFiles.filter(f =>
+              f.record_id && f.record_id.split(',').includes(item.id)
+            )
+            return {
+              ...item,
+              evidenceFiles: filesForThisRecord
+              // ⚠️ 不清除 memoryFiles！
+            }
           })
-        }
-
-        cleanAndAssignFiles()
+        })
       }
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [loadedFiles, pageKey, dataLoading])
+  }, [loadedFiles, pageKey, dataLoading, savedGroups.length])
 
   // ⭐ 新架構的 Helper Functions
 
@@ -251,7 +230,7 @@ export default function GasolinePage() {
     if (!isEditMode) {
       // 驗證：至少要有一筆記錄
       if (records.length === 0) {
-        setError('請至少新增一筆記錄')
+        setSubmitError('請至少新增一筆記錄')
         return
       }
 
@@ -260,7 +239,7 @@ export default function GasolinePage() {
         r.date.trim() !== '' || r.quantity > 0
       )
       if (!hasValidData) {
-        setError('請至少填寫一筆有效數據（日期或數量）')
+        setSubmitError('請至少填寫一筆有效數據（日期或數量）')
         return
       }
     }
@@ -285,11 +264,9 @@ export default function GasolinePage() {
         ...recordsWithGroupId,
         ...prev.filter(r => r.groupId !== groupId)
       ])
-      setSuccess('群組已更新')
     } else {
       // 新增模式：加入已保存列表
       setSavedGroups(prev => [...recordsWithGroupId, ...prev])
-      setSuccess('群組已新增')
     }
 
     // 清空編輯區（準備下一個群組），預設 3 格
@@ -327,75 +304,77 @@ export default function GasolinePage() {
       records: groupRecords,
       memoryFiles: groupRecords[0]?.memoryFiles || []
     })
-
-    setSuccess('群組已載入到編輯區')
   }
 
   // 刪除已保存的群組
   const deleteSavedGroup = (groupId: string) => {
-    if (!window.confirm('確定要刪除此群組嗎？')) return
-
     setSavedGroups(prev => prev.filter(r => r.groupId !== groupId))
-    removeRecordMapping(groupId)
-    setSuccess('群組已刪除')
   }
 
-  const handleSubmit = async () => {
-    await executeSubmit(async () => {
-      // ✅ 使用統一的資料準備函數
-      const { totalQuantity, cleanedEnergyData, deduplicatedRecordData } = prepareSubmissionData(gasolineData)
+  // 標記佐證檔案為待刪除
+  const handleDeleteEvidence = (fileId: string) => {
+    setFilesToDelete(prev => [...prev, fileId])
+  }
 
-      // ⭐ 使用 hook 的 submit 函數
-      await submit({
-        entryInput: {
-          page_key: pageKey,
+  // 統一提交函數（提交和暫存）
+  const submitData = async (isDraft: boolean) => {
+    if (savedGroups.length === 0) {
+      throw new Error('請至少新增一個群組')
+    }
+
+    await executeSubmit(async () => {
+      setSubmitError(null)
+      setSubmitSuccess(null)
+
+      try {
+        const { totalQuantity, cleanedEnergyData } = prepareSubmissionData(savedGroups)
+
+        const response = await submitEnergyEntry({
+          page_key: 'gasoline',
           period_year: year,
           unit: GASOLINE_CONFIG.unit,
           monthly: { '1': totalQuantity },
-          notes: `${GASOLINE_CONFIG.title}使用共 ${gasolineData.length} 筆記錄`,
-          extraPayload: {
-            [GASOLINE_CONFIG.dataFieldName]: cleanedEnergyData,
-            fileMapping: getFileMappingForPayload()
+          status: isDraft ? 'saved' : 'submitted',
+          notes: `${GASOLINE_CONFIG.title}使用共 ${savedGroups.length} 筆記錄`,
+          payload: {
+            gasolineData: cleanedEnergyData
           }
-        },
-        recordData: deduplicatedRecordData,  // ⭐ 使用去重後的資料（含 allRecordIds）
-        uploadRecordFiles,
-        onSuccess: async (entry_id) => {
-          // ⭐ 簡化為只有收尾工作
-          setCurrentEntryId(entry_id)
-          await reload()
+        })
+
+        const groupsMap = helpers.buildGroupsMap(savedGroups)
+        await helpers.uploadGroupFiles(groupsMap, response.entry_id)
+        await helpers.deleteMarkedFiles(filesToDelete, setFilesToDelete)
+
+        setCurrentEntryId(response.entry_id)
+        setSubmitSuccess(isDraft ? '暫存成功' : '提交成功')
+
+        await reload()
+        if (!isDraft) {
+          await handleSubmitSuccess()
         }
-      })
+        reloadApprovalStatus()
 
-      await handleSubmitSuccess();
-
-      // 重新載入審核狀態，更新狀態橫幅
-      reloadApprovalStatus()
-    }).catch(error => {
-      setError(error instanceof Error ? error.message : '提交失敗，請重試');
+      } catch (error) {
+        setSubmitError(error instanceof Error ? error.message : '操作失敗')
+        throw error
+      }
     })
-  };
+  }
+
+  const handleSubmit = () => submitData(false)
 
   const handleSave = async () => {
     await executeSubmit(async () => {
-      setError(null)
-      setSuccess(null)
+      setSubmitError(null)
+      setSubmitSuccess(null)
 
-      // ✅ 使用統一的資料準備函數
-      const { totalQuantity, cleanedEnergyData, deduplicatedRecordData } = prepareSubmissionData(gasolineData)
+      // ⭐ 先同步編輯區修改（所有模式都需要）
+      const finalSavedGroups = helpers.syncEditingGroupChanges(currentEditingGroup, savedGroups, setSavedGroups)
+      const { totalQuantity, cleanedEnergyData } = prepareSubmissionData(finalSavedGroups)
 
       // 審核模式：使用 useAdminSave hook
       if (isReviewMode && reviewEntryId) {
-        console.log('📝 管理員審核模式：使用 useAdminSave hook', reviewEntryId)
-
-        // ⭐ 新架構：準備檔案列表（從當前編輯群組收集）
-        const filesToUpload = currentEditingGroup.memoryFiles.map((mf: MemoryFile) => ({
-          file: mf.file,
-          metadata: {
-            recordIndex: 0,
-            allRecordIds: currentEditingGroup.records.map(r => r.id)
-          }
-        }))
+        const filesToUpload = helpers.collectAdminFilesToUpload(finalSavedGroups)
 
         await adminSave({
           updateData: {
@@ -403,51 +382,26 @@ export default function GasolinePage() {
             amount: totalQuantity,
             payload: {
               monthly: { '1': totalQuantity },
-              [GASOLINE_CONFIG.dataFieldName]: cleanedEnergyData,
-              fileMapping: getFileMappingForPayload()
+              gasolineData: cleanedEnergyData
             }
           },
           files: filesToUpload
         })
 
-        await reload()
+        await helpers.deleteMarkedFilesAsAdmin(filesToDelete, setFilesToDelete)  // ✅ 管理員用 adminDeleteEvidence（坑 #3 + #5 修復）
+        await reload()                     // ✅ 再重新載入
         reloadApprovalStatus()
-        // 清空記憶體檔案（在 reload 之後，避免檔案暫時消失）
         setCurrentEditingGroup(prev => ({ ...prev, memoryFiles: [] }))
-        setSuccess('✅ 儲存成功！資料已更新')
+        setSubmitSuccess('✅ 儲存成功！資料已更新')
         return
       }
 
-      // 非審核模式：使用統一的資料準備函數（已在函數開頭準備好）
-      // ⭐ 使用 hook 的 save 函數（跳過驗證）
-      await save({
-        entryInput: {
-          page_key: pageKey,
-          period_year: year,
-          unit: GASOLINE_CONFIG.unit,
-          monthly: { '1': totalQuantity },
-          notes: `${GASOLINE_CONFIG.title}使用共 ${gasolineData.length} 筆記錄`,
-          extraPayload: {
-            [GASOLINE_CONFIG.dataFieldName]: cleanedEnergyData,
-            fileMapping: getFileMappingForPayload()
-          }
-        },
-        recordData: deduplicatedRecordData,  // ⭐ 包含 allRecordIds
-        uploadRecordFiles,
-        onSuccess: async (entry_id) => {
-          // ⭐ 簡化為 2 行（原本 ~55 行）
-          setCurrentEntryId(entry_id)
-          await reload()
-        }
-      })
-
-      // 重新載入審核狀態，更新狀態橫幅
-      reloadApprovalStatus()
+      // 一般暫存：調用 submitData
+      await submitData(true)
     }).catch(error => {
-      console.error('❌ 暫存失敗:', error)
-      setError(error instanceof Error ? error.message : '暫存失敗')
+      setSubmitError(error instanceof Error ? error.message : '暫存失敗')
     })
-  };
+  }
 
   const handleClear = () => {
     setShowClearConfirmModal(true);
@@ -485,9 +439,9 @@ export default function GasolinePage() {
       await reload()
       reloadApprovalStatus()
 
-      setSuccess('資料已完全清除')
+      setSubmitSuccess('資料已完全清除')
     } catch (error) {
-      setError(error instanceof Error ? error.message : '清除失敗，請重試')
+      setSubmitError(error instanceof Error ? error.message : '清除失敗，請重試')
     }
   };
 
@@ -535,24 +489,6 @@ export default function GasolinePage() {
     })
   }, [gasolineData])
 
-  // ⭐ 只為圖片檔案生成縮圖（PDF 不需要）
-  useEffect(() => {
-    evidenceGroups.forEach(async (group) => {
-      if (group.evidence &&
-          group.evidence.mime_type.startsWith('image/') &&
-          !thumbnails[group.evidence.id]) {
-        try {
-          const url = await getFileUrl(group.evidence.file_path)
-          setThumbnails(prev => ({
-            ...prev,
-            [group.evidence!.id]: url
-          }))
-        } catch (error) {
-          console.warn('Failed to generate thumbnail for', group.evidence.file_name, error)
-        }
-      }
-    })
-  }, [evidenceGroups])
   return (
     <>
       {/* 隱藏瀏覽器原生日曆圖示和數字輸入框的上下箭頭 */}
@@ -611,13 +547,13 @@ export default function GasolinePage() {
         unit: GASOLINE_CONFIG.unit,
         role,
         onSave: handleSave,
-        isSaving: submitLoading
+        isSaving: submitting
       }}
       notificationState={{
         success: submitSuccess,
         error: submitError,
-        clearSuccess: clearSubmitSuccess,
-        clearError: clearSubmitError
+        clearSuccess: () => setSubmitSuccess(null),
+        clearError: () => setSubmitError(null)
       }}
     >
       {/* 使用數據區塊 */}
@@ -634,7 +570,8 @@ export default function GasolinePage() {
         saveCurrentGroup={saveCurrentGroup}
         thumbnails={thumbnails}
         onPreviewImage={(src) => setLightboxSrc(src)}
-        onError={(msg) => setError(msg)}
+        onError={(msg) => setSubmitError(msg)}
+        onDeleteEvidence={handleDeleteEvidence}
         iconColor={GASOLINE_CONFIG.iconColor}
       />
 
@@ -664,23 +601,6 @@ export default function GasolinePage() {
         zIndex={LAYOUT_CONSTANTS.MODAL_Z_INDEX}
         onClose={() => setLightboxSrc(null)}
       />
-
-      {/* Toast 訊息 */}
-      {error && (
-        <Toast
-          message={error}
-          type="error"
-          onClose={() => setError(null)}
-        />
-      )}
-
-      {success && (
-        <Toast
-          message={success}
-          type="success"
-          onClose={() => setSuccess(null)}
-        />
-      )}
 
     </SharedPageLayout>
     </>

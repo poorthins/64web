@@ -20,17 +20,17 @@
 
 | # | 頁面 | 狀態 | 開始 | 完成 | 耗時 | 備註 |
 |---|------|------|------|------|------|------|
-| 4 | DieselPage | 🔜 | - | - | - | 群組記錄典型 |
-| 5 | GasolinePage | 🔜 | - | - | - | 和 Diesel 幾乎一樣 |
-| 6 | DieselStationarySourcesPage | 🔜 | - | - | - | 固定源 |
-| 7 | SepticTankPage | 🔜 | - | - | - | 設施群組 |
-| 8 | UreaPage | 🔜 | - | - | - | 有 SDS 管理 |
+| 4 | DieselPage | ✅ | 2025-01-20 | 2025-01-20 | 3h | Pilot 頁面，建立 Type 2 SOP |
+| 5 | GasolinePage | ✅ | 2025-01-20 | 2025-01-20 | 45min | 應用 Type 2 SOP |
+| 6 | DieselStationarySourcesPage | ✅ | 2025-01-20 | 2025-01-21 | 3h | 固定源，應用通知規範 |
+| 7 | SepticTankPage | ✅ | 2025-01-20 | 2025-01-21 | 2h | 設施群組，應用通知規範 |
+| 8 | UreaPage | ✅ | 2025-01-20 | 2025-01-21 | 2h | 有 SDS 管理，應用通知規範 |
 
 ### Type 3：先設定規格 → 一筆佐證 → 多筆使用記錄（5 頁）
 
 | # | 頁面 | 狀態 | 開始 | 完成 | 耗時 | 備註 |
 |---|------|------|------|------|------|------|
-| 9 | WD40Page | 🔜 | - | - | - | 已有 spec manager |
+| 9 | WD40Page | ✅ | 2025-01-20 | 2025-01-21 | 2h | 已有 spec manager，應用通知規範 |
 | 10 | FireExtinguisherPage | 🔜 | - | - | - | 檢修記錄 |
 | 11 | AcetylenePage | 🔜 | - | - | - | 鋼瓶規格 |
 | 12 | LPGPage | 🔜 | - | - | - | 液化石油氣 |
@@ -71,6 +71,30 @@
 
 #### 2025-01-19 - GeneratorTestPage 重構完成，應用全部 8 個 bug 預防措施
 > 第三個 Type 1 頁面重構完成！**Type 1 批次全部完成（3/3）**。程式碼從 730 行減少到 424 行（42% 縮減），移除 useMultiRecordSubmit、useRecordFileMapping、useSubmitGuard 等舊 hooks，改用 submitEnergyEntry + uploadEvidenceFile 直接 API 呼叫。應用全部 8 個 PROGRESS.md 記錄的 bug 預防措施：named import、必填欄位、payload 不是 extraPayload、status 用 saved/submitted、recordId 設定、審核鎖定、file.size 判斷、customNotifications。TypeScript 編譯全部通過。
+
+#### 2025-01-20 - GasolinePage 重構完成（Type 2），應用完整 Type 2 SOP
+> 第二個 Type 2 頁面重構完成！**45 分鐘完成**（基於 DieselPage 的 Type 2 SOP）。移除 useMultiRecordSubmit (204行) 和 useRecordFileMapping (352行)，建立 submitData 統一提交函數 + 6 個輔助函數（buildGroupsMap, uploadGroupFiles, deleteMarkedFiles, collectAdminFilesToUpload, syncEditingGroupChanges, deleteMarkedFilesAsAdmin）。**程式碼減少約 590 行 (87%)**。關鍵修復：1) 檔案載入邏輯改用 `split(',').includes()` 過濾 record_id（Type 2 特有），2) 移除刪除確認提示（UI/UX 標準），3) reviewSection 不傳 onShowSuccess/onShowError。品質檢查全部通過（P0: 無型別重複, P1: 函數都小於 50 行, P2: 無 console.log）。TypeScript 編譯零錯誤。
+
+#### 2025-11-21 - GasolinePage 修復管理員模式檔案刪除時序錯誤（坑 #5）
+> 發現 GasolinePage 管理員儲存模式缺少 `deleteMarkedFiles()` 呼叫，導致管理員編輯佐證後，刪除的舊檔案會在 reload 時重新出現。修復方式：在 `handleSave` 管理員模式的 `await reload()` 前加上 `await deleteMarkedFiles()`（Line 492）。這是 type2-sop.md 坑 #5「檔案刪除時序錯誤」的標準修復，遵循「Delete before reload」原則。修復後 TypeScript 編譯零錯誤（GasolinePage 無編譯錯誤）。
+
+#### 2025-11-21 - GasolinePage 修復儲存按鈕無通知問題（參照 UreaPage 模式）
+> 使用者回報點「儲存」按鈕沒有任何反應（無通知彈窗）。診斷發現 GasolinePage 設置了 `customNotifications: true` 但 Toast 組件沒有正常工作。參考 UreaPage 的實現，UreaPage **不使用** `customNotifications: true`，而是讓 SharedPageLayout 通過 `notificationState` 自動顯示 SuccessModal。修復：1) 移除 `bottomActionBar` 的 `customNotifications: true`（Line 638），2) 移除 Toast 組件渲染（Line 706-720），3) 移除 Toast import（Line 30）。修復後 SharedPageLayout 會自動顯示通知：暫存 → 藍色 SuccessModal「暫存成功」，提交 → 綠色 SuccessModal「提交成功」，錯誤 → 錯誤訊息。行為與 UreaPage 完全一致。TypeScript 編譯零錯誤。**GasolinePage 現在完全符合 Type 2 標準模式。**
+
+#### 2025-11-21 - GasolinePage 修復管理員無法刪除佐證檔案問題（坑 #3 標準修復 + 關鍵連接點補完）
+> **第一階段修復（不完整）：** 管理員回報刪除使用者的舊佐證並上傳新佐證後儲存，結果新舊佐證都出現在頁面中（舊佐證沒有被刪除）。初步診斷：管理員模式的 `handleSave` 使用了 `deleteMarkedFiles()`（呼叫 `deleteEvidence`），但管理員刪除檔案必須使用 `adminDeleteEvidence` 才有權限。修復：1) import 加入 `adminDeleteEvidence`（Line 17），2) 新增 `deleteMarkedFilesAsAdmin()` 函數使用 `adminDeleteEvidence`（Line 363-375），3) 管理員模式改為呼叫 `deleteMarkedFilesAsAdmin()`（Line 506）。
+
+> **問題持續 → 第二階段修復（完整）：** 使用者回報問題依然存在。深入對比 UreaPage 發現：**GasolinePage 缺少關鍵連接點**。管理員點刪除按鈕時，檔案 ID 沒有被記錄到 `filesToDelete` 數組，導致 `deleteMarkedFilesAsAdmin()` 雖然被呼叫但 `filesToDelete` 是空的。根本原因：`MobileEnergyUsageSection` 缺少 `onDeleteEvidence` prop（對比 UreaPage Line 813）。修復：在 Line 689 加上 `onDeleteEvidence={handleDeleteEvidence}`，完整連接刪除鏈路：點刪除 → 記錄 ID → 儲存時刪除。這是 type2-sop.md 坑 #3「使用者無法刪除管理員上傳的檔案」的對稱問題：**管理員也無法用一般 API 刪除使用者的檔案**，必須使用 admin 專用 API + **正確連接刪除回調**。TypeScript 編譯零錯誤。
+
+#### 2025-01-23 - Type 2 優化：抽取 6 個輔助函數到 useType2Helpers
+> 發現 5 個 Type 2 頁面有 60% 重複代碼（~2,100 行），其中 6 個輔助函數（buildGroupsMap, uploadGroupFiles, deleteMarkedFiles, collectAdminFilesToUpload, deleteMarkedFilesAsAdmin, syncEditingGroupChanges）完全一樣。抽取到 `useType2Helpers<T>` 泛型 hook 後，**減少 365 行重複代碼**（每頁約 73 行）。修改內容：1) 建立 `frontend/src/hooks/useType2Helpers.ts` (173 lines)，2) 更新 5 個頁面使用 hook：DieselPage, UreaPage, GasolinePage, DieselStationarySourcesPage, SepticTankPage，3) 函數改為接受參數（filesToDelete, setFilesToDelete, currentEditingGroup, savedGroups, setSavedGroups）提升可重用性，4) syncEditingGroupChanges 接受泛型結構（支援 SepticTankPage 的 SepticTankCurrentEditingGroup）。TypeScript 編譯零錯誤。**5 個 Type 2 頁面重構完成，總計減少 ~3,000 行代碼。**
+
+#### 2025-01-23 - 扁平化目錄結構：shared/mobile/ → common/
+> **問題：** Category1 有 3 個 components 資料夾（`components/` 舊架構 + `shared/mobile/components/` 新架構），路徑深度 4 層（Category1 → shared → mobile → components），命名誤導（"mobile" 實際上不是 mobile-specific）。**Linus 判斷：違反 "good taste"，不必要的複雜性。**
+>
+> **重構內容：** 1) 建立 `Category1/common/` 扁平目錄（2 層路徑），2) 移動 12 個檔案（8 components + 4 utils/types/config），3) 更新 10 個檔案的 import 路徑（9 pages + useType2Helpers.ts），4) 清理空目錄（shared/mobile/, shared/），5) 修復內部相對路徑（`../../../../../` → `../../../../`, `../mobileEnergy` → `./mobileEnergy`）。
+>
+> **結果：** 路徑深度減少 2 層（`./shared/mobile/components/XXX` → `./common/XXX`），消除誤導性命名，統一組件位置。TypeScript 編譯零錯誤（針對重構的 9 個頁面 + useType2Helpers.ts）。**15 分鐘完成，零破壞性。**符合 Linus 原則：1) 消除特殊情況（只保留一個 components 位置），2) 簡化資料結構（扁平化），3) 實用主義（3 小時換回未來無數個 5 秒鐘的思考時間）。
 
 ---
 
@@ -776,6 +800,90 @@ useEffect(() => {
 
 ---
 
+#### 2025-11-20 - DieselPage 管理員審核按鈕通知錯誤：移除 onShowSuccess/onShowError 回調
+**情況：** 管理員在 DieselPage 審核模式點擊「退回」按鈕時，顯示「提交成功」的通知而不是正確的「已退回」通知。三個審核按鈕（儲存編輯/通過審核/退回）的通知都顯示不正確。
+
+**問題根源：**
+DieselPage 傳遞了 `onShowSuccess` 和 `onShowError` 回調到 reviewSection，但 TYPE1 (GeneratorTestPage) 不使用這個模式。DieselPage 的通知系統與 ReviewSection 的內部通知邏輯產生衝突。
+
+**錯誤邏輯：**
+```typescript
+// ❌ DieselPage.tsx:667-679 - 傳遞了通知回調（TYPE1 沒有這樣做）
+reviewSection={{
+  isReviewMode,
+  reviewEntryId,
+  // ...
+  onSave: handleSave,
+  isSaving: submitting,
+  onShowSuccess: (msg) => setSubmitSuccess(msg),  // ← TYPE1 沒有這個
+  onShowError: (msg) => setSubmitError(msg)       // ← TYPE1 也沒有這個
+}}
+```
+
+**TYPE1 的做法（正確）：**
+```typescript
+// ✅ GeneratorTestPage.tsx:491-510 - 不傳遞通知回調
+reviewSection={{
+  isReviewMode,
+  reviewEntryId,
+  reviewUserId,
+  currentEntryId,
+  pageKey,
+  year,
+  category: GENERATOR_TEST_CONFIG.title,
+  amount: savedTests.reduce((sum, test) => {
+    return sum + (test.generatorPower * test.testFrequency * test.testDuration / 60)
+  }, 0),
+  unit: GENERATOR_TEST_CONFIG.unit,
+  role,
+  onSave: handleSave,
+  isSaving: submitting
+  // ← 沒有 onShowSuccess 和 onShowError
+}}
+```
+
+**關鍵修復：**
+```typescript
+// ✅ DieselPage.tsx:667-679 - 移除通知回調，完全匹配 TYPE1
+reviewSection={{
+  isReviewMode,
+  reviewEntryId,
+  reviewUserId,
+  currentEntryId,
+  pageKey,
+  year,
+  category: DIESEL_CONFIG.title,
+  amount: dieselData.reduce((sum, item) => sum + item.quantity, 0),
+  unit: DIESEL_CONFIG.unit,
+  role,
+  onSave: handleSave,
+  isSaving: submitting
+  // ✅ 移除 onShowSuccess 和 onShowError
+}}
+```
+
+**用戶反饋：**
+「現在管理員介面的那三個按鈕所對應到的通知很怪，我點退回結果出現提交成功的通知」
+「我是覺得這裡直接抄TYPE1的做法就好，因為一模一樣」
+
+**修復位置：**
+- `frontend/src/pages/Category1/DieselPage.tsx:667-679` (移除 onShowSuccess 和 onShowError)
+- `frontend/src/components/ReviewSection.tsx:67-68, 108-109` (添加調試日誌，用於診斷)
+- `frontend/src/layouts/SharedPageLayout.tsx:72-73, 467-468` (添加類型定義，雖然現在 DieselPage 不用了)
+
+**學到的教訓：**
+- **TYPE1 vs TYPE2 的審核模式應該一致**：ReviewSection 的使用方式應該在所有頁面保持統一
+- **ReviewSection 自己處理通知**：不需要從外部傳入通知回調，它會在內部處理（使用 `alert()` 或導航）
+- **遇到跨頁面的共用組件問題時優先參考 TYPE1**：TYPE1 已經經過完整測試，是可靠的範本
+- **直接複製已驗證可用的模式** 比自己創造新模式更可靠
+
+**相關檔案：**
+- `frontend/src/pages/Category1/DieselPage.tsx:667-679` (修復)
+- `frontend/src/pages/Category1/GeneratorTestPage.tsx:491-510` (TYPE1 參考範本)
+- `frontend/src/components/ReviewSection.tsx` (共用審核組件)
+
+---
+
 #### [範例] 2025-01-18 - 檔案上傳忘記 await
 **問題：** 檔案上傳沒等 entry_id 回傳就開始上傳，導致 entry_id 是 undefined
 
@@ -879,3 +987,632 @@ await fileAPI.uploadEvidenceFile(file, {
 
 當前進度：1 / 16 頁完成
 ```
+
+---
+
+## 🎨 UI/UX 標準化記錄
+
+### 縮圖佔位符統一（2025-01-20）
+
+**問題：**
+- RefrigerantPage: 永久容器 + 白色背景
+- DieselPage (GroupListItem): 永久容器 + 白色背景
+- SF6Page: 條件渲染 `{thumbnail && <div>}` → layout shift ❌
+- GeneratorTestPage: 條件渲染 `{thumbnail && <div>}` → layout shift ❌
+
+**問題根源：**
+4 個已重構頁面有 2 種不同邏輯：
+1. 永久容器（RefrigerantPage, DieselPage）→ 不跳，但白色背景不專業
+2. 條件渲染（SF6Page, GeneratorTestPage）→ 載入時會跳動
+
+**解決方案：**
+
+1. **建立共用常數** `frontend/src/utils/energy/thumbnailConstants.tsx`
+   ```tsx
+   export const THUMBNAIL_PLACEHOLDER_SVG = <svg>...</svg>
+   export const THUMBNAIL_BACKGROUND = '#EBEDF0'
+   export const THUMBNAIL_BORDER = '1px solid rgba(0, 0, 0, 0.25)'
+   ```
+
+2. **修改 4 個組件使用統一標準：**
+   - `components/energy/GroupListItem.tsx` - 白色 → 灰色 + SVG
+   - `pages/Category1/components/RefrigerantListSection.tsx` - 白色 → 灰色 + SVG
+   - `pages/Category1/components/SF6ListSection.tsx` - 條件渲染 → 永久容器 + SVG
+   - `pages/Category1/components/GeneratorTestListSection.tsx` - 條件渲染 → 永久容器 + SVG
+
+3. **更新 SOP 文件：**
+   - `docs/type1-sop.md` 步驟 8：縮圖標準
+   - `docs/type2-sop.md` 步驟 9：縮圖標準
+
+**統一後的標準：**
+```tsx
+<div style={{
+  background: THUMBNAIL_BACKGROUND,  // #EBEDF0
+  border: THUMBNAIL_BORDER,
+  display: 'flex',
+  alignItems: 'center',
+  justifyContent: 'center'
+}}>
+  {thumbnail ? (
+    <img src={thumbnail} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+  ) : (
+    THUMBNAIL_PLACEHOLDER_SVG
+  )}
+</div>
+```
+
+**效果：**
+- ✅ 消除 layout shift（SF6Page, GeneratorTestPage）
+- ✅ 統一視覺風格（4 頁一致，淺灰色更專業）
+- ✅ 程式碼不重複（SVG 只定義一次）
+- ✅ 後續頁面有標準可循（寫入 SOP）
+
+**載入過程（統一後）：**
+```
+階段 1: Entry 載入   → [淺灰色底 #EBEDF0 + SVG 圖示]
+階段 2: Files 載入   → [淺灰色底 #EBEDF0 + SVG 圖示] (無變化)
+階段 3: 縮圖載入完成 → [實際縮圖顯示] (SVG → img，無 layout shift)
+```
+
+**Code Smell 消除：**
+- ✅ Duplicated Code（SVG 重複 4 次 → 1 次）
+- ✅ Inconsistent Behavior（4 種邏輯 → 1 種標準）
+- ✅ Magic Values（#FFF, #EBEDF0 散落各處 → 統一常數）
+
+**修改檔案清單：**
+```
+新增：
+  frontend/src/utils/energy/thumbnailConstants.tsx
+
+修改（程式碼）：
+  frontend/src/components/energy/GroupListItem.tsx
+  frontend/src/pages/Category1/components/RefrigerantListSection.tsx
+  frontend/src/pages/Category1/components/SF6ListSection.tsx
+  frontend/src/pages/Category1/components/GeneratorTestListSection.tsx
+
+修改（文件）：
+  docs/type1-sop.md
+  docs/type2-sop.md
+  docs/PROGRESS.md
+```
+
+---
+
+#### 2025-11-20 - ⚠️ DieselPage 雙重通知問題：錯誤解法記錄（已廢棄，請參照 UreaPage 模式）
+**⚠️ 警告：本記錄為錯誤解法，請勿參考。正確解法請參照 2025-11-21 GasolinePage 修復記錄。**
+
+**情況：** DieselPage 點「儲存」按鈕會跳兩次成功通知。
+
+**當時的錯誤解法：** 加上 `customNotifications: true` ❌
+
+**為什麼這是錯的：**
+1. 增加了複雜度 - 需要頁面自己管理 Toast 組件
+2. 不是標準模式 - UreaPage、SepticTankPage 等 Type 2 頁面都**不使用** `customNotifications`
+3. 容易出錯 - GasolinePage 後來因此出現通知不顯示的問題
+
+**正確解法（2025-11-21 從 UreaPage 學到）：**
+- **不要使用** `customNotifications: true`
+- 讓 SharedPageLayout 通過 `notificationState` 自動顯示通知
+- 這是 UreaPage、SepticTankPage 等頁面的標準模式
+
+**參考正確實現：**
+- `frontend/src/pages/Category1/UreaPage.tsx` - Type 2 標準通知模式
+- `frontend/src/pages/Category1/GasolinePage.tsx` - 已修正為正確模式
+
+---
+
+#### 2025-11-20 - DieselPage 管理員刪除檔案權限問題：參考 TYPE1 使用 adminDeleteEvidence
+**情況：** 管理員在審核模式上傳的佐證檔案，使用者後來無法刪除。使用者反應：「管理員這邊上傳的佐證到了使用者那邊編輯會出現佐證資料刪不掉的問題」
+
+**問題根源：**
+DieselPage 的 `handleAdminSave` 函數使用 `deleteEvidence(fileId)` 刪除舊檔案：
+```typescript
+// Line 449 (修改前)
+await deleteEvidence(fileId)
+```
+
+**為什麼會失敗：**
+- `deleteEvidence` 會檢查 `owner_id = current_user_id` (files.ts:1099, 1145)
+- 管理員上傳的檔案 → `owner_id = admin_id`
+- 使用者後來想刪除 → `owner_id != user_id` → **刪除失敗**
+
+**TYPE1 的做法（GeneratorTestPage）：**
+GeneratorTestPage 使用 `adminDeleteEvidence` 而不是 `deleteEvidence`：
+```typescript
+// GeneratorTestPage.tsx:357
+await adminDeleteEvidence(fileId)  // ← TYPE1 用這個
+```
+
+**adminDeleteEvidence vs deleteEvidence 差異：**
+```typescript
+// deleteEvidence (files.ts:1084-1160)
+.eq('owner_id', user.id)  // ❌ 檢查 owner_id - 只能刪自己的檔案
+
+// adminDeleteEvidence (files.ts:1170-1254)
+// ✅ 不檢查 owner_id - 驗證管理員身份後可刪任何檔案
+// Line 1181-1190: 驗證管理員權限
+// Line 1237: 刪除時不過濾 owner_id
+```
+
+**修復方案：**
+參考 TYPE1，將 DieselPage 改用 `adminDeleteEvidence`
+
+**修改位置：**
+1. `frontend/src/pages/Category1/DieselPage.tsx:18` - Import 區
+   ```typescript
+   // 加上 adminDeleteEvidence
+   import { EvidenceFile, getFileUrl, deleteEvidence, adminDeleteEvidence } from '../../api/files';
+   ```
+
+2. `frontend/src/pages/Category1/DieselPage.tsx:449` - handleAdminSave 函數
+   ```typescript
+   // 從：
+   await deleteEvidence(fileId)
+
+   // 改為：
+   await adminDeleteEvidence(fileId)
+   ```
+
+**為什麼有效：**
+- `adminDeleteEvidence` 先驗證管理員身份（files.ts:1181-1190）
+- 通過驗證後允許刪除任何檔案（files.ts:1237 不檢查 owner_id）
+- `handleAdminSave` 只在 `isReviewMode && reviewEntryId` 時執行，已有權限保護
+- RLS policy 保證非管理員無法調用此 API
+
+**與 TYPE1 一致性：**
+- GeneratorTestPage (TYPE1) 使用 `adminDeleteEvidence`
+- DieselPage (TYPE2) 現在也使用 `adminDeleteEvidence`
+- 統一管理員刪除檔案的做法
+
+**測試建議：**
+1. 管理員在審核模式上傳佐證 → 儲存
+2. 使用者編輯 → 刪除舊佐證 → 上傳新佐證 → 儲存
+3. 檢查資料庫 → 確認舊佐證已刪除，只有新佐證
+
+**相關檔案：**
+- `frontend/src/pages/Category1/DieselPage.tsx:18, 449` (加上 adminDeleteEvidence import，handleAdminSave 改用 adminDeleteEvidence)
+- `frontend/src/api/files.ts:1084-1160` (deleteEvidence - 檢查 owner_id)
+- `frontend/src/api/files.ts:1170-1254` (adminDeleteEvidence - 不檢查 owner_id)
+- `frontend/src/pages/Category1/GeneratorTestPage.tsx:357` (TYPE1 參考實作)
+
+---
+
+#### 2025-11-21 - 使用者無法刪除管理員上傳的檔案：RLS Policy + API 程式碼雙修復
+**情況：** 使用者無法刪除管理員在審核模式上傳的佐證檔案。使用者報告：「管理員介面上傳佐證後儲存 → 使用者這邊刪除管理員佐證後再次上傳自己的佐證後儲存 → 佐證資料出現舊的檔案」
+
+**場景重現：**
+1. 管理員在審核模式上傳檔案 → `owner_id = admin_id`
+2. 使用者編輯並刪除舊檔案 → 標記為待刪除
+3. 使用者儲存 → 呼叫 `deleteEvidence(fileId)`
+4. API 查詢：`.eq('owner_id', user.id)` → 無匹配（因為 owner_id 是管理員）
+5. Line 1109 silent return → **檔案未被刪除**
+6. Reload → 舊檔案重新出現
+
+**問題根源：**
+雙層權限檢查都基於錯誤的假設（檢查檔案所有者而非 entry 所有者）：
+1. **API 查詢層**：`files.ts:1099, 1146` 的 `.eq('owner_id', user.id)` 過濾掉管理員上傳的檔案
+2. **RLS Policy 層**：舊 Policy 也檢查 `owner_id = auth.uid()`
+
+**影響範圍：**
+- ❌ 所有 TYPE1 頁面（RefrigerantPage, SF6Page, GeneratorTestPage）
+- ❌ 所有 TYPE2 頁面（DieselPage, GasolinePage, UreaPage, WD40Page, SepticTankPage）
+- ✅ 共 8 個頁面
+
+**解決方案（兩階段）：**
+
+**階段 1：修改 RLS Policy（用戶執行）**
+```sql
+DROP POLICY IF EXISTS "users_can_delete_own_files" ON entry_files;
+
+CREATE POLICY "users_can_delete_own_entry_files"
+ON entry_files
+FOR DELETE
+USING (
+  -- 管理員可以刪除任何檔案
+  auth.uid() IN (SELECT id FROM profiles WHERE role = 'admin')
+  OR
+  -- 或者：這個檔案的 entry 屬於當前使用者
+  EXISTS (
+    SELECT 1 FROM energy_entries
+    WHERE energy_entries.id = entry_files.entry_id
+    AND energy_entries.owner_id = auth.uid()
+  )
+);
+```
+
+**為什麼還不夠：** 用戶反饋「可是我現在還是有欸」→ RLS Policy 修改後仍然失敗
+
+**階段 2：移除 API 程式碼的 owner_id 檢查（關鍵修復）**
+
+API 程式碼在 RLS Policy 之前就先過濾了資料，導致 RLS Policy 根本沒機會執行：
+
+```typescript
+// ❌ files.ts:1095-1101 (修復前) - 查詢時過濾
+const { data: fileData, error: fetchError } = await supabase
+  .from('entry_files')
+  .select('file_path, owner_id')
+  .eq('id', fileId)
+  .eq('owner_id', user.id) // ← 管理員檔案被過濾掉，返回 null
+  .maybeSingle()
+
+// ✅ files.ts:1095-1101 (修復後) - 移除 owner_id 檢查
+const { data: fileData, error: fetchError } = await supabase
+  .from('entry_files')
+  .select('file_path, owner_id')
+  .eq('id', fileId)
+  // 移除 .eq('owner_id', user.id)
+  // RLS Policy 會檢查是否有權限讀取此檔案
+  .maybeSingle()
+```
+
+```typescript
+// ❌ files.ts:1142-1146 (修復前) - 刪除時過濾
+const { error: dbError } = await supabase
+  .from('entry_files')
+  .delete()
+  .eq('id', fileId)
+  .eq('owner_id', user.id)  // ← 管理員檔案無法刪除
+
+// ✅ files.ts:1142-1146 (修復後) - 移除 owner_id 檢查
+const { error: dbError } = await supabase
+  .from('entry_files')
+  .delete()
+  .eq('id', fileId)
+  // 移除 .eq('owner_id', user.id)
+  // RLS Policy 會檢查是否有權限刪除此檔案
+```
+
+**修復位置：**
+1. Supabase SQL Editor - RLS Policy 修改（用戶執行）
+2. `frontend/src/api/files.ts:1099` - 移除查詢時的 `owner_id` 檢查
+3. `frontend/src/api/files.ts:1146` - 移除刪除時的 `owner_id` 檢查
+
+**為什麼需要兩階段修復：**
+- **只改 RLS Policy**：API 查詢先過濾 → 返回 null → RLS Policy 無機會執行 ❌
+- **只改 API 程式碼**：無 RLS Policy 保護 → 安全漏洞 ❌
+- **雙修復**：API 不過濾 → RLS Policy 驗證權限 → 正確運作 ✅
+
+**權限邏輯正確化：**
+```
+舊邏輯（錯誤）：
+  檢查「誰上傳了這個檔案」(owner_id = user_id)
+  → 使用者無法刪除管理員上傳的檔案
+
+新邏輯（正確）：
+  檢查「這個檔案的 entry 屬於誰」(entry.owner_id = user_id)
+  → 使用者可以刪除自己 entry 下的任何檔案（不管是誰上傳的）
+```
+
+**學到的教訓：**
+- **資料所有權檢查原則**：檢查「誰擁有這個資料（entry）」而非「誰上傳了這個檔案」
+- **雙層權限檢查的陷阱**：API 查詢層過濾會阻止 RLS Policy 執行
+- **正確做法**：API 程式碼不做 owner_id 過濾，完全交給 RLS Policy 處理權限
+- **管理員代理操作支援**：管理員幫使用者上傳檔案後，使用者必須能自行管理
+
+**相關檔案：**
+- Supabase RLS Policy (新增 `users_can_delete_own_entry_files`)
+- `frontend/src/api/files.ts:1099, 1146` (移除 owner_id 檢查)
+- 影響範圍：所有 TYPE1 和 TYPE2 頁面（8 頁）
+
+---
+
+
+#### 2025-11-21 - ⚠️ GasolinePage 雙重通知系統衝突：錯誤解法記錄（已廢棄）
+**⚠️ 警告：本記錄為錯誤解法，請勿參考。正確解法是移除 `customNotifications: true`。**
+
+**當時的錯誤診斷：** 以為是 state 變數命名問題，需要移除自定義 Toast ❌
+
+**真正的問題：** 根本不應該使用 `customNotifications: true`，應該參照 UreaPage 模式
+
+**正確解法（稍後發現）：**
+1. 移除 `bottomActionBar` 的 `customNotifications: true`
+2. 移除 Toast 組件和 import
+3. 讓 SharedPageLayout 自動顯示通知
+
+**參考：** 請看後面的「2025-11-21 - GasolinePage 修復儲存按鈕無通知問題（參照 UreaPage 模式）」記錄
+
+---
+
+#### 2025-11-21 - GasolinePage handleSave 不工作：syncEditingGroupChanges 位置錯誤
+**情況：** GasolinePage 點「儲存」按鈕沒反應，錯誤訊息：「請至少新增一個群組」
+
+**使用者流程：**
+1. 輸入資料到編輯區
+2. **沒有**點「保存群組」按鈕
+3. 直接點底部的「儲存」按鈕
+4. 錯誤：`savedGroups` 是空的 → 提示「請至少新增一個群組」
+
+**問題根源：**
+`handleSave` 只在 review mode 同步編輯區，一般儲存模式沒有同步
+
+**錯誤邏輯：**
+```typescript
+// ❌ GasolinePage.tsx:473-510（修復前）
+const handleSave = async () => {
+  await executeSubmit(async () => {
+    const { totalQuantity, cleanedEnergyData } = prepareSubmissionData(savedGroups)
+
+    if (isReviewMode && reviewEntryId) {
+      const finalSavedGroups = syncEditingGroupChanges()  // ← 只在 review mode 同步
+      // ... adminSave 邏輯 ...
+      return
+    }
+    // 一般儲存
+    await submitData(true)  // savedGroups 還是空的！
+  })
+}
+```
+
+**DieselPage 的正確做法（Line 507）：**
+```typescript
+// ✅ DieselPage.tsx:507 - 在所有模式前都同步
+const handleSave = async () => {
+  await executeSubmit(async () => {
+    const finalSavedGroups = syncEditingGroupChanges()  // ⭐ 所有模式都執行
+    const { totalQuantity, cleanedEnergyData } = prepareSubmissionData(finalSavedGroups)
+
+    if (isReviewMode && reviewEntryId) {
+      // ... adminSave 邏輯 ...
+      return
+    }
+    await submitData(true)  // 使用同步後的資料
+  })
+}
+```
+
+**關鍵修復：**
+```typescript
+// ✅ GasolinePage.tsx:473-510（修復後）
+const handleSave = async () => {
+  await executeSubmit(async () => {
+    setSubmitError(null)
+    setSubmitSuccess(null)
+
+    // ⭐ 移到最前面，所有模式都執行
+    const finalSavedGroups = syncEditingGroupChanges()
+    const { totalQuantity, cleanedEnergyData } = prepareSubmissionData(finalSavedGroups)
+
+    if (isReviewMode && reviewEntryId) {
+      const filesToUpload = collectAdminFilesToUpload(finalSavedGroups)
+      await adminSave({
+        updateData: {
+          unit: GASOLINE_CONFIG.unit,
+          amount: totalQuantity,
+          payload: {
+            monthly: { '1': totalQuantity },
+            gasolineData: cleanedEnergyData
+          }
+        },
+        files: filesToUpload
+      })
+      await reload()
+      reloadApprovalStatus()
+      setCurrentEditingGroup(prev => ({ ...prev, memoryFiles: [] }))
+      setSubmitSuccess('✅ 儲存成功！資料已更新')
+      return
+    }
+
+    // 一般儲存：使用同步後的 finalSavedGroups
+    await submitData(true)
+  }).catch(error => {
+    setSubmitError(error instanceof Error ? error.message : '暫存失敗')
+  })
+}
+```
+
+**syncEditingGroupChanges 做什麼：**
+```typescript
+// Line 452-469
+const syncEditingGroupChanges = () => {
+  if (currentEditingGroup.groupId === null) return savedGroups
+
+  const hasModifications = currentEditingGroup.records.some(r =>
+    r.date.trim() !== '' || r.quantity > 0
+  ) || currentEditingGroup.memoryFiles.length > 0
+
+  if (!hasModifications) return savedGroups
+
+  const { groupId, records, memoryFiles } = currentEditingGroup
+  const validRecords = records.filter(r => r.date.trim() !== '' || r.quantity > 0)
+  const recordsWithGroupId = validRecords.map(r => ({
+    ...r,
+    groupId: groupId,
+    memoryFiles: [...memoryFiles]
+  }))
+
+  const finalSavedGroups = [
+    ...recordsWithGroupId,
+    ...savedGroups.filter(r => r.groupId !== groupId)
+  ]
+  setSavedGroups(finalSavedGroups)
+  return finalSavedGroups
+}
+```
+
+**修復位置：**
+- `frontend/src/pages/Category1/GasolinePage.tsx:473-510` (handleSave 移動 syncEditingGroupChanges)
+
+**學到的教訓：**
+- **編輯區同步是所有模式的前置作業**：不論 review mode 或一般儲存，都需要先同步編輯區
+- **TYPE2 特殊性**：TYPE2 頁面有「編輯區」和「已儲存列表」的雙 state，必須在儲存前同步
+- **參考 Pilot 頁面**：DieselPage 已經有正確實作，直接複製即可
+- **使用者體驗**：使用者期望「點儲存 = 儲存目前所有內容」，不需要額外點「保存群組」
+
+**相關檔案：**
+- `frontend/src/pages/Category1/GasolinePage.tsx:473-510` (handleSave 修復)
+- `frontend/src/pages/Category1/DieselPage.tsx:507` (DieselPage 參考範本)
+
+---
+
+#### 2025-11-21 - 重構 DieselStationarySourcesPage + 修復 TYPE2 頁面 Hook 初始化錯誤
+
+**重構內容：** 按照 type2-sop.md 標準重構 DieselStationarySourcesPage（柴油固定源）頁面
+
+**重構成果：**
+✅ 完整重寫 DieselStationarySourcesPage（787 行）
+✅ 參考 DieselPage 成功模式，保持一致性
+✅ 新增 6 個輔助函數（buildGroupsMap, uploadGroupFiles, deleteMarkedFiles, collectAdminFilesToUpload, deleteMarkedFilesAsAdmin, syncEditingGroupChanges）
+✅ 修復 TypeScript 類型錯誤（groupId: null → undefined）
+✅ 使用 `AdminSaveParams['files']` 型別（P0 品質標準）
+✅ 簡化 handleSave 和 handleAdminSave
+✅ 添加檔案刪除追蹤（filesToDelete）
+✅ 支援設備類型選擇（發電機、鍋爐、蓄熱式焚化爐、其他）
+
+**批次修復：** 同時修復了其他 4 個 TYPE2 頁面的 Hook 初始化順序錯誤：
+- ✅ GasolinePage - 移動 `useThumbnailLoader` 到 `savedGroups` 之後
+- ✅ SepticTankPage - 移動 `useThumbnailLoader` 到 `savedGroups` 之後
+- ✅ UreaPage - 移動 `useThumbnailLoader` 到 `savedGroups` 之後
+- ✅ WD40Page - 移動 `useMemo` 和 `useThumbnailLoader` 到 `savedGroups` 之後
+
+**問題根源：**
+所有 TYPE2 頁面都犯了同樣的錯誤：在 state 聲明之前就使用了該 state
+```typescript
+// ❌ 錯誤（line 49-52）
+const thumbnails = useThumbnailLoader({
+  records: savedGroups,  // 使用 savedGroups
+  fileExtractor: (record) => record.evidenceFiles || []
+})
+
+// state 聲明（line 136）
+const [savedGroups, setSavedGroups] = useState<Record[]>([])
+
+// 錯誤訊息：
+// Block-scoped variable 'savedGroups' used before its declaration
+```
+
+**解決方案：** Hook 初始化順序調整
+```typescript
+// ✅ 正確順序
+// 1️⃣ 先聲明 state（line 130）
+const [savedGroups, setSavedGroups] = useState<Record[]>([])
+
+// 2️⃣ 再使用 hook（line 133-136）
+const thumbnails = useThumbnailLoader({
+  records: savedGroups,
+  fileExtractor: (record) => record.evidenceFiles || []
+})
+```
+
+**TypeScript 編譯結果：**
+✅ 所有 5 個修復的頁面零錯誤
+- DieselStationarySourcesPage ✅
+- GasolinePage ✅
+- SepticTankPage ✅
+- UreaPage ✅
+- WD40Page ✅
+
+**學到的教訓：**
+1. **Hook 初始化順序鐵律**：所有 React Hook 都必須在其依賴的 state 聲明之後調用
+2. **type2-sop.md 的重要性**：SOP 明確指出「⭐ 已加入 useThumbnailLoader（在 savedGroups 之後）」
+3. **批次修復效率**：發現一個頁面的問題後，立即檢查其他相似頁面，可以避免重複錯誤
+4. **參考範本的價值**：DieselPage 作為 TYPE2 Pilot，提供了正確的程式碼結構範本
+
+**相關檔案：**
+- `frontend/src/pages/Category1/DieselStationarySourcesPage.tsx` (完整重構)
+- `frontend/src/pages/Category1/GasolinePage.tsx:49-52, 130-136` (Hook 順序修復)
+- `frontend/src/pages/Category1/SepticTankPage.tsx:145-149, 217-223` (Hook 順序修復)
+- `frontend/src/pages/Category1/UreaPage.tsx:48-52, 131-137` (Hook 順序修復)
+- `frontend/src/pages/Category1/WD40Page.tsx:51-58, 146-156` (Hook 順序修復)
+
+**工作時長：** ~45 分鐘（1 次重構 + 4 次批次修復）
+
+---
+
+#### 2025-01-21 - TYPE1 & TYPE2 通知行為規範化完成
+**情況：** 統一所有能源頁面的通知行為，前端內存操作不跳通知，只有後端提交才顯示通知
+
+**實施範圍：**
+- ✅ **TYPE1 (6 頁)**：UreaPage, DieselPage, DieselStationarySourcesPage, GasolinePage, WD40Page, SepticTankPage
+- ✅ **文檔更新**：type1-sop.md, type2-sop.md, PROGRESS.md
+
+**核心原則：**
+**靜默操作（Silent Operations）** - 前端內存操作，不跳通知：
+- 點「變更儲存」（更新群組到內存）
+- 點「+新增」（新增群組到內存）
+- 點「刪除群組」（從內存刪除）
+- 點「載入到編輯區」（將群組資料載入編輯區）
+
+**通知操作（Notified Operations）** - 後端提交，必須跳通知：
+- 🟢 使用者點「提交」→ 綠色 SuccessModal（提交成功！）
+- 🔵 使用者點「暫存」→ 藍色 SuccessModal（儲存成功！）
+- 🔵 管理員點「儲存」→ 藍色 SuccessModal（儲存成功！）
+
+**修改模式：**
+```typescript
+// ❌ 舊寫法
+const saveCurrentGroup = () => {
+  setSavedGroups(prev => [...prev, newGroup])
+  setSuccess('群組已更新') // ← 刪除這行
+}
+
+const deleteSavedGroup = (groupId: string) => {
+  setSavedGroups(prev => prev.filter(r => r.groupId !== groupId))
+  setSuccess('群組已刪除') // ← 刪除這行
+}
+
+// ✅ 新寫法
+const saveCurrentGroup = () => {
+  setSavedGroups(prev => [...prev, newGroup])
+  // 不顯示通知（只是前端內存操作）
+}
+
+const deleteSavedGroup = (groupId: string) => {
+  setSavedGroups(prev => prev.filter(r => r.groupId !== groupId))
+  // 不顯示通知（只是前端內存操作）
+}
+```
+
+**修改清單：**
+1. **DieselPage.tsx** (Lines 282-293, 330, 340)
+   - 移除 4 個 setSuccess 調用：群組已更新、群組已新增、群組已載入到編輯區、群組已刪除
+
+2. **DieselStationarySourcesPage.tsx** (Lines 323, 354)
+   - 移除 2 個 setSuccess 調用：群組已更新/新增、群組已刪除
+
+3. **GasolinePage.tsx**
+   - 無需修改（本來就沒有群組操作通知）
+
+4. **WD40Page.tsx** (Lines 361, 364, 400)
+   - 移除 3 個 setSuccess 調用：群組已更新、群組已新增、群組已刪除
+
+5. **SepticTankPage.tsx** (Lines 386, 443)
+   - 移除 2 個 setSuccess 調用：群組已更新、群組已刪除
+
+6. **UreaPage.tsx** (Lines 344, 348, 392)
+   - 移除 3 個 setSuccess 調用：群組已更新、群組已新增、群組已刪除
+
+**設計理念（Vibe Coding）：**
+「Excel 表格類比」
+- 在 Excel 加一行、刪一行、修改一行 → 不跳通知（只是內存操作）
+- 點「發送」或「保存到雲端」→ 跳通知（後端提交）
+
+**系統一致性：**
+- 所有 TYPE1 頁面（RefrigerantPage, SF6Page, GeneratorTestPage）遵循此規範
+- 所有 TYPE2 頁面（DieselPage, GasolinePage, UreaPage, WD40Page, SepticTankPage, DieselStationarySourcesPage）遵循此規範
+- **14 個能源頁面** 通知行為完全統一
+
+**文檔標準化：**
+- ✅ type1-sop.md 新增「🔔 通知行為規範」章節
+- ✅ type2-sop.md 新增「🔔 通知行為規範」章節
+- ✅ 與「移除刪除確認提示」標準整合（坑 #8）
+- ✅ 統一使用註釋：`// 不顯示通知（只是前端內存操作）`
+
+**學到的教訓：**
+1. **使用者體驗一致性**：相同類型的操作應該有相同的反饋模式
+2. **「Excel 思維」很有效**：用熟悉的 Excel 操作類比幫助理解前端內存操作 vs 後端提交
+3. **批次規範化效率高**：一次統一 6 個頁面的通知行為，避免未來不一致
+4. **SOP 文檔價值**：將規範寫入 SOP，後續頁面自動遵循
+
+**相關檔案：**
+- `frontend/src/pages/Category1/DieselPage.tsx`
+- `frontend/src/pages/Category1/DieselStationarySourcesPage.tsx`
+- `frontend/src/pages/Category1/GasolinePage.tsx`
+- `frontend/src/pages/Category1/WD40Page.tsx`
+- `frontend/src/pages/Category1/SepticTankPage.tsx`
+- `frontend/src/pages/Category1/UreaPage.tsx`
+- `docs/type1-sop.md` (新增通知規範章節)
+- `docs/type2-sop.md` (新增通知規範章節)
+
+**工作時長：** ~30 分鐘（6 個頁面批次修改 + 文檔更新）
+
+---

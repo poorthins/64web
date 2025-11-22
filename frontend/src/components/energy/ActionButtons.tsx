@@ -12,8 +12,12 @@ export interface ActionButtonsProps {
   onEdit: () => void
   /** 刪除回調 */
   onDelete: () => void
-  /** 是否禁用 */
+  /** 是否禁用（同時控制兩個按鈕，向後兼容） */
   disabled?: boolean
+  /** 單獨禁用編輯按鈕 */
+  disableEdit?: boolean
+  /** 單獨禁用刪除按鈕 */
+  disableDelete?: boolean
   /** 編輯按鈕標題（hover 提示） */
   editTitle?: string
   /** 刪除按鈕標題（hover 提示） */
@@ -40,16 +44,22 @@ export function ActionButtons({
   onEdit,
   onDelete,
   disabled = false,
+  disableEdit,
+  disableDelete,
   editTitle = '編輯',
   deleteTitle = '刪除',
   marginRight = '20px'
 }: ActionButtonsProps): JSX.Element {
+  // 如果有指定單獨的 disabled，使用單獨的；否則使用統一的 disabled
+  const isEditDisabled = disableEdit !== undefined ? disableEdit : disabled
+  const isDeleteDisabled = disableDelete !== undefined ? disableDelete : disabled
+
   return (
     <div style={{ display: 'flex', gap: '8px', flexShrink: 0, marginRight }}>
       {/* 編輯按鈕 */}
       <button
         onClick={onEdit}
-        disabled={disabled}
+        disabled={isEditDisabled}
         className="p-2 text-black hover:text-gray-700 hover:bg-gray-100 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
         title={editTitle}
       >
@@ -59,7 +69,7 @@ export function ActionButtons({
       {/* 刪除按鈕 */}
       <button
         onClick={onDelete}
-        disabled={disabled}
+        disabled={isDeleteDisabled}
         className="p-2 text-black hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
         title={deleteTitle}
       >

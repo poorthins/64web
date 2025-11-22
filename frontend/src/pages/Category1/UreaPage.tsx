@@ -7,24 +7,25 @@ import { useFrontendStatus } from '../../hooks/useFrontendStatus';
 import { useApprovalStatus } from '../../hooks/useApprovalStatus';
 import { useReviewMode } from '../../hooks/useReviewMode'
 import { useEnergyData } from '../../hooks/useEnergyData'
-import { useMultiRecordSubmit } from '../../hooks/useMultiRecordSubmit'
 import { useEnergyClear } from '../../hooks/useEnergyClear'
 import { useSubmitGuard } from '../../hooks/useSubmitGuard'
 import { useGhostFileCleaner } from '../../hooks/useGhostFileCleaner'
-import { useRecordFileMapping } from '../../hooks/useRecordFileMapping'
 import { useRole } from '../../hooks/useRole'
 import { useAdminSave } from '../../hooks/useAdminSave'
-import { getFileUrl, deleteEvidence } from '../../api/files';
-import Toast from '../../components/Toast';
+import { EvidenceFile, deleteEvidence, getFileUrl } from '../../api/files'
+import { submitEnergyEntry } from '../../api/v2/entryAPI'
+import { uploadEvidenceFile } from '../../api/v2/fileAPI';
 import { generateRecordId } from '../../utils/idGenerator';
-import { MobileEnergyRecord as UreaRecord, CurrentEditingGroup, EvidenceGroup } from './shared/mobile/mobileEnergyTypes'
-import { LAYOUT_CONSTANTS } from './shared/mobile/mobileEnergyConstants'
-import { createEmptyRecords, prepareSubmissionData } from './shared/mobile/mobileEnergyUtils'
-import { UREA_CONFIG } from './shared/mobileEnergyConfig'
-import { MobileEnergyUsageSection } from './shared/mobile/components/MobileEnergyUsageSection'
-import { MobileEnergyGroupListSection } from './shared/mobile/components/MobileEnergyGroupListSection'
-import { ImageLightbox } from './shared/mobile/components/ImageLightbox'
+import { MobileEnergyRecord as UreaRecord, CurrentEditingGroup, EvidenceGroup } from './common/mobileEnergyTypes'
+import { LAYOUT_CONSTANTS } from './common/mobileEnergyConstants'
+import { createEmptyRecords, prepareSubmissionData } from './common/mobileEnergyUtils'
+import { UREA_CONFIG } from './common/mobileEnergyConfig'
+import { MobileEnergyUsageSection } from './common/MobileEnergyUsageSection'
+import { MobileEnergyGroupListSection } from './common/MobileEnergyGroupListSection'
+import { ImageLightbox } from './common/ImageLightbox'
 import { SDSUploadSection } from '../../components/SDSUploadSection'
+import { useThumbnailLoader } from '../../hooks/useThumbnailLoader'
+import { useType2Helpers } from '../../hooks/useType2Helpers'
 import type { MemoryFile } from '../../services/documentHandler';
 
 
@@ -43,7 +44,6 @@ export default function UreaPage() {
   const [lightboxSrc, setLightboxSrc] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
-  const [thumbnails, setThumbnails] = useState<{ [key: string]: string }>({});  // ⭐ 檔案縮圖 URL
 
   // ⭐ 尿素特有：SDS 安全資料表
   const [sdsFile, setSdsFile] = useState<MemoryFile | null>(null);
@@ -86,42 +86,24 @@ export default function UreaPage() {
   // 管理員儲存 Hook
   const { save: adminSave } = useAdminSave(pageKey, reviewEntryId)
 
-  // 提交 Hook（多記錄專用）
-  const {
-    submit,
-    save,
-    submitting: submitLoading,
-    error: submitError,
-    success: submitSuccess,
-    clearError: clearSubmitError,
-    clearSuccess: clearSubmitSuccess
-  } = useMultiRecordSubmit(pageKey, year)
-
   // 清除 Hook
   const {
     clear,
-    clearing: clearLoading
+    clearing: clearLoading,
+    error: clearError,
+    clearError: clearClearError
   } = useEnergyClear(currentEntryId, currentStatus)
 
   // 幽靈檔案清理 Hook
   const { cleanFiles } = useGhostFileCleaner()
 
-  // 檔案映射 Hook
-  const {
-    uploadRecordFiles,
-    getRecordFiles,
-    loadFileMapping,
-    getFileMappingForPayload,
-    removeRecordMapping
-  } = useRecordFileMapping(pageKey, currentEntryId)
+  // ⭐ 新架构状态管理（替代旧 hooks）
+  const [submitError, setSubmitError] = useState<string | null>(null)
+  const [submitSuccess, setSubmitSuccess] = useState<string | null>(null)
 
   // ⭐ 新架構：分離「當前編輯」和「已保存群組」
   // 當前正在編輯的群組（對應 Figma 上方「使用數據」區）
-  const [currentEditingGroup, setCurrentEditingGroup] = useState<{
-    groupId: string | null      // null = 新增模式，有值 = 編輯模式
-    records: UreaRecord[]     // 該群組的記錄
-    memoryFiles: MemoryFile[]   // 暫存佐證
-  }>({
+  const [currentEditingGroup, setCurrentEditingGroup] = useState<CurrentEditingGroup>({
     groupId: null,
     records: createEmptyRecords(),
     memoryFiles: []
@@ -129,6 +111,15 @@ export default function UreaPage() {
 
   // 已保存的群組（對應 Figma 下方「資料列表」區）
   const [savedGroups, setSavedGroups] = useState<UreaRecord[]>([])
+
+  // ⭐ 缩图加载（使用统一 hook，Type 2：从群组中提取 evidenceFiles）
+  const thumbnails = useThumbnailLoader({
+    records: savedGroups,
+    fileExtractor: (record) => record.evidenceFiles || []
+  })
+
+  // ⭐ Type 2 共用輔助函數
+  const helpers = useType2Helpers<UreaRecord>(pageKey, year)
 
   // ⭐ 保留舊的 ureaData（提交時用）
   const ureaData = useMemo(() => {
@@ -162,12 +153,6 @@ export default function UreaPage() {
 
           // ⭐ 載入到 savedGroups（新架構）
           setSavedGroups(updated)
-
-          // 載入檔案映射表
-          const payload = loadedEntry.payload || loadedEntry.extraPayload
-          if (payload) {
-            loadFileMapping(payload)
-          }
         }
       }
     }
@@ -176,50 +161,57 @@ export default function UreaPage() {
 
   // 第二步：檔案載入後分配到記錄
   useEffect(() => {
-    if (dataLoading || loadedFiles.length === 0) return
+    if (dataLoading) return
 
-    const processFiles = async () => {
-      // ✅ 處理使用數據的佐證檔案
-      if (savedGroups.length > 0) {
-        const usageFiles = loadedFiles.filter(f =>
-          f.file_type === 'other' && f.page_key === pageKey
-        )
+    if (loadedFiles.length > 0 && savedGroups.length > 0) {
+      const ureaFiles = loadedFiles.filter(f =>
+        f.file_type === 'other' && f.page_key === pageKey
+      )
 
-        if (usageFiles.length > 0) {
-          const validFiles = await cleanFiles(usageFiles)
-          setSavedGroups(prev =>
-            prev.map(item => ({
-              ...item,
-              evidenceFiles: getRecordFiles(item.id, validFiles),
-              memoryFiles: []
-            }))
-          )
-        }
-      }
+      if (ureaFiles.length > 0) {
+        const cleanAndAssignFiles = async () => {
+          const validUreaFiles = await cleanFiles(ureaFiles)
 
-      // ✅ 處理 SDS 檔案（使用 Hook）
-      const msdsFiles = loadedFiles.filter(f => f.file_type === 'msds' && f.page_key === pageKey)
-      const sdsFiles = getRecordFiles('sds_upload', msdsFiles)
-
-      if (sdsFiles.length > 0) {
-        const validSdsFiles = await cleanFiles(sdsFiles)
-        const sdsFile = validSdsFiles[0]
-
-        if (sdsFile) {
-          const fileUrl = await getFileUrl(sdsFile.file_path)
-          setSdsFile({
-            id: sdsFile.id,
-            file: new File([], sdsFile.file_name, { type: sdsFile.mime_type }),
-            preview: fileUrl,
-            file_name: sdsFile.file_name,
-            file_size: sdsFile.file_size,
-            mime_type: sdsFile.mime_type
+          setSavedGroups(prev => {
+            return prev.map((item) => {
+              // ⭐ Type 2 关键：使用 split(',').includes() 过滤
+              const filesForThisRecord = validUreaFiles.filter(f =>
+                f.record_id && f.record_id.split(',').includes(item.id)
+              )
+              return {
+                ...item,
+                evidenceFiles: filesForThisRecord
+                // ⚠️ 不清除 memoryFiles
+              }
+            })
           })
         }
+
+        cleanAndAssignFiles()
       }
     }
 
-    processFiles()
+    // ✅ 處理 SDS 檔案
+    const msdsFiles = loadedFiles.filter(f => f.file_type === 'msds' && f.page_key === pageKey)
+    if (msdsFiles.length > 0) {
+      const loadSdsFile = async () => {
+        const validSdsFiles = await cleanFiles(msdsFiles)
+        const sdsFileData = validSdsFiles[0]
+
+        if (sdsFileData) {
+          const fileUrl = await getFileUrl(sdsFileData.file_path)
+          setSdsFile({
+            id: sdsFileData.id,
+            file: new File([], sdsFileData.file_name, { type: sdsFileData.mime_type }),
+            preview: fileUrl,
+            file_name: sdsFileData.file_name,
+            file_size: sdsFileData.file_size,
+            mime_type: sdsFileData.mime_type
+          })
+        }
+      }
+      loadSdsFile()
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loadedFiles, pageKey, dataLoading, savedGroups.length])
 
@@ -239,7 +231,7 @@ export default function UreaPage() {
       try {
         await deleteEvidence(file.id)
       } catch (error) {
-        console.error('刪除舊 SDS 檔案失敗:', file.file_name, error)
+        // SDS file deletion failed, silently ignore
       }
     }
   }
@@ -323,12 +315,10 @@ export default function UreaPage() {
     )
 
     // 將 groupId 套用到有效記錄
-    // ⚠️ 注意：不要把 memoryFiles 存到 savedGroups，因為這些檔案只應該在提交時上傳一次
-    // 如果存到 savedGroups，重新載入後會導致重複顯示（memoryFiles + evidenceFiles）
     const recordsWithGroupId = validRecords.map(r => ({
       ...r,
       groupId: targetGroupId,
-      memoryFiles: isEditMode ? [] : [...memoryFiles]  // 編輯模式清空，新增模式保留
+      memoryFiles: [...memoryFiles]  // 保留 memoryFiles（reload 後會轉為 evidenceFiles）
     }))
 
     if (isEditMode) {
@@ -337,11 +327,11 @@ export default function UreaPage() {
         ...recordsWithGroupId,
         ...prev.filter(r => r.groupId !== groupId)
       ])
-      setSuccess('群組已更新')
+      // 不顯示通知（只是前端內存操作）
     } else {
       // 新增模式：加入已保存列表
       setSavedGroups(prev => [...recordsWithGroupId, ...prev])
-      setSuccess('群組已新增')
+      // 不顯示通知（只是前端內存操作）
     }
 
     // 清空編輯區（準備下一個群組），預設 3 格
@@ -379,151 +369,102 @@ export default function UreaPage() {
       records: groupRecords,
       memoryFiles: groupRecords[0]?.memoryFiles || []
     })
-
-    setSuccess('群組已載入到編輯區')
   }
 
   // 刪除已保存的群組
   const deleteSavedGroup = (groupId: string) => {
-    if (!window.confirm('確定要刪除此群組嗎？')) return
-
     setSavedGroups(prev => prev.filter(r => r.groupId !== groupId))
-    removeRecordMapping(groupId)
-    setSuccess('群組已刪除')
+    // 不顯示通知（只是前端內存操作）
   }
 
-  const handleSubmit = async () => {
+  // ⭐ 統一提交函數（Type 2 新架構）
+  const submitData = async (isDraft: boolean) => {
+    // ⭐ UreaPage 特殊驗證：必須有 SDS
+    if (!isDraft && !sdsFile) {
+      throw new Error('請先上傳 SDS 安全資料表')
+    }
+
+    if (savedGroups.length === 0) {
+      throw new Error('請至少新增一個群組')
+    }
+
     await executeSubmit(async () => {
-      // ⭐ 尿素頁面：驗證 SDS 必須上傳
-      if (!sdsFile) {
-        setError('請先上傳 SDS 安全資料表')
-        return
-      }
+      setSubmitError(null)
+      setSubmitSuccess(null)
 
-      // ✅ 使用統一的資料準備函數
-      const { totalQuantity, cleanedEnergyData, deduplicatedRecordData } = prepareSubmissionData(ureaData)
+      try {
+        const { totalQuantity, cleanedEnergyData } = prepareSubmissionData(savedGroups)
 
-      // ⭐ 使用 hook 的 submit 函數
-      await submit({
-        entryInput: {
+        const response = await submitEnergyEntry({
           page_key: pageKey,
           period_year: year,
           unit: UREA_CONFIG.unit,
           monthly: { '1': totalQuantity },
-          notes: `${UREA_CONFIG.title}使用共 ${ureaData.length} 筆記錄`,
-          extraPayload: {
-            [UREA_CONFIG.dataFieldName]: cleanedEnergyData,
-            fileMapping: getFileMappingForPayload()
+          status: isDraft ? 'saved' : 'submitted',
+          notes: `${UREA_CONFIG.title}使用共 ${savedGroups.length} 筆記錄`,
+          payload: {
+            [UREA_CONFIG.dataFieldName]: cleanedEnergyData
           }
-        },
-        recordData: deduplicatedRecordData,  // ⭐ 使用去重後的資料（含 allRecordIds）
-        uploadRecordFiles,
-        onSuccess: async (entry_id) => {
-          // ⭐ 上傳 SDS 檔案（只上傳新檔案，跳過已儲存的）
-          if (isNewSdsFile(sdsFile)) {
-            await deleteOldSdsFiles(entry_id)  // 先刪除舊的 SDS 檔案
-            await uploadRecordFiles('sds_upload', [sdsFile], entry_id, 'msds', ['sds_upload'])
-          }
+        })
 
-          // ⭐ 簡化為只有收尾工作
-          setCurrentEntryId(entry_id)
-          await reload()
+        // ⭐ 上傳群組佐證檔案
+        const groupsMap = helpers.buildGroupsMap(savedGroups)
+        await helpers.uploadGroupFiles(groupsMap, response.entry_id)
+
+        // ⭐ UreaPage 特殊需求：上傳 SDS 檔案
+        if (isNewSdsFile(sdsFile)) {
+          await deleteOldSdsFiles(response.entry_id)
+          await uploadEvidenceFile(sdsFile.file, {
+            page_key: pageKey,
+            period_year: year,
+            file_type: 'msds',
+            entry_id: response.entry_id,
+            standard: '64'
+          })
         }
-      })
 
-      await handleSubmitSuccess();
+        await helpers.deleteMarkedFiles(filesToDelete, setFilesToDelete)
 
-      // 重新載入審核狀態，更新狀態橫幅
-      reloadApprovalStatus()
-    }).catch(error => {
-      setError(error instanceof Error ? error.message : '提交失敗，請重試');
+        setCurrentEntryId(response.entry_id)
+        setSubmitSuccess(isDraft ? '暫存成功' : '提交成功')
+
+        await reload()
+        if (!isDraft) {
+          await handleSubmitSuccess()
+        }
+        reloadApprovalStatus()
+
+      } catch (error) {
+        setSubmitError(error instanceof Error ? error.message : '操作失敗')
+        throw error
+      }
     })
-  };
+  }
+
+  const handleSubmit = () => submitData(false)
 
   const handleSave = async () => {
     await executeSubmit(async () => {
-      setError(null)
-      setSuccess(null)
+      setSubmitError(null)
+      setSubmitSuccess(null)
+
+      // 先同步編輯區修改
+      const finalSavedGroups = helpers.syncEditingGroupChanges(currentEditingGroup, savedGroups, setSavedGroups)
+      const { totalQuantity, cleanedEnergyData } = prepareSubmissionData(finalSavedGroups)
 
       // 審核模式：使用 useAdminSave hook
       if (isReviewMode && reviewEntryId) {
-        console.log('📝 管理員審核模式：使用 useAdminSave hook', reviewEntryId)
+        const filesToUpload = helpers.collectAdminFilesToUpload(finalSavedGroups)
 
-        // ⭐ 準備完整資料集：合併 savedGroups 和 currentEditingGroup（避免遺失編輯中的資料）
-        let completeDataSet = [...savedGroups]
-
-        // 如果 currentEditingGroup 有資料，合併進去
-        const hasEditingData = currentEditingGroup.records.some(r =>
-          r.date.trim() !== '' || r.quantity > 0
-        ) || currentEditingGroup.memoryFiles.length > 0
-
-        if (hasEditingData) {
-          const targetGroupId = currentEditingGroup.groupId || generateRecordId()
-          const recordsWithGroupId = currentEditingGroup.records.map(r => ({
-            ...r,
-            groupId: targetGroupId,
-            memoryFiles: [...currentEditingGroup.memoryFiles]
-          }))
-
-          if (currentEditingGroup.groupId) {
-            // 編輯模式：更新現有群組
-            completeDataSet = [
-              ...recordsWithGroupId,
-              ...completeDataSet.filter(r => r.groupId !== currentEditingGroup.groupId)
-            ]
-          } else {
-            // 新增模式：加入群組
-            completeDataSet = [...recordsWithGroupId, ...completeDataSet]
-          }
-        }
-
-        // ✅ 從完整資料集計算
-        const { totalQuantity, cleanedEnergyData } = prepareSubmissionData(completeDataSet)
-
-        // ⭐ 從完整資料集收集檔案（按 groupId 分組去重）
-        const groupMap = new Map<string, UreaRecord[]>()
-        completeDataSet.forEach(record => {
-          if (!record.groupId) return
-          if (!groupMap.has(record.groupId)) {
-            groupMap.set(record.groupId, [])
-          }
-          groupMap.get(record.groupId)!.push(record)
-        })
-
-        const filesToUpload: Array<{
-          file: File
-          metadata: {
-            recordIndex: number
-            allRecordIds: string[]
-            fileType?: 'msds' | 'usage_evidence' | 'other'
-          }
-        }> = []
-
-        groupMap.forEach((records) => {
-          const firstRecord = records[0]
-          if (firstRecord?.memoryFiles && firstRecord.memoryFiles.length > 0) {
-            firstRecord.memoryFiles.forEach((mf: MemoryFile) => {
-              filesToUpload.push({
-                file: mf.file,
-                metadata: {
-                  recordIndex: 0,
-                  allRecordIds: records.map(r => r.id),
-                  fileType: 'other'  // 使用數據的佐證檔案
-                }
-              })
-            })
-          }
-        })
-
-        // ⭐ 添加 SDS 檔案到上傳列表（只上傳新檔案）
+        // ⭐ UreaPage 特殊需求：添加 SDS 檔案到上傳列表
         if (isNewSdsFile(sdsFile)) {
-          await deleteOldSdsFiles(reviewEntryId)  // 先刪除舊的 SDS 檔案
+          await deleteOldSdsFiles(reviewEntryId)
           filesToUpload.push({
             file: sdsFile.file,
             metadata: {
               recordIndex: 0,
               allRecordIds: ['sds_upload'],
-              fileType: 'msds'  // SDS 安全資料表
+              fileType: 'msds'
             }
           })
         }
@@ -534,83 +475,26 @@ export default function UreaPage() {
             amount: totalQuantity,
             payload: {
               monthly: { '1': totalQuantity },
-              [UREA_CONFIG.dataFieldName]: cleanedEnergyData,
-              fileMapping: getFileMappingForPayload()
+              [UREA_CONFIG.dataFieldName]: cleanedEnergyData
             }
           },
           files: filesToUpload
         })
 
+        await helpers.deleteMarkedFilesAsAdmin(filesToDelete, setFilesToDelete)
         await reload()
-
-        // 批次刪除被移除的檔案
-        if (filesToDelete.length > 0) {
-          for (const fileId of filesToDelete) {
-            try {
-              await deleteEvidence(fileId)
-              console.log('✅ 已刪除檔案:', fileId)
-            } catch (error) {
-              console.error('❌ 刪除檔案失敗:', fileId, error)
-            }
-          }
-          setFilesToDelete([])  // 清空待刪除列表
-        }
-
         reloadApprovalStatus()
-        setCurrentEditingGroup({ groupId: null, records: createEmptyRecords(), memoryFiles: [] })
-        setSuccess('✅ 儲存成功！資料已更新')
+        setCurrentEditingGroup(prev => ({ ...prev, memoryFiles: [] }))
+        setSubmitSuccess('✅ 儲存成功！資料已更新')
         return
       }
 
-      // ✅ 非審核模式：使用 save hook（跳過驗證）
-      const { totalQuantity, cleanedEnergyData, deduplicatedRecordData } = prepareSubmissionData(ureaData)
-      await save({
-        entryInput: {
-          page_key: pageKey,
-          period_year: year,
-          unit: UREA_CONFIG.unit,
-          monthly: { '1': totalQuantity },
-          notes: `${UREA_CONFIG.title}使用共 ${ureaData.length} 筆記錄`,
-          extraPayload: {
-            [UREA_CONFIG.dataFieldName]: cleanedEnergyData,
-            fileMapping: getFileMappingForPayload()
-          }
-        },
-        recordData: deduplicatedRecordData,  // ⭐ 包含 allRecordIds
-        uploadRecordFiles,
-        onSuccess: async (entry_id) => {
-          // ⭐ 上傳 SDS 檔案（只上傳新檔案，跳過已儲存的）
-          if (isNewSdsFile(sdsFile)) {
-            await deleteOldSdsFiles(entry_id)  // 先刪除舊的 SDS 檔案
-            await uploadRecordFiles('sds_upload', [sdsFile], entry_id, 'msds', ['sds_upload'])
-          }
-
-          // ⭐ 簡化為 2 行（原本 ~55 行）
-          setCurrentEntryId(entry_id)
-          await reload()
-
-          // 批次刪除被移除的檔案
-          if (filesToDelete.length > 0) {
-            for (const fileId of filesToDelete) {
-              try {
-                await deleteEvidence(fileId)
-                console.log('✅ 已刪除檔案:', fileId)
-              } catch (error) {
-                console.error('❌ 刪除檔案失敗:', fileId, error)
-              }
-            }
-            setFilesToDelete([])  // 清空待刪除列表
-          }
-        }
-      })
-
-      // 重新載入審核狀態，更新狀態橫幅
-      reloadApprovalStatus()
+      // 一般暫存：調用 submitData
+      await submitData(true)
     }).catch(error => {
-      console.error('❌ 暫存失敗:', error)
-      setError(error instanceof Error ? error.message : '暫存失敗')
+      setSubmitError(error instanceof Error ? error.message : '暫存失敗')
     })
-  };
+  }
 
   const handleClear = () => {
     setShowClearConfirmModal(true);
@@ -703,24 +587,6 @@ export default function UreaPage() {
       })
   }, [ureaData])
 
-  // ⭐ 只為圖片檔案生成縮圖（PDF 不需要）
-  useEffect(() => {
-    evidenceGroups.forEach(async (group) => {
-      if (group.evidence &&
-          group.evidence.mime_type.startsWith('image/') &&
-          !thumbnails[group.evidence.id]) {
-        try {
-          const url = await getFileUrl(group.evidence.file_path)
-          setThumbnails(prev => ({
-            ...prev,
-            [group.evidence!.id]: url
-          }))
-        } catch (error) {
-          console.warn('Failed to generate thumbnail for', group.evidence.file_name, error)
-        }
-      }
-    })
-  }, [evidenceGroups])
   return (
     <>
       {/* 隱藏瀏覽器原生日曆圖示和數字輸入框的上下箭頭 */}
@@ -744,6 +610,9 @@ export default function UreaPage() {
         }
       `}</style>
 
+      {/* ⚠️ 重要：reviewSection 不要傳 onShowSuccess/onShowError
+          原因：通知已由 notificationState 統一處理，傳入會造成重複通知
+          參考：type2-sop.md - DieselPage 坑 #1 */}
       <SharedPageLayout
         pageHeader={{
           category: UREA_CONFIG.category,
@@ -779,13 +648,19 @@ export default function UreaPage() {
         unit: UREA_CONFIG.unit,
         role,
         onSave: handleSave,
-        isSaving: submitLoading
+        isSaving: submitting
       }}
       notificationState={{
-        success: submitSuccess,
-        error: submitError,
-        clearSuccess: clearSubmitSuccess,
-        clearError: clearSubmitError
+        success: submitSuccess || success,
+        error: submitError || error,
+        clearSuccess: () => {
+          setSubmitSuccess(null);
+          setSuccess(null);
+        },
+        clearError: () => {
+          setSubmitError(null);
+          setError(null);
+        }
       }}
     >
       {/* ⭐ SDS 安全資料表上傳區（尿素特有） */}
@@ -846,22 +721,6 @@ export default function UreaPage() {
         onClose={() => setLightboxSrc(null)}
       />
 
-      {/* Toast 訊息 */}
-      {error && (
-        <Toast
-          message={error}
-          type="error"
-          onClose={() => setError(null)}
-        />
-      )}
-
-      {success && (
-        <Toast
-          message={success}
-          type="success"
-          onClose={() => setSuccess(null)}
-        />
-      )}
     </SharedPageLayout>
     </>
   );
