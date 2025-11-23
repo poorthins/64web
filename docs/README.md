@@ -53,9 +53,6 @@
 - `frontend/src/api/v2/fileAPI.ts` - 檔案上傳 API
 - `frontend/src/api/v2/carbonAPI.ts` - 碳排放計算 API
 
-**新共用 Hooks（✅ Type 2 使用）：**
-- `frontend/src/hooks/useType2Helpers.ts` - Type 2 頁面共用輔助函數（6 個函數，減少 365 行重複代碼）
-
 **舊 Hooks（❌ 重構後刪除）：**
 - `useMultiRecordSubmit` - 舊的提交 hook（Type A 用）✅ RefrigerantPage 已移除
 - `useEnergySubmit` - 舊的提交 hook（Type B 用）
@@ -91,8 +88,8 @@
 ## 📊 進度總覽
 
 **Type 1（一筆佐證 → 一筆資料）：** 3 / 3 ✅ (RefrigerantPage ✅, SF6Page ✅, GeneratorTestPage ✅)
-**Type 2（一筆佐證 → 多筆資料）：** 5 / 5 ✅ (DieselPage ✅, DieselStationarySourcesPage ✅, GasolinePage ✅, UreaPage ✅, SepticTankPage ✅)
-**Type 3（規格 + 使用記錄）：** 0 / 5 🔜
+**Type 2（一筆佐證 → 多筆資料）：** 5 / 5 ✅ (DieselPage ✅, GasolinePage ✅, UreaPage ✅, SepticTankPage ✅, DieselStationarySourcesPage ✅)
+**Type 3（規格 + 使用記錄）：** 1 / 5 (WD40Page ✅ - 已完成通知規範化)
 **Type 4（電錶 + 帳單）：** 0 / 2 🔜
 **Type 5（Excel 上傳）：** 0 / 1 🔜
 

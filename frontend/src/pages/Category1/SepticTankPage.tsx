@@ -419,13 +419,18 @@ export default function SepticTankPage() {
         await helpers.uploadGroupFiles(groupsMap, response.entry_id)
 
         setCurrentEntryId(response.entry_id)
-        setSubmitSuccess(isDraft ? '暫存成功' : '提交成功')
+
+        // ⭐ 提交時不手動設置 submitSuccess，由 handleSubmitSuccess() 設置
+        // 暫存時才手動設置
+        if (isDraft) {
+          setSubmitSuccess('暫存成功')
+        }
 
         // ⭐ 修正：先刪除標記的檔案，再 reload（避免新舊並存）
         await helpers.deleteMarkedFiles(filesToDelete, setFilesToDelete)
         await reload()
         if (!isDraft) {
-          await handleSubmitSuccess()
+          await handleSubmitSuccess()  // 會設置 success('提交成功，狀態已更新為已提交')
         }
         reloadApprovalStatus()
 

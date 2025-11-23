@@ -41,6 +41,8 @@ export default function GasolinePage() {
 
   // 圖片放大 lightbox
   const [lightboxSrc, setLightboxSrc] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [success, setSuccess] = useState<string | null>(null);
 
   // 新架構：簡單 state 取代舊 hooks
   const [submitError, setSubmitError] = useState<string | null>(null)
@@ -51,8 +53,8 @@ export default function GasolinePage() {
     initialStatus,
     entryId: currentEntryId,
     onStatusChange: () => {},
-    onError: (error) => setSubmitError(error),
-    onSuccess: (message) => setSubmitSuccess(message)
+    onError: (error) => setError(error),
+    onSuccess: (message) => setSuccess(message)
   })
 
   const { currentStatus, setCurrentStatus, handleSubmitSuccess, handleDataChanged, isInitialLoad } = frontendStatus
@@ -346,11 +348,16 @@ export default function GasolinePage() {
         await helpers.deleteMarkedFiles(filesToDelete, setFilesToDelete)
 
         setCurrentEntryId(response.entry_id)
-        setSubmitSuccess(isDraft ? '暫存成功' : '提交成功')
+
+        // ⭐ 提交時不手動設置 submitSuccess，由 handleSubmitSuccess() 設置
+        // 暫存時才手動設置
+        if (isDraft) {
+          setSubmitSuccess('暫存成功')
+        }
 
         await reload()
         if (!isDraft) {
-          await handleSubmitSuccess()
+          await handleSubmitSuccess()  // 會設置 submitSuccess('提交成功，狀態已更新為已提交')
         }
         reloadApprovalStatus()
 
@@ -364,16 +371,15 @@ export default function GasolinePage() {
   const handleSubmit = () => submitData(false)
 
   const handleSave = async () => {
-    await executeSubmit(async () => {
-      setSubmitError(null)
-      setSubmitSuccess(null)
+    // 審核模式：使用 useAdminSave hook
+    if (isReviewMode && reviewEntryId) {
+      await executeSubmit(async () => {
+        setSubmitError(null)
+        setSubmitSuccess(null)
 
-      // ⭐ 先同步編輯區修改（所有模式都需要）
-      const finalSavedGroups = helpers.syncEditingGroupChanges(currentEditingGroup, savedGroups, setSavedGroups)
-      const { totalQuantity, cleanedEnergyData } = prepareSubmissionData(finalSavedGroups)
-
-      // 審核模式：使用 useAdminSave hook
-      if (isReviewMode && reviewEntryId) {
+        // 先同步編輯區修改
+        const finalSavedGroups = helpers.syncEditingGroupChanges(currentEditingGroup, savedGroups, setSavedGroups)
+        const { totalQuantity, cleanedEnergyData } = prepareSubmissionData(finalSavedGroups)
         const filesToUpload = helpers.collectAdminFilesToUpload(finalSavedGroups)
 
         await adminSave({
@@ -388,19 +394,22 @@ export default function GasolinePage() {
           files: filesToUpload
         })
 
-        await helpers.deleteMarkedFilesAsAdmin(filesToDelete, setFilesToDelete)  // ✅ 管理員用 adminDeleteEvidence（坑 #3 + #5 修復）
-        await reload()                     // ✅ 再重新載入
+        await helpers.deleteMarkedFilesAsAdmin(filesToDelete, setFilesToDelete)
+        await reload()
         reloadApprovalStatus()
         setCurrentEditingGroup(prev => ({ ...prev, memoryFiles: [] }))
-        setSubmitSuccess('✅ 儲存成功！資料已更新')
-        return
-      }
+        setSuccess('✅ 儲存成功！資料已更新')
+      }).catch(error => {
+        setSubmitError(error instanceof Error ? error.message : '暫存失敗')
+        throw error
+      })
+      return
+    }
 
-      // 一般暫存：調用 submitData
-      await submitData(true)
-    }).catch(error => {
-      setSubmitError(error instanceof Error ? error.message : '暫存失敗')
-    })
+    // ⭐ 一般暫存模式：先同步編輯區，再調用 submitData
+    // submitData 內部會呼叫 executeSubmit，所以這裡不需要
+    helpers.syncEditingGroupChanges(currentEditingGroup, savedGroups, setSavedGroups)
+    await submitData(true)
   }
 
   const handleClear = () => {
@@ -550,10 +559,16 @@ export default function GasolinePage() {
         isSaving: submitting
       }}
       notificationState={{
-        success: submitSuccess,
-        error: submitError,
-        clearSuccess: () => setSubmitSuccess(null),
-        clearError: () => setSubmitError(null)
+        success: submitSuccess || success,
+        error: submitError || error,
+        clearSuccess: () => {
+          setSubmitSuccess(null);
+          setSuccess(null);
+        },
+        clearError: () => {
+          setSubmitError(null);
+          setError(null);
+        }
       }}
     >
       {/* 使用數據區塊 */}

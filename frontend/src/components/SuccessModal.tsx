@@ -1,4 +1,4 @@
-import React from 'react'
+import React, { useEffect, useRef } from 'react'
 import { createPortal } from 'react-dom'
 import { CheckCircle, X, Save } from 'lucide-react'
 import { designTokens } from '../utils/designTokens'
@@ -11,6 +11,9 @@ interface SuccessModalProps {
   /** 類型：save (儲存) 或 submit (提交) */
   type?: 'save' | 'submit'
 }
+
+// ⭐ 全局鎖：防止 React.StrictMode 導致多個實例同時顯示
+let isModalActive = false
 
 /**
  * SuccessModal - 提交成功彈窗組件
@@ -31,7 +34,26 @@ export const SuccessModal: React.FC<SuccessModalProps> = ({
   onClose,
   type = 'submit'
 }) => {
-  if (!show) return null
+  const hasLock = useRef(false)
+
+  useEffect(() => {
+    if (show && !isModalActive) {
+      // 獲取鎖
+      isModalActive = true
+      hasLock.current = true
+    }
+
+    return () => {
+      // 釋放鎖
+      if (hasLock.current) {
+        isModalActive = false
+        hasLock.current = false
+      }
+    }
+  }, [show])
+
+  // 如果沒顯示，或者沒拿到鎖，就不渲染
+  if (!show || !hasLock.current) return null
 
   // 根據類型決定樣式
   const isSave = type === 'save'

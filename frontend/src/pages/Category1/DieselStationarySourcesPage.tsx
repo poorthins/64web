@@ -17,7 +17,6 @@ import { EvidenceFile } from '../../api/files'
 import { submitEnergyEntry } from '../../api/v2/entryAPI'
 import { useThumbnailLoader } from '../../hooks/useThumbnailLoader'
 import { useType2Helpers } from '../../hooks/useType2Helpers'
-import Toast from '../../components/Toast';
 import { generateRecordId } from '../../utils/idGenerator';
 import { MobileEnergyRecord as DieselGeneratorRecord, CurrentEditingGroup, EvidenceGroup } from './common/mobileEnergyTypes'
 import { LAYOUT_CONSTANTS } from './common/mobileEnergyConstants'
@@ -232,32 +231,12 @@ export default function DieselStationarySourcesPage() {
 
   // 保存當前群組到 savedGroups
   const saveCurrentGroup = () => {
-    if (!deviceType) {
-      setError('請選擇設備類型')
-      return
-    }
-
-    if (deviceType === '其他' && !customDeviceType.trim()) {
-      setError('請輸入自訂設備類型')
-      return
-    }
-
     const finalDeviceType = deviceType === '其他' ? customDeviceType : deviceType
 
     // ⭐ 過濾出有效記錄（有日期或數量的記錄）
     const validRecords = currentEditingGroup.records.filter(r =>
       r.date.trim() !== '' || r.quantity > 0
     )
-
-    if (validRecords.length === 0) {
-      setError('請至少填寫一筆加油記錄')
-      return
-    }
-
-    if (currentEditingGroup.memoryFiles.length === 0) {
-      setError('請上傳佐證文件')
-      return
-    }
 
     const isEditMode = currentEditingGroup.groupId !== null
     const groupId = currentEditingGroup.groupId || generateRecordId()
@@ -357,11 +336,16 @@ export default function DieselStationarySourcesPage() {
         await helpers.deleteMarkedFiles(filesToDelete, setFilesToDelete)
 
         setCurrentEntryId(response.entry_id)
-        setSubmitSuccess(isDraft ? '暫存成功' : '提交成功')
+
+        // ⭐ 提交時不手動設置 submitSuccess，由 handleSubmitSuccess() 設置
+        // 暫存時才手動設置
+        if (isDraft) {
+          setSubmitSuccess('暫存成功')
+        }
 
         await reload()
         if (!isDraft) {
-          await handleSubmitSuccess()
+          await handleSubmitSuccess()  // 會設置 success('提交成功，狀態已更新為已提交')
         }
         reloadApprovalStatus()
 
@@ -375,16 +359,15 @@ export default function DieselStationarySourcesPage() {
   const handleSubmit = () => submitData(false)
 
   const handleSave = async () => {
-    await executeSubmit(async () => {
-      setSubmitError(null)
-      setSubmitSuccess(null)
+    // 審核模式：使用 useAdminSave hook
+    if (isReviewMode && reviewEntryId) {
+      await executeSubmit(async () => {
+        setSubmitError(null)
+        setSubmitSuccess(null)
 
-      // 先同步編輯區修改
-      const finalSavedGroups = helpers.syncEditingGroupChanges(currentEditingGroup, savedGroups, setSavedGroups)
-      const { totalQuantity, cleanedEnergyData } = prepareSubmissionData(finalSavedGroups)
-
-      // 審核模式：使用 useAdminSave hook
-      if (isReviewMode && reviewEntryId) {
+        // 先同步編輯區修改
+        const finalSavedGroups = helpers.syncEditingGroupChanges(currentEditingGroup, savedGroups, setSavedGroups)
+        const { totalQuantity, cleanedEnergyData } = prepareSubmissionData(finalSavedGroups)
         const filesToUpload = helpers.collectAdminFilesToUpload(finalSavedGroups)
 
         await adminSave({
@@ -403,15 +386,18 @@ export default function DieselStationarySourcesPage() {
         await reload()
         reloadApprovalStatus()
         setCurrentEditingGroup(prev => ({ ...prev, memoryFiles: [] }))
-        setSubmitSuccess('✅ 儲存成功！資料已更新')
-        return
-      }
+        setSuccess('✅ 儲存成功！資料已更新')
+      }).catch(error => {
+        setSubmitError(error instanceof Error ? error.message : '暫存失敗')
+        throw error
+      })
+      return
+    }
 
-      // 一般暫存：調用 submitData
-      await submitData(true)
-    }).catch(error => {
-      setSubmitError(error instanceof Error ? error.message : '暫存失敗')
-    })
+    // ⭐ 一般暫存模式：先同步編輯區，再調用 submitData
+    // submitData 內部會呼叫 executeSubmit，所以這裡不需要
+    helpers.syncEditingGroupChanges(currentEditingGroup, savedGroups, setSavedGroups)
+    await submitData(true)
   }
 
   const handleClear = () => {
@@ -545,23 +531,6 @@ export default function DieselStationarySourcesPage() {
         onPreviewImage={setLightboxSrc}
         iconColor={DIESEL_GENERATOR_CONFIG.iconColor}
       />
-
-      {/* Toast 訊息 */}
-      {error && (
-        <Toast
-          message={error}
-          type="error"
-          onClose={() => setError(null)}
-        />
-      )}
-
-      {success && (
-        <Toast
-          message={success}
-          type="success"
-          onClose={() => setSuccess(null)}
-        />
-      )}
 
       {/* 清除確認彈窗 */}
       <ConfirmClearModal

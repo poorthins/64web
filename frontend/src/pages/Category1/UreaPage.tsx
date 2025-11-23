@@ -56,8 +56,8 @@ export default function UreaPage() {
     initialStatus,
     entryId: currentEntryId,
     onStatusChange: () => {},
-    onError: (error) => setError(error),
-    onSuccess: (message) => setSuccess(message)
+    onError: (error) => setSubmitError(error),
+    onSuccess: (message) => setSubmitSuccess(message)
   })
 
   const { currentStatus, setCurrentStatus, handleSubmitSuccess } = frontendStatus
@@ -426,11 +426,16 @@ export default function UreaPage() {
         await helpers.deleteMarkedFiles(filesToDelete, setFilesToDelete)
 
         setCurrentEntryId(response.entry_id)
-        setSubmitSuccess(isDraft ? '暫存成功' : '提交成功')
+
+        // ⭐ 提交時不手動設置 submitSuccess，由 handleSubmitSuccess() 設置
+        // 暫存時才手動設置
+        if (isDraft) {
+          setSubmitSuccess('暫存成功')
+        }
 
         await reload()
         if (!isDraft) {
-          await handleSubmitSuccess()
+          await handleSubmitSuccess()  // 會設置 submitSuccess('提交成功，狀態已更新為已提交')
         }
         reloadApprovalStatus()
 
@@ -444,16 +449,15 @@ export default function UreaPage() {
   const handleSubmit = () => submitData(false)
 
   const handleSave = async () => {
-    await executeSubmit(async () => {
-      setSubmitError(null)
-      setSubmitSuccess(null)
+    // 審核模式：使用 useAdminSave hook
+    if (isReviewMode && reviewEntryId) {
+      await executeSubmit(async () => {
+        setSubmitError(null)
+        setSubmitSuccess(null)
 
-      // 先同步編輯區修改
-      const finalSavedGroups = helpers.syncEditingGroupChanges(currentEditingGroup, savedGroups, setSavedGroups)
-      const { totalQuantity, cleanedEnergyData } = prepareSubmissionData(finalSavedGroups)
-
-      // 審核模式：使用 useAdminSave hook
-      if (isReviewMode && reviewEntryId) {
+        // 先同步編輯區修改
+        const finalSavedGroups = helpers.syncEditingGroupChanges(currentEditingGroup, savedGroups, setSavedGroups)
+        const { totalQuantity, cleanedEnergyData } = prepareSubmissionData(finalSavedGroups)
         const filesToUpload = helpers.collectAdminFilesToUpload(finalSavedGroups)
 
         // ⭐ UreaPage 特殊需求：添加 SDS 檔案到上傳列表
@@ -485,15 +489,18 @@ export default function UreaPage() {
         await reload()
         reloadApprovalStatus()
         setCurrentEditingGroup(prev => ({ ...prev, memoryFiles: [] }))
-        setSubmitSuccess('✅ 儲存成功！資料已更新')
-        return
-      }
+        setSuccess('✅ 儲存成功！資料已更新')
+      }).catch(error => {
+        setSubmitError(error instanceof Error ? error.message : '暫存失敗')
+        throw error
+      })
+      return
+    }
 
-      // 一般暫存：調用 submitData
-      await submitData(true)
-    }).catch(error => {
-      setSubmitError(error instanceof Error ? error.message : '暫存失敗')
-    })
+    // ⭐ 一般暫存模式：先同步編輯區，再調用 submitData
+    // submitData 內部會呼叫 executeSubmit，所以這裡不需要
+    helpers.syncEditingGroupChanges(currentEditingGroup, savedGroups, setSavedGroups)
+    await submitData(true)
   }
 
   const handleClear = () => {
@@ -651,15 +658,13 @@ export default function UreaPage() {
         isSaving: submitting
       }}
       notificationState={{
-        success: submitSuccess || success,
-        error: submitError || error,
+        success: submitSuccess,
+        error: submitError,
         clearSuccess: () => {
           setSubmitSuccess(null);
-          setSuccess(null);
         },
         clearError: () => {
           setSubmitError(null);
-          setError(null);
         }
       }}
     >

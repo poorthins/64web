@@ -134,6 +134,9 @@ const SharedPageLayout: React.FC<SharedPageLayoutProps> = ({
         setSuccessMessage(message)
         setShowSuccessModal(true)
       }
+    } else {
+      // ⭐ success 變成 null 時，關閉彈窗
+      setShowSuccessModal(false)
     }
   }, [notificationState?.success])
 
