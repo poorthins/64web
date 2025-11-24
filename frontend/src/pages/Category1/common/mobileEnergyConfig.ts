@@ -7,7 +7,7 @@
 
 export interface MobileEnergyConfig {
   /** 頁面 key（用於 API） */
-  pageKey: 'diesel' | 'gasoline' | 'urea' | 'septic_tank' | 'diesel_generator' | 'generator_test' | 'sf6' | 'wd40'
+  pageKey: 'diesel' | 'gasoline' | 'urea' | 'septic_tank' | 'diesel_generator' | 'generator_test' | 'sf6' | 'wd40' | 'lpg'
   /** 類別標籤（顯示在標題左側） */
   category: string
   /** 主標題 */
@@ -134,4 +134,17 @@ export const WD40_CONFIG: MobileEnergyConfig = {
   unit: '瓶',
   instructionText: '請先依據購買品項建立清單；再上傳購買單據，選擇日期、品項、填寫數量，點選「+新增數據到此群組」，讓一份佐證可對應多張購買單據/多筆品項；<br />同一份佐證的所有數據新增完成後，請點選「+新增群組」，以填寫下一份佐證的數據。',
   dataFieldName: 'wd40Data'
+}
+
+// LPG（液化石油氣）配置
+export const LPG_CONFIG: MobileEnergyConfig = {
+  pageKey: 'lpg',
+  category: 'L',
+  title: '液化石油氣/瓦斯',
+  subtitle: 'Liquefied Petroleum Gas (LPG)',
+  iconColor: '#2DB14C',
+  categoryPosition: { left: 609, top: 39 },
+  unit: 'KG',
+  instructionText: '請先依據購買品項建立清單；再上傳購買單據，選擇日期、品項、填寫數量，點選「+新增數據到此群組」，讓一份佐證可對應多張購買單據/多筆品項；同一份佐證的所有數據新增完成後，請點選「+新增群組」，以填寫下一份佐證的數據。',
+  dataFieldName: 'lpgData'
 }
