@@ -136,7 +136,8 @@ export function WD40SpecListSection({
               <ActionButtons
                 onEdit={() => onEdit(spec.id)}
                 onDelete={() => onDelete(spec.id)}
-                disabled={isReadOnly}
+                disableEdit={false}
+                disableDelete={isReadOnly}
                 editTitle="編輯品項"
                 deleteTitle="刪除品項"
                 marginRight="0"

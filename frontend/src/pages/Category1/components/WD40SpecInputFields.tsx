@@ -7,9 +7,10 @@
  * - 保存按鈕（在組件內）
  */
 
-import { FileDropzone, MemoryFile } from '../../../components/FileDropzone'
+import { FileDropzone, MemoryFile, EvidenceFile as FileDropzoneEvidenceFile } from '../../../components/FileDropzone'
 import { Package } from 'lucide-react'
 import { generateRecordId } from '../../../utils/idGenerator'
+import { TYPE3_ALLOWED_FILE_TYPES, TYPE3_FILE_UPLOAD_HINT } from '../../../constants/fileUpload'
 import { WD40Spec } from '../hooks/useWD40SpecManager'
 
 // ==================== 樣式常數 ====================
@@ -45,6 +46,8 @@ interface WD40SpecInputFieldsProps {
   onSave: () => void
   editingSpecId: string | null
   isReadOnly: boolean
+  thumbnails: Record<string, string>
+  onImageClick: (src: string) => void
 }
 
 // ==================== 主組件 ====================
@@ -53,8 +56,22 @@ export function WD40SpecInputFields({
   onFieldChange,
   onSave,
   editingSpecId,
-  isReadOnly
+  isReadOnly,
+  thumbnails,
+  onImageClick
 }: WD40SpecInputFieldsProps) {
+  // ⭐ 準備 FileDropzone 所需的資料
+  const evidenceFile = spec.evidenceFiles?.[0]
+  const memoryFile = spec.memoryFiles?.[0]
+  const evidenceFileForDropzone: FileDropzoneEvidenceFile | null = evidenceFile ? {
+    id: evidenceFile.id,
+    file_path: evidenceFile.file_path,
+    file_name: evidenceFile.file_name,
+    file_size: evidenceFile.file_size,
+    mime_type: evidenceFile.mime_type
+  } : null
+  const thumbnailUrl = evidenceFile ? thumbnails[evidenceFile.id] : null
+
   return (
     <>
       {/* 標題 */}
@@ -65,7 +82,7 @@ export function WD40SpecInputFields({
           </div>
           <div className="flex flex-col justify-center h-[86px]">
             <h3 className="text-[28px] font-bold text-black">
-              WD-40 品項設定
+              品項設定
             </h3>
           </div>
         </div>
@@ -106,9 +123,11 @@ export function WD40SpecInputFields({
             <FileDropzone
               width="795px"
               height="262px"
-              accept="image/*,application/pdf"
+              accept={TYPE3_ALLOWED_FILE_TYPES}
               multiple={false}
-              file={spec.memoryFiles[0] || null}
+              file={memoryFile || null}
+              evidenceFile={evidenceFileForDropzone}
+              evidenceFileUrl={thumbnailUrl}
               onFileSelect={(files) => {
                 const file = files[0]
                 if (file) {
@@ -123,11 +142,17 @@ export function WD40SpecInputFields({
                   onFieldChange('memoryFiles', [memoryFile])
                 }
               }}
-              onRemove={() => onFieldChange('memoryFiles', [])}
+              onRemove={() => {
+                onFieldChange('memoryFiles', [])
+                if (evidenceFile) {
+                  onFieldChange('evidenceFiles', [])
+                }
+              }}
+              onEvidenceFileClick={(url) => onImageClick(url)}
               disabled={isReadOnly}
               readOnly={isReadOnly}
               primaryText="點擊或拖放品項佐證"
-              secondaryText="支援圖片或 PDF 格式，最大 10MB"
+              secondaryText={TYPE3_FILE_UPLOAD_HINT}
             />
           </div>
         </div>
@@ -137,16 +162,15 @@ export function WD40SpecInputFields({
       <div className="flex justify-center" style={{ marginTop: '46px' }}>
         <button
           onClick={onSave}
-          disabled={isReadOnly}
           style={{
             width: '237px',
             height: '46.25px',
             flexShrink: 0,
             borderRadius: '7px',
             border: '1px solid rgba(0, 0, 0, 0.50)',
-            background: isReadOnly ? '#9CA3AF' : '#000',
+            background: '#000',
             boxShadow: '0 4px 4px 0 rgba(0, 0, 0, 0.25)',
-            cursor: isReadOnly ? 'not-allowed' : 'pointer',
+            cursor: 'pointer',
             color: '#FFF',
             textAlign: 'center',
             fontFamily: 'var(--sds-typography-body-font-family)',

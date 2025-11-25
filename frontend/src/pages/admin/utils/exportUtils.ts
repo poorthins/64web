@@ -51,6 +51,8 @@ export const categoryNameMap: Record<string, string> = {
   'urea': '尿素',
   'fire_extinguisher': '滅火器',
   'welding_rod': '焊條',
+  'gas_cylinder': '氣體鋼瓶',
+  'other_energy_sources': '其他使用能源',
   'septic_tank': '化糞池',
 
   // 範疇二

@@ -117,9 +117,13 @@ def create_energy_entry(
         amount = calculate_amount(monthly)
         period_start, period_end = get_period_dates(period_year)
 
-        # 2. 合併 payload（將 monthly 放入 payload）
+        # 2. 合併所有數據到 payload（將 monthly 和 extraPayload 都放入 payload）
         final_payload = payload or {}
         final_payload['monthly'] = monthly
+
+        # 如果有 extraPayload，合併到 final_payload 中（資料庫只有 payload 欄位）
+        if extraPayload is not None:
+            final_payload.update(extraPayload)
 
         entry_data = {
             'owner_id': user_id,
@@ -134,10 +138,6 @@ def create_energy_entry(
             'payload': final_payload,
             'status': status
         }
-
-        # extraPayload 是 optional，只在有值且資料庫支援時才加入
-        if extraPayload is not None:
-            entry_data['extraPayload'] = extraPayload
 
         logger.info(f"Creating/Updating energy entry for user {user_id}, page_key: {page_key}")
         print(f"[DEBUG] About to UPSERT with owner_id={user_id}, category={category}, period_year={period_year}")
@@ -242,8 +242,14 @@ def update_energy_entry(
         if payload is not None:
             update_data['payload'] = payload
 
+        # 如果有 extraPayload，合併到 payload 中（資料庫只有 payload 欄位）
         if extraPayload is not None:
-            update_data['extraPayload'] = extraPayload
+            if 'payload' in update_data:
+                update_data['payload'].update(extraPayload)
+            else:
+                current_payload = existing.data.get('payload', {})
+                current_payload.update(extraPayload)
+                update_data['payload'] = current_payload
 
         if status is not None:
             update_data['status'] = status

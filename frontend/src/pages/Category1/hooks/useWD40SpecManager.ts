@@ -92,6 +92,12 @@ export function useWD40SpecManager() {
     return '品項已刪除'
   }
 
+  // 取消編輯（清空編輯區）
+  const cancelEdit = () => {
+    setEditingSpecId(null)
+    setCurrentEditingSpec(createEmptySpec())
+  }
+
   return {
     savedSpecs,
     setSavedSpecs,
@@ -100,6 +106,7 @@ export function useWD40SpecManager() {
     updateCurrentSpec,
     saveCurrentSpec,
     editSpec,
-    deleteSpec
+    deleteSpec,
+    cancelEdit
   }
 }

@@ -30,6 +30,8 @@ export const ENERGY_CONFIG: readonly EnergyCategory[] = [
   { id: 'lpg', name: '液化石油氣', scope: 1, route: '/app/lpg' },
   { id: 'fire_extinguisher', name: '滅火器', scope: 1, route: '/app/fire_extinguisher' },
   { id: 'welding_rod', name: '焊條', scope: 1, route: '/app/welding_rod' },
+  { id: 'gas_cylinder', name: '氣體鋼瓶', scope: 1, route: '/app/gas_cylinder' },
+  { id: 'other_energy_sources', name: '其他使用能源', scope: 1, route: '/app/other_energy_sources' },
 
   // 範疇二：外購電力
   { id: 'electricity', name: '外購電力', scope: 2, route: '/app/electricity' },

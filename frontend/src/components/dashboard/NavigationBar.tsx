@@ -1,7 +1,9 @@
 import React, { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { supabase } from '../../lib/supabaseClient'
-import { CATEGORY_GROUPS } from '../../config/categoryMapping'
+import { CATEGORY_GROUPS, CategoryGroup } from '../../config/categoryMapping'
+import { useAuth } from '../../contexts/AuthContext'
+import { useCurrentUserPermissions } from '../../hooks/useCurrentUserPermissions'
 import LogoutButton from '../common/LogoutButton'
 
 interface NavigationBarProps {
@@ -19,7 +21,20 @@ interface NavigationBarProps {
  */
 const NavigationBar: React.FC<NavigationBarProps> = ({ onChecklistClick }) => {
   const navigate = useNavigate()
+  const { isAdmin } = useAuth()
+  const { filterByPermissions } = useCurrentUserPermissions()
   const [hoveredCategory, setHoveredCategory] = useState<string | null>(null)
+
+  /**
+   * 根據權限過濾可見項目
+   * 管理員看到所有項目，一般用戶只看有權限的項目
+   */
+  const getVisibleItems = (category: CategoryGroup) => {
+    if (isAdmin) {
+      return category.items  // 管理員：無過濾
+    }
+    return filterByPermissions(category.items, (item) => item.id)
+  }
 
   const handleItemClick = (route: string) => {
     navigate(route)
@@ -76,76 +91,80 @@ const NavigationBar: React.FC<NavigationBarProps> = ({ onChecklistClick }) => {
             </span>
           </div>
 
-          {/* 類別一~六 */}
-          {CATEGORY_GROUPS.map(category => (
-            <div
-              key={category.id}
-              className="relative"
-              onMouseEnter={() => category.items.length > 0 ? setHoveredCategory(category.id) : null}
-              onMouseLeave={() => setHoveredCategory(null)}
-            >
-              <button
-                disabled={category.items.length === 0}
-                className={category.items.length > 0 ? "hover:text-figma-accent transition-colors" : "cursor-not-allowed"}
-                title={category.items.length === 0 ? "此分類尚未開放" : undefined}
-                style={{
-                  display: 'flex',
-                  width: '74px',
-                  height: '54px',
-                  justifyContent: 'center',
-                  alignItems: 'center',
-                  flexShrink: 0,
-                  color: category.items.length === 0 ? '#9CA3AF' : '#0E3C32',
-                  fontFamily: 'Inter',
-                  fontSize: '22px',
-                  fontWeight: 600
-                }}
-              >
-                {category.label}
-              </button>
+          {/* 類別一~六（權限過濾後） */}
+          {CATEGORY_GROUPS.map(category => {
+            const visibleItems = getVisibleItems(category)
 
-              {/* Dropdown Menu */}
-              {hoveredCategory === category.id && category.items.length > 0 && (
-                <div
-                  className="absolute left-0 z-50"
+            return (
+              <div
+                key={category.id}
+                className="relative"
+                onMouseEnter={() => visibleItems.length > 0 ? setHoveredCategory(category.id) : null}
+                onMouseLeave={() => setHoveredCategory(null)}
+              >
+                <button
+                  disabled={visibleItems.length === 0}
+                  className={visibleItems.length > 0 ? "hover:text-figma-accent transition-colors" : "cursor-not-allowed"}
+                  title={visibleItems.length === 0 ? "此分類尚未開放或無權限" : undefined}
                   style={{
-                    top: '100%',
-                    marginTop: '0',
-                    width: '202px',
-                    background: 'rgba(255, 255, 255, 0.80)',
-                    borderRadius: '0 0 8px 8px',
-                    padding: '9px 0',
                     display: 'flex',
-                    flexDirection: 'column',
-                    gap: '6px'
+                    width: '74px',
+                    height: '54px',
+                    justifyContent: 'center',
+                    alignItems: 'center',
+                    flexShrink: 0,
+                    color: visibleItems.length === 0 ? '#9CA3AF' : '#0E3C32',
+                    fontFamily: 'Inter',
+                    fontSize: '22px',
+                    fontWeight: 600
                   }}
                 >
-                  {category.items.map(item => (
-                    <button
-                      key={item.id}
-                      onClick={() => handleItemClick(item.route)}
-                      className="hover:opacity-80 transition-opacity"
-                      style={{
-                        width: '202px',
-                        height: '33px',
-                        display: 'flex',
-                        alignItems: 'center',
-                        paddingLeft: '12.76%',
-                        background: 'transparent',
-                        color: '#000',
-                        fontFamily: 'Inter',
-                        fontSize: '20px',
-                        fontWeight: 400,
-                        textAlign: 'left'
-                      }}
-                    >
-                      {item.name}
-                    </button>
-                  ))}
-                </div>
-              )}
-            </div>
-          ))}
+                  {category.label}
+                </button>
+
+                {/* Dropdown Menu：只顯示有權限的項目 */}
+                {hoveredCategory === category.id && visibleItems.length > 0 && (
+                  <div
+                    className="absolute left-0 z-50"
+                    style={{
+                      top: '100%',
+                      marginTop: '0',
+                      width: '202px',
+                      background: 'rgba(255, 255, 255, 0.80)',
+                      borderRadius: '0 0 8px 8px',
+                      padding: '9px 0',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: '6px'
+                    }}
+                  >
+                    {visibleItems.map(item => (
+                      <button
+                        key={item.id}
+                        onClick={() => handleItemClick(item.route)}
+                        className="hover:opacity-80 transition-opacity"
+                        style={{
+                          width: '202px',
+                          height: '33px',
+                          display: 'flex',
+                          alignItems: 'center',
+                          paddingLeft: '12.76%',
+                          background: 'transparent',
+                          color: '#000',
+                          fontFamily: 'Inter',
+                          fontSize: '20px',
+                          fontWeight: 400,
+                          textAlign: 'left'
+                        }}
+                      >
+                        {item.name}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )
+          })}
         </div>
 
         {/* 右側：盤查清單/佐證範例按鈕 */}

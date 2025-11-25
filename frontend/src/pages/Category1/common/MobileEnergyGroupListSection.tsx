@@ -92,7 +92,7 @@ export function MobileEnergyGroupListSection(props: MobileEnergyGroupListSection
                   onPreviewImage(file.preview || URL.createObjectURL(file.file))
                 }
               }}
-              disableEdit={isReadOnly}  // 只有審核模式非管理員不能點編輯
+              disableEdit={false}  // 編輯按鈕永遠可點擊，唯讀狀態由編輯區欄位的 disabled 屬性控制
               disableDelete={isReadOnly || (approvalStatus.isApproved && !isReviewMode)}  // 審核通過後禁用刪除
             />
           )

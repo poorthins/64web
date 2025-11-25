@@ -75,7 +75,13 @@
       "Bash(python:*)",
       "Bash(cp:*)",
       "Bash(timeout 30 npx:*)",
-      "Bash(xcopy:*)"
+      "Bash(xcopy:*)",
+      "Bash(timeout 10 bash:*)",
+      "Bash(timeout:*)",
+      "Bash(npm run type-check:*)",
+      "Bash(npm run:*)",
+      "Bash(Stop-Process -Id 8836 -Force)",
+      "Bash(cmd /c \"taskkill /F /PID 8836\")"
     ],
     "deny": [],
     "ask": []

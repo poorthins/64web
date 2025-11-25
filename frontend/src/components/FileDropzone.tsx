@@ -58,6 +58,15 @@ export interface MemoryFile {
   mime_type: string
 }
 
+// EvidenceFile 介面（用於顯示已儲存的檔案）
+export interface EvidenceFile {
+  id: string
+  file_path: string
+  file_name: string
+  file_size: number
+  mime_type: string
+}
+
 export interface FileDropzoneProps {
   // 尺寸
   width?: string
@@ -72,11 +81,14 @@ export interface FileDropzoneProps {
   disabled?: boolean  // 控制上傳區是否可點擊
   readOnly?: boolean  // 控制是否為只讀模式（影響刪除按鈕）
 
-  // 當前檔案 (顯示在上傳框下方)
+  // 當前檔案 (顯示在上傳框下方) - 支援 MemoryFile（新上傳）或 EvidenceFile（已儲存）
   file?: MemoryFile | null
+  evidenceFile?: EvidenceFile | null  // ⭐ 新增：用於顯示已儲存的檔案
+  evidenceFileUrl?: string | null      // ⭐ 新增：EvidenceFile 的預覽 URL
   onRemove?: () => void
   showFileActions?: boolean // 是否顯示預覽/刪除按鈕
   onFileClick?: (file: MemoryFile) => void // 檔案點擊回調（圖片預覽）
+  onEvidenceFileClick?: (url: string) => void // ⭐ 新增：EvidenceFile 點擊回調
 
   // 提示文字
   primaryText?: string
@@ -100,9 +112,12 @@ export function FileDropzone({
   disabled = false,
   readOnly = false,
   file = null,
+  evidenceFile = null,  // ⭐ 新增
+  evidenceFileUrl = null,  // ⭐ 新增
   onRemove,
   showFileActions = true,
   onFileClick,
+  onEvidenceFileClick,  // ⭐ 新增
   primaryText = '點擊或拖放檔案暫存',
   secondaryText = '支援所有檔案類型，最大 10MB',
   className = '',
@@ -117,8 +132,11 @@ export function FileDropzone({
   const isDragging = externalIsDragging ?? internalIsDragging
   const setIsDragging = onDragStateChange ?? setInternalIsDragging
 
+  // ⭐ 優先使用 file（新上傳），其次使用 evidenceFile（已儲存）
+  const hasFile = file !== null || evidenceFile !== null
+
   // 自動鎖定邏輯：當 multiple=false 且已有檔案時，自動禁用
-  const isAutoDisabled = !multiple && file !== null
+  const isAutoDisabled = !multiple && hasFile
   const effectiveDisabled = disabled || isAutoDisabled
 
   const handleClick = (e: React.MouseEvent) => {
@@ -166,14 +184,55 @@ export function FileDropzone({
     }
   }
 
-  // 根據檔案類型渲染 icon（統一樣式，參考 UploadedFileList.tsx）
-  const renderFileIcon = (file: MemoryFile) => {
-    const mimeType = file.mime_type
-    const isImage = mimeType.startsWith('image/')
-    const isClickable = isImage && onFileClick
+  // ⭐ 根據檔案類型渲染 icon（支援 MemoryFile 和 EvidenceFile）
+  const renderFileIcon = (
+    fileData: MemoryFile | null,
+    evidenceFileData: EvidenceFile | null,
+    previewUrl: string | null
+  ) => {
+    // 優先使用 MemoryFile
+    if (fileData) {
+      const mimeType = fileData.mime_type
+      const isImage = mimeType.startsWith('image/')
+      const isClickable = isImage && onFileClick
 
-    // 圖片：顯示預覽
-    if (isImage) {
+      // 圖片：顯示預覽
+      if (isImage) {
+        return (
+          <div
+            style={{
+              width: '48px',
+              height: '48px',
+              borderRadius: '8px',
+              overflow: 'hidden',
+              border: '1px solid rgba(0, 0, 0, 0.1)',
+              background: '#f0f0f0',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              cursor: isClickable ? 'pointer' : 'default',
+            }}
+            onClick={() => {
+              if (isClickable) {
+                onFileClick(fileData)
+              }
+            }}
+          >
+            {fileData.preview ? (
+              <img
+                src={fileData.preview}
+                alt={fileData.file_name}
+                style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+              />
+            ) : null}
+          </div>
+        )
+      }
+
+      // 非圖片：根據類型顯示不同顏色的文件 icon
+      const fileType = getFileType(mimeType, fileData.file_name)
+      const iconColor = getFileIconColor(fileType)
+
       return (
         <div
           style={{
@@ -181,61 +240,101 @@ export function FileDropzone({
             height: '48px',
             borderRadius: '8px',
             overflow: 'hidden',
-            border: '1px solid rgba(0, 0, 0, 0.1)',
+            flexShrink: 0,
             background: '#f0f0f0',
+            border: '1px solid rgba(0, 0, 0, 0.1)',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
-            cursor: isClickable ? 'pointer' : 'default',
-          }}
-          onClick={() => {
-            if (isClickable) {
-              onFileClick(file)
-            }
           }}
         >
-          {file.preview ? (
-            <img
-              src={file.preview}
-              alt={file.file_name}
-              style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <path
+              d="M14 2H6C5.46957 2 4.96086 2.21071 4.58579 2.58579C4.21071 2.96086 4 3.46957 4 4V20C4 20.5304 4.21071 21.0391 4.58579 21.4142C4.96086 21.7893 5.46957 22 6 22H18C18.5304 22 19.0391 21.7893 19.4142 21.4142C19.7893 21.0391 20 20.5304 20 20V8L14 2Z"
+              stroke={iconColor}
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
             />
-          ) : null}
+            <path d="M14 2V8H20" stroke={iconColor} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
         </div>
       )
     }
 
-    // 非圖片：根據類型顯示不同顏色的文件 icon
-    const fileType = getFileType(mimeType, file.file_name)
-    const iconColor = getFileIconColor(fileType)
+    // 使用 EvidenceFile
+    if (evidenceFileData) {
+      const mimeType = evidenceFileData.mime_type
+      const isImage = mimeType.startsWith('image/')
+      const isClickable = isImage && onEvidenceFileClick && previewUrl
 
-    return (
-      <div
-        style={{
-          width: '48px',
-          height: '48px',
-          borderRadius: '8px',
-          overflow: 'hidden',
-          flexShrink: 0,
-          background: '#f0f0f0',
-          border: '1px solid rgba(0, 0, 0, 0.1)',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-        }}
-      >
-        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-          <path
-            d="M14 2H6C5.46957 2 4.96086 2.21071 4.58579 2.58579C4.21071 2.96086 4 3.46957 4 4V20C4 20.5304 4.21071 21.0391 4.58579 21.4142C4.96086 21.7893 5.46957 22 6 22H18C18.5304 22 19.0391 21.7893 19.4142 21.4142C19.7893 21.0391 20 20.5304 20 20V8L14 2Z"
-            stroke={iconColor}
-            strokeWidth="2"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          />
-          <path d="M14 2V8H20" stroke={iconColor} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-        </svg>
-      </div>
-    )
+      // 圖片：顯示預覽
+      if (isImage) {
+        return (
+          <div
+            style={{
+              width: '48px',
+              height: '48px',
+              borderRadius: '8px',
+              overflow: 'hidden',
+              border: '1px solid rgba(0, 0, 0, 0.1)',
+              background: '#f0f0f0',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              cursor: isClickable ? 'pointer' : 'default',
+            }}
+            onClick={() => {
+              if (isClickable && previewUrl) {
+                onEvidenceFileClick(previewUrl)
+              }
+            }}
+          >
+            {previewUrl ? (
+              <img
+                src={previewUrl}
+                alt={evidenceFileData.file_name}
+                style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+              />
+            ) : null}
+          </div>
+        )
+      }
+
+      // 非圖片：根據類型顯示不同顏色的文件 icon
+      const fileType = getFileType(mimeType, evidenceFileData.file_name)
+      const iconColor = getFileIconColor(fileType)
+
+      return (
+        <div
+          style={{
+            width: '48px',
+            height: '48px',
+            borderRadius: '8px',
+            overflow: 'hidden',
+            flexShrink: 0,
+            background: '#f0f0f0',
+            border: '1px solid rgba(0, 0, 0, 0.1)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+          }}
+        >
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <path
+              d="M14 2H6C5.46957 2 4.96086 2.21071 4.58579 2.58579C4.21071 2.96086 4 3.46957 4 4V20C4 20.5304 4.21071 21.0391 4.58579 21.4142C4.96086 21.7893 5.46957 22 6 22H18C18.5304 22 19.0391 21.7893 19.4142 21.4142C19.7893 21.0391 20 20.5304 20 20V8L14 2Z"
+              stroke={iconColor}
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            />
+            <path d="M14 2V8H20" stroke={iconColor} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
+        </div>
+      )
+    }
+
+    return null
   }
 
   return (
@@ -293,8 +392,8 @@ export function FileDropzone({
       </div>
     </div>
 
-    {/* 檔案列表 - 有檔案時才顯示 */}
-    {file && (
+    {/* 檔案列表 - 有檔案時才顯示（支援 MemoryFile 和 EvidenceFile） */}
+    {(file || evidenceFile) && (
       <div
         style={{
           marginTop: '25px',
@@ -312,7 +411,7 @@ export function FileDropzone({
         }}
       >
         {/* 檔案縮圖/icon */}
-        {renderFileIcon(file)}
+        {renderFileIcon(file, evidenceFile, evidenceFileUrl)}
 
         {/* 檔名 + 大小 */}
         <div style={{ flex: 1, marginLeft: '12px', overflow: 'hidden' }}>
@@ -325,9 +424,9 @@ export function FileDropzone({
               textOverflow: 'ellipsis',
               whiteSpace: 'nowrap',
             }}
-            title={file.file_name}
+            title={file?.file_name || evidenceFile?.file_name || ''}
           >
-            {file.file_name}
+            {file?.file_name || evidenceFile?.file_name || ''}
           </p>
           <p
             style={{
@@ -336,7 +435,7 @@ export function FileDropzone({
               marginTop: '2px',
             }}
           >
-            {(file.file_size / 1024).toFixed(1)} KB
+            {((file?.file_size || evidenceFile?.file_size || 0) / 1024).toFixed(1)} KB
           </p>
         </div>
 

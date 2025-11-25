@@ -25,6 +25,8 @@ import SF6Page from '../pages/Category1/SF6Page'
 import LPGPage from '../pages/Category1/LPGPage'
 import WeldingRodPage from '../pages/Category1/WeldingRodPage'
 import FireExtinguisherPage from '../pages/Category1/FireExtinguisherPage'
+import GasCylinderPage from '../pages/Category1/GasCylinderPage'
+import OtherEnergySourcesPage from '../pages/Category1/OtherEnergySourcesPage'
 import ElectricityBillPage from '../pages/Category2/ElectricityBillPage'
 import CommutePage from '../pages/Category3/CommuteePage'
 import PingPage from '../pages/PingPage'
@@ -165,6 +167,16 @@ function AppRouter() {
               <Route path="fire_extinguisher" element={
                 <UserRoute energyCategory="fire_extinguisher">
                   <FireExtinguisherPage />
+                </UserRoute>
+              } />
+              <Route path="gas_cylinder" element={
+                <UserRoute energyCategory="gas_cylinder">
+                  <GasCylinderPage />
+                </UserRoute>
+              } />
+              <Route path="other_energy_sources" element={
+                <UserRoute energyCategory="other_energy_sources">
+                  <OtherEnergySourcesPage />
                 </UserRoute>
               } />
               <Route path="ping" element={<PingPage />} />

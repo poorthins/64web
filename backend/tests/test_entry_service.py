@@ -79,13 +79,13 @@ class TestCreateEnergyEntry:
         # Mock Supabase client
         mock_supabase = Mock()
         mock_table = Mock()
-        mock_insert = Mock()
+        mock_upsert = Mock()
         mock_execute = Mock()
 
-        # Setup mock chain
+        # Setup mock chain (使用 upsert 而非 insert)
         mock_supabase.table.return_value = mock_table
-        mock_table.insert.return_value = mock_insert
-        mock_insert.execute.return_value = mock_execute
+        mock_table.upsert.return_value = mock_upsert
+        mock_upsert.execute.return_value = mock_execute
         mock_execute.data = [{'id': 'test-entry-id', 'amount': 300.0}]
 
         # Call function
@@ -103,29 +103,29 @@ class TestCreateEnergyEntry:
         assert result['entry_id'] == 'test-entry-id'
         mock_supabase.table.assert_called_with('energy_entries')
 
-        # Verify insert was called with correct data
-        insert_call = mock_table.insert.call_args[0][0]
-        assert insert_call['owner_id'] == 'user-123'
-        assert insert_call['page_key'] == 'diesel'
-        assert insert_call['category'] == '柴油(移動源)'
-        assert insert_call['amount'] == 300.0
-        assert insert_call['payload']['monthly'] == {"1": 100.0, "2": 200.0}
+        # Verify upsert was called with correct data
+        upsert_call = mock_table.upsert.call_args[0][0]
+        assert upsert_call['owner_id'] == 'user-123'
+        assert upsert_call['page_key'] == 'diesel'
+        assert upsert_call['category'] == '柴油(移動源)'
+        assert upsert_call['amount'] == 300.0
+        assert upsert_call['payload']['monthly'] == {"1": 100.0, "2": 200.0}
 
     def test_rollback_on_insert_failure(self):
         """測試插入失敗時的 rollback 機制（最重要的測試）"""
         # Mock Supabase client
         mock_supabase = Mock()
         mock_table = Mock()
-        mock_insert = Mock()
+        mock_upsert = Mock()
         mock_execute = Mock()
 
-        # Setup: insert succeeds first, then fails on second operation
+        # Setup: upsert succeeds first, then fails on second operation
         mock_supabase.table.return_value = mock_table
-        mock_table.insert.return_value = mock_insert
+        mock_table.upsert.return_value = mock_upsert
 
-        # First call: successful insert
+        # First call: successful upsert but returns empty data
         mock_execute.data = []  # Empty data = failure
-        mock_insert.execute.return_value = mock_execute
+        mock_upsert.execute.return_value = mock_execute
 
         # Expect exception
         with pytest.raises(Exception) as exc_info:
@@ -139,7 +139,49 @@ class TestCreateEnergyEntry:
             )
 
         # Verify error message
-        assert "Failed to create energy entry: no data returned" in str(exc_info.value)
+        assert "Failed to create/update energy entry: no data returned" in str(exc_info.value)
+
+    def test_extraPayload_merged_into_payload(self):
+        """測試 extraPayload 正確合併到 payload 中"""
+        # Mock Supabase client
+        mock_supabase = Mock()
+        mock_table = Mock()
+        mock_upsert = Mock()
+        mock_execute = Mock()
+
+        # Setup mock chain
+        mock_supabase.table.return_value = mock_table
+        mock_table.upsert.return_value = mock_upsert
+        mock_upsert.execute.return_value = mock_execute
+        mock_execute.data = [{'id': 'test-entry-id', 'amount': 300.0}]
+
+        # Call function with extraPayload
+        extra_data = {
+            'weldingRodData': {
+                'specs': [{'id': 'spec-1', 'name': 'E7018_0.05'}],
+                'usageRecords': [{'id': 'rec-1', 'quantity': 100}]
+            }
+        }
+
+        result = create_energy_entry(
+            supabase=mock_supabase,
+            user_id='user-123',
+            page_key='welding_rod',
+            period_year=2024,
+            unit='KG',
+            monthly={"1": 100.0, "2": 200.0},
+            extraPayload=extra_data
+        )
+
+        # Assertions
+        assert result['success'] == True
+        assert result['entry_id'] == 'test-entry-id'
+
+        # Verify extraPayload was merged into payload
+        upsert_call = mock_table.upsert.call_args[0][0]
+        assert upsert_call['payload']['monthly'] == {"1": 100.0, "2": 200.0}
+        assert 'weldingRodData' in upsert_call['payload']
+        assert upsert_call['payload']['weldingRodData']['specs'][0]['name'] == 'E7018_0.05'
 
     def test_rollback_on_exception(self):
         """測試發生例外時執行 rollback"""

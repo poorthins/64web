@@ -18,7 +18,9 @@ export const ENERGY_CATEGORIES = {
     'gasoline': { category: '汽油', unit: 'L', scope: 1 },
     'lpg': { category: '液化石油氣', unit: 'kg', scope: 1 },
     'fire_extinguisher': { category: '滅火器', unit: 'kg', scope: 1 },
-    'welding_rod': { category: '焊條', unit: 'kg', scope: 1 }
+    'welding_rod': { category: '焊條', unit: 'kg', scope: 1 },
+    'gas_cylinder': { category: '氣體鋼瓶', unit: 'kg', scope: 1 },
+    'other_energy_sources': { category: '其他使用能源', unit: 'kg', scope: 1 }
   },
   // 範疇二 - 能源間接溫室氣體排放
   scope2: {

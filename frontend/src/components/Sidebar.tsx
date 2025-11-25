@@ -25,6 +25,8 @@ const ENERGY_CATEGORY_LABELS: Record<string, string> = {
   lpg: '液化石油氣',
   fire_extinguisher: '滅火器',
   welding_rod: '焊條',
+  gas_cylinder: '氣體鋼瓶',
+  other_energy_sources: '其他使用能源',
   electricity: '外購電力',
   employee_commute: '員工通勤'
 };

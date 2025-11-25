@@ -38,7 +38,9 @@ export const CATEGORY_GROUPS: CategoryGroup[] = [
       'sf6',
       'lpg',
       'fire_extinguisher',
-      'welding_rod'
+      'welding_rod',
+      'gas_cylinder',
+      'other_energy_sources'
     ].map(id => {
       const config = ENERGY_CONFIG.find(c => c.id === id)!
       return {

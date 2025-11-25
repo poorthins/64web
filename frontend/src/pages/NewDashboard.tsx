@@ -229,7 +229,7 @@ const NewDashboard = () => {
     <div className="fixed inset-0 overflow-x-hidden overflow-y-auto z-40 bg-white flex justify-center">
       <div style={{
         width: '1920px',
-        minHeight: '1689px',
+        minHeight: '100vh',
         position: 'relative',
         transform: `scale(${scale})`,
         transformOrigin: 'top center'

@@ -2,8 +2,8 @@
 
 > 每次打開這個文件，就知道現在要做什麼
 
-**上次更新：** 2025-01-21
-**當前進度：** 8 / 16 頁完成 ✅（Type 1 ✅ 完成，Type 2 ✅ 完成 🎉）
+**上次更新：** 2025-01-25
+**當前進度：** 13 / 16 頁完成 ✅（Type 1 ✅ 完成，Type 2 ✅ 完成，Type 3 ✅ 完成）
 
 ---
 
@@ -16,13 +16,28 @@
 [x] 重構 SF6Page（第 2/16 頁）- Type 1 ✅ 完成
 [x] 重構 GeneratorTestPage（第 3/16 頁）- Type 1 ✅ 完成
 [x] 完成 Type 2 批次（第 4-8/16 頁）- Type 2（一筆佐證 → 多筆資料）✅ 完成
+[x] 重構 WD40Page（第 9/16 頁）- Type 3 Pilot ✅ 完成
+[x] 重構 LPGPage（第 10/16 頁）- Type 3 ✅ 完成
+[x] 重構 AcetylenePage（第 11/16 頁）- Type 3 ✅ 完成
+[x] 重構 WeldingRodPage（第 12/16 頁）- Type 3 ✅ 完成
+[x] 重構 FireExtinguisherPage（第 13/16 頁）- Type 3 ✅ 完成（全局檔案功能）
 ```
 
-**Type 1 & Type 2 已完成！下一步：Type 3 或 Type 5**
-1. 選擇方向：Type 3（規格 + 使用記錄）或 Type 5（Excel 上傳，最簡單）
-2. 打開 [page-classification.md](page-classification.md) 研究選定類型特徵
-3. 打開對應的 SOP（type3-sop.md 或 type5-sop.md，如果尚未建立則需先建立）
-4. 執行重構並更新 [PROGRESS.md](PROGRESS.md)
+**Type 3 批次進度：5/5 完成 ✅**
+
+### 🎉 重要里程碑：Type 3 全局檔案功能
+
+**日期：** 2025-01-25
+**成就：** Type 3 架構新增全局檔案支援（Global Files）
+
+- ✅ 滅火器頁面從 291 行簡化到 159 行（減少 45%）
+- ✅ 零破壞性：其他 4 個 Type 3 頁面完全不受影響
+- ✅ 自動管理：載入、上傳、刪除、狀態同步全自動
+- ✅ 消除 Bug：解決了上傳後佐證顯示錯誤的狀態衝突問題
+
+下一步選項：
+1. **Type 5**：CommuteePage（Excel 上傳，最簡單，30 分鐘）
+2. **Type 4**：NaturalGasPage（電錶 + 帳單，最複雜）
 
 ---
 
@@ -36,6 +51,7 @@
 | **[PROGRESS.md](PROGRESS.md)** | 進度追蹤 + 心得記錄 | 完成一頁後更新 |
 | **[type1-sop.md](type1-sop.md)** | Type 1 頁面重構步驟 | 重構 Type 1 頁面時 |
 | **[type2-sop.md](type2-sop.md)** | Type 2 頁面重構步驟 | 重構 Type 2 頁面時 |
+| **[type3-sop.md](type3-sop.md)** | Type 3 頁面重構步驟 + 7 題問卷 | 重構/新增 Type 3 頁面時 |
 
 ---
 
@@ -68,7 +84,7 @@
 
 **新 API（✅ 已實作）：**
 - `/api/carbon/calculate` - 碳排放計算（16 tests passed）
-- `/api/entries/submit` - 提交能源條目（15 tests passed）
+- `/api/entries/submit` - 提交能源條目（16 tests passed）
 - `/api/files/upload` - 檔案上傳（29 tests passed）
 
 ### 已知問題
@@ -89,7 +105,7 @@
 
 **Type 1（一筆佐證 → 一筆資料）：** 3 / 3 ✅ (RefrigerantPage ✅, SF6Page ✅, GeneratorTestPage ✅)
 **Type 2（一筆佐證 → 多筆資料）：** 5 / 5 ✅ (DieselPage ✅, GasolinePage ✅, UreaPage ✅, SepticTankPage ✅, DieselStationarySourcesPage ✅)
-**Type 3（規格 + 使用記錄）：** 1 / 5 (WD40Page ✅ - 已完成通知規範化)
+**Type 3（規格 + 使用記錄）：** 5 / 5 ✅ (WD40Page ✅, LPGPage ✅, AcetylenePage ✅, WeldingRodPage ✅, FireExtinguisherPage ✅)
 **Type 4（電錶 + 帳單）：** 0 / 2 🔜
 **Type 5（Excel 上傳）：** 0 / 1 🔜
 

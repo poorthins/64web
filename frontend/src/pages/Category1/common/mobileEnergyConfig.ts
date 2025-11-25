@@ -7,7 +7,7 @@
 
 export interface MobileEnergyConfig {
   /** 頁面 key（用於 API） */
-  pageKey: 'diesel' | 'gasoline' | 'urea' | 'septic_tank' | 'diesel_generator' | 'generator_test' | 'sf6' | 'wd40' | 'lpg'
+  pageKey: 'diesel' | 'gasoline' | 'urea' | 'septic_tank' | 'diesel_generator' | 'generator_test' | 'sf6' | 'wd40' | 'lpg' | 'acetylene' | 'welding_rod' | 'fire_extinguisher' | 'gas_cylinder' | 'other_energy_sources'
   /** 類別標籤（顯示在標題左側） */
   category: string
   /** 主標題 */
@@ -147,4 +147,56 @@ export const LPG_CONFIG: MobileEnergyConfig = {
   unit: 'KG',
   instructionText: '請先依據購買品項建立清單；再上傳購買單據，選擇日期、品項、填寫數量，點選「+新增數據到此群組」，讓一份佐證可對應多張購買單據/多筆品項；同一份佐證的所有數據新增完成後，請點選「+新增群組」，以填寫下一份佐證的數據。',
   dataFieldName: 'lpgData'
+}
+
+// 乙炔配置
+export const ACETYLENE_CONFIG: MobileEnergyConfig = {
+  pageKey: 'acetylene',
+  category: 'A',
+  title: '乙炔',
+  subtitle: 'Acetylene',
+  iconColor: '#9BB944',
+  categoryPosition: { left: 743, top: 39 },
+  unit: '瓶',
+  instructionText: '請先依據購買品項建立清單；再上傳購買單據，選擇日期、品項、填寫數量，點選 「+新增數據到此群組」，讓一份佐證<br />可對應多張購買單據/多筆品項； 同一份佐證的所有數據新增完成後，請點選 「+新增群組」，以填寫下一份佐證的數據。',
+  dataFieldName: 'acetyleneData'
+}
+
+// 滅火器配置
+export const FIRE_EXTINGUISHER_CONFIG: MobileEnergyConfig = {
+  pageKey: 'fire_extinguisher',
+  category: 'F',
+  title: '滅火器',
+  subtitle: 'Fire Extinguisher',
+  iconColor: '#006738',
+  categoryPosition: { left: 714, top: 39 },
+  unit: '支',
+  instructionText: '請上傳消防安全設備檢修表；並確認當年度是否有新購入或填充滅火器，如有，先依據購買/ 填充規格建立清單；再上傳佐證文件，選擇日期、品項、填寫數量，<br />點選 「+新增數據到此群組」，讓一份佐證可對應多張購買單據/多筆品項； 同一份佐證的所有數據新增完成後，請點選 「+新增群組」，以填寫下一份佐證的數據。',
+  dataFieldName: 'fireExtinguisherData'
+}
+
+// 氣體鋼瓶配置
+export const GAS_CYLINDER_CONFIG: MobileEnergyConfig = {
+  pageKey: 'gas_cylinder',
+  category: 'G',
+  title: '氣體鋼瓶',
+  subtitle: 'Gas Cylinder',
+  iconColor: '#98C576',
+  categoryPosition: { left: 719, top: 39 },
+  unit: 'KG',
+  instructionText: '請先依據購買品項建立清單；再上傳購買單據，選擇日期、品項、填寫數量，點選 「+新增數據到此群組」，讓一份佐證可對應多張購買單據/多筆品項； 同一份佐證的所有數據新增完成後，請點選 「+新增群組」，以填寫下一份佐證的數據。',
+  dataFieldName: 'gasCylinderData'
+}
+
+// 其他使用能源配置
+export const OTHER_ENERGY_SOURCES_CONFIG: MobileEnergyConfig = {
+  pageKey: 'other_energy_sources',
+  category: 'O',
+  title: '其他使用能源',
+  subtitle: 'Other Energy Sources',
+  iconColor: '#204057',
+  categoryPosition: { left: 643, top: 39 },
+  unit: 'KG',
+  instructionText: '請依據購買品項與單位建立清單；再上傳購買單據，選擇日期、品項、填寫數量，點選 「+新增數據到此群組」，讓一份佐證可對應多張購買單據/多筆品項； 同一份佐證的所有數據新增完成後，請點選 「+新增群組」，以填寫下一份佐證的數據。',
+  dataFieldName: 'otherEnergySourcesData'
 }

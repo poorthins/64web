@@ -58,7 +58,7 @@ class Settings(BaseSettings):
     
     # 檔案上傳設定
     MAX_UPLOAD_SIZE: int = 10 * 1024 * 1024  # 10MB
-    ALLOWED_EXTENSIONS: set[str] = {".jpg", ".jpeg", ".png", ".pdf", ".docx"}
+    ALLOWED_EXTENSIONS: set[str] = {".jpg", ".jpeg", ".png", ".pdf", ".docx", ".xlsx", ".xls"}
     
     @validator("ENVIRONMENT")
     def validate_environment(cls, v):

@@ -85,6 +85,8 @@ const allCategories = [
   { pageKey: 'lpg', title: '液化石油氣', category: '範疇一', scope: '直接排放' },
   { pageKey: 'fire_extinguisher', title: '滅火器', category: '範疇一', scope: '直接排放' },
   { pageKey: 'welding_rod', title: '焊條', category: '範疇一', scope: '直接排放' },
+  { pageKey: 'gas_cylinder', title: '氣體鋼瓶', category: '範疇一', scope: '直接排放' },
+  { pageKey: 'other_energy_sources', title: '其他使用能源', category: '範疇一', scope: '直接排放' },
   { pageKey: 'electricity', title: '外購電力', category: '範疇二', scope: '間接排放' },
   { pageKey: 'employee_commute', title: '員工通勤', category: '範疇三', scope: '其他間接' }
 ]
@@ -104,6 +106,8 @@ const titleMap: Record<string, string> = {
   'lpg': '液化石油氣',
   'fire_extinguisher': '滅火器',
   'welding_rod': '焊條',
+  'gas_cylinder': '氣體鋼瓶',
+  'other_energy_sources': '其他使用能源',
   'electricity': '外購電力',
   'employee_commute': '員工通勤'
 }
