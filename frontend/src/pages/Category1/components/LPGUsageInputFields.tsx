@@ -9,7 +9,7 @@
 
 import { FileDropzone, MemoryFile, EvidenceFile as FileDropzoneEvidenceFile } from '../../../components/FileDropzone'
 import { Trash2 } from 'lucide-react'
-import { generateRecordId } from '../../../utils/idGenerator'
+import { createMemoryFile } from '../../../utils/fileUploadHelpers'
 import { TYPE3_ALLOWED_FILE_TYPES, TYPE3_FILE_UPLOAD_HINT } from '../../../constants/fileUpload'
 import { LPGSpec } from '../hooks/useLPGSpecManager'
 import { CurrentEditingGroup } from '../common/mobileEnergyTypes'
@@ -93,17 +93,8 @@ export function LPGUsageInputFields({
             evidenceFile={evidenceFileForDropzone}  // ⭐ 已儲存的檔案
             evidenceFileUrl={thumbnailUrl}  // ⭐ 縮圖 URL
             onFileSelect={(files) => {
-              const file = files[0]
-              if (file) {
-                const newMemoryFile: MemoryFile = {
-                  id: generateRecordId(),
-                  file,
-                  preview: URL.createObjectURL(file),
-                  file_name: file.name,
-                  file_size: file.size,
-                  mime_type: file.type
-                }
-                onFileChange([newMemoryFile])
+              if (files[0]) {
+                onFileChange([createMemoryFile(files[0])])
               }
             }}
             onRemove={onRemoveEvidence}  // ⭐ 清除所有佐證（memoryFiles + evidenceFiles）

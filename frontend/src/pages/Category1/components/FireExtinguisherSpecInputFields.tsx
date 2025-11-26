@@ -9,7 +9,7 @@
 
 import { FileDropzone, MemoryFile, EvidenceFile as FileDropzoneEvidenceFile } from '../../../components/FileDropzone'
 import { Package } from 'lucide-react'
-import { generateRecordId } from '../../../utils/idGenerator'
+import { createMemoryFile } from '../../../utils/fileUploadHelpers'
 import { FireExtinguisherSpec } from '../hooks/useFireExtinguisherSpecManager'
 import { TYPE3_ALLOWED_FILE_TYPES, TYPE3_FILE_UPLOAD_HINT } from '../../../constants/fileUpload'
 
@@ -166,14 +166,7 @@ export function FireExtinguisherSpecInputFields({
               onFileSelect={(files) => {
                 const file = files[0]
                 if (file) {
-                  const memoryFile: MemoryFile = {
-                    id: generateRecordId(),
-                    file,
-                    preview: URL.createObjectURL(file),
-                    file_name: file.name,
-                    file_size: file.size,
-                    mime_type: file.type
-                  }
+                  const memoryFile = createMemoryFile(file)
                   onFieldChange('memoryFiles', [memoryFile])
                 }
               }}

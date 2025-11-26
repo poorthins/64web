@@ -4,6 +4,8 @@ import { Trash2 } from 'lucide-react';
 import FileDropzone from '../../../components/FileDropzone';
 import { EvidenceFile, getFileUrl } from '../../../api/files';
 import type { MemoryFile } from '../../../services/documentHandler';
+import { FileTypeIcon } from '../../../components/energy/FileTypeIcon';
+import { getFileType } from '../../../utils/energy/fileTypeDetector';
 
 interface CommuteUploadSectionProps {
   iconColor: string;
@@ -139,37 +141,36 @@ export const CommuteUploadSection: React.FC<CommuteUploadSectionProps> = ({
             <div style={{ marginTop: '32px' }}>
               <h4 className="text-[20px] font-semibold mb-4" style={{ color: '#000', fontFamily: 'Inter' }}>已上傳檔案</h4>
               <div className="space-y-3">
-                {excelFile.map((file) => (
-                  <div
-                    key={file.id}
-                    className="flex items-center justify-between p-4 bg-white rounded-lg border border-gray-200"
-                    style={{ width: '904px' }}
-                  >
-                    <div className="flex items-center gap-3">
-                      <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke={iconColor} strokeWidth="2">
-                        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
-                        <polyline points="14 2 14 8 20 8" />
-                        <line x1="12" y1="18" x2="12" y2="12" />
-                        <line x1="9" y1="15" x2="15" y2="15" />
-                      </svg>
-                      <div>
-                        <p className="text-[16px] font-medium">{file.file_name}</p>
-                        <p className="text-[14px] text-gray-500">
-                          {(file.file_size / 1024).toFixed(2)} KB
-                        </p>
+                {excelFile.map((file) => {
+                  const fileType = getFileType(file.mime_type, file.file_name);
+
+                  return (
+                    <div
+                      key={file.id}
+                      className="flex items-center justify-between p-4 bg-white rounded-lg border border-gray-200"
+                      style={{ width: '904px' }}
+                    >
+                      <div className="flex items-center gap-3">
+                        <FileTypeIcon fileType={fileType} size={36} />
+                        <div>
+                          <p className="text-[16px] font-medium">{file.file_name}</p>
+                          <p className="text-[14px] text-gray-500">
+                            {(file.file_size / 1024).toFixed(2)} KB
+                          </p>
+                        </div>
                       </div>
+                      {!isReadOnly && !disabled && (
+                        <button
+                          onClick={() => onExcelFilesChange(excelFile.filter(f => f.id !== file.id))}
+                          className="p-2 text-black hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                          title="刪除檔案"
+                        >
+                          <Trash2 style={{ width: '32px', height: '32px' }} />
+                        </button>
+                      )}
                     </div>
-                    {!isReadOnly && !disabled && (
-                      <button
-                        onClick={() => onExcelFilesChange(excelFile.filter(f => f.id !== file.id))}
-                        className="p-2 text-black hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
-                        title="刪除檔案"
-                      >
-                        <Trash2 style={{ width: '32px', height: '32px' }} />
-                      </button>
-                    )}
-                  </div>
-                ))}
+                  )
+                })}
               </div>
             </div>
           )}

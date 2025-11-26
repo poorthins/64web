@@ -9,7 +9,7 @@
 
 import { FileDropzone, MemoryFile, EvidenceFile as FileDropzoneEvidenceFile } from '../../../components/FileDropzone'
 import { Package } from 'lucide-react'
-import { generateRecordId } from '../../../utils/idGenerator'
+import { createMemoryFile } from '../../../utils/fileUploadHelpers'
 import { GasCylinderSpec } from '../hooks/useGasCylinderSpecManager'
 
 // ==================== 樣式常數 ====================
@@ -39,7 +39,7 @@ const STYLES = {
   subLabel: {
     display: 'block',
     marginTop: '8px',
-    color: '#FFF',
+    color: '#000',
     fontFamily: 'Inter',
     fontSize: '16px',
     fontStyle: 'normal' as const,
@@ -105,7 +105,7 @@ export function GasCylinderSpecInputFields({
             minHeight: '400px',
             flexShrink: 0,
             borderRadius: '37px',
-            background: '#EBEDF0',
+            background: '#9BB944',
             paddingTop: '27px',
             paddingLeft: '49px',
             paddingRight: '49px',
@@ -150,14 +150,7 @@ export function GasCylinderSpecInputFields({
               onFileSelect={(files) => {
                 const file = files[0]
                 if (file) {
-                  const memoryFile: MemoryFile = {
-                    id: generateRecordId(),
-                    file,
-                    preview: URL.createObjectURL(file),
-                    file_name: file.name,
-                    file_size: file.size,
-                    mime_type: file.type
-                  }
+                  const memoryFile = createMemoryFile(file)
                   onFieldChange('memoryFiles', [memoryFile])
                 }
               }}

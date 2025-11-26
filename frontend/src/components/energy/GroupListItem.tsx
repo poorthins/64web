@@ -128,27 +128,29 @@ export function GroupListItem({
           }
         }}
       >
-        {/* 圖片：顯示縮圖 */}
-        {thumbnailUrl || memoryFile?.preview ? (
-          <img
-            src={memoryFile?.preview || thumbnailUrl || ''}
-            alt="preview"
-            style={{ width: '100%', height: '100%', objectFit: 'cover' }}
-          />
-        ) : isImage ? (
-          // 圖片但縮圖還沒載入：顯示統一佔位符
-          <div
-            style={{
-              width: '100%',
-              height: '100%',
-              background: THUMBNAIL_BACKGROUND,
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-            }}
-          >
-            {THUMBNAIL_PLACEHOLDER_SVG}
-          </div>
+        {isImage ? (
+          // 圖片檔案
+          thumbnailUrl || memoryFile?.preview ? (
+            <img
+              src={memoryFile?.preview || thumbnailUrl || ''}
+              alt="preview"
+              style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+            />
+          ) : (
+            // 圖片但縮圖還沒載入：顯示統一佔位符
+            <div
+              style={{
+                width: '100%',
+                height: '100%',
+                background: THUMBNAIL_BACKGROUND,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+              }}
+            >
+              {THUMBNAIL_PLACEHOLDER_SVG}
+            </div>
+          )
         ) : (
           // 非圖片檔案：顯示檔案類型 icon
           <FileTypeIcon fileType={fileType} size={36} />

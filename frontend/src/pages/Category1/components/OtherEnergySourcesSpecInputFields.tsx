@@ -9,7 +9,7 @@
 
 import { FileDropzone, MemoryFile, EvidenceFile as FileDropzoneEvidenceFile } from '../../../components/FileDropzone'
 import { Package } from 'lucide-react'
-import { generateRecordId } from '../../../utils/idGenerator'
+import { createMemoryFile } from '../../../utils/fileUploadHelpers'
 import { OtherEnergySourcesSpec } from '../hooks/useOtherEnergySourcesSpecManager'
 
 // ==================== 樣式常數 ====================
@@ -29,7 +29,7 @@ const STYLES = {
   label: {
     display: 'block',
     marginBottom: '17px',
-    color: '#000',
+    color: '#FFF',
     fontFamily: 'Inter',
     fontSize: '20px',
     fontStyle: 'normal' as const,
@@ -105,7 +105,7 @@ export function OtherEnergySourcesSpecInputFields({
             minHeight: '400px',
             flexShrink: 0,
             borderRadius: '37px',
-            background: '#EBEDF0',
+            background: '#204057',
             paddingTop: '27px',
             paddingLeft: '49px',
             paddingRight: '49px',
@@ -151,14 +151,7 @@ export function OtherEnergySourcesSpecInputFields({
               onFileSelect={(files) => {
                 const file = files[0]
                 if (file) {
-                  const memoryFile: MemoryFile = {
-                    id: generateRecordId(),
-                    file,
-                    preview: URL.createObjectURL(file),
-                    file_name: file.name,
-                    file_size: file.size,
-                    mime_type: file.type
-                  }
+                  const memoryFile = createMemoryFile(file)
                   onFieldChange('memoryFiles', [memoryFile])
                 }
               }}

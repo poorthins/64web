@@ -267,6 +267,31 @@ WD40 → Acetylene
 # 注意：使用數據表格固定為「日期 | 品項 | 購買數量」，通常不需修改
 ```
 
+**4.4 檔案圖示大小規範（2025-01-26 統一標準）⭐ UI 標準**
+
+**確認所有 UI 元件中的 FileTypeIcon 使用統一大小：**
+
+```typescript
+import { FileTypeIcon } from '../../../components/energy/FileTypeIcon'
+
+// ✅ 正確：統一使用 size={36}
+<FileTypeIcon fileType={fileType} size={36} />
+
+// ❌ 錯誤：使用其他大小（24、32 等）
+<FileTypeIcon fileType={fileType} size={24} />
+<FileTypeIcon fileType={fileType} size={32} />
+```
+
+**檢查位置：**
+- ✅ SpecListSection（規格列表）
+- ✅ UsageInputFields（使用記錄輸入區）
+- ✅ FileDropzone（上傳框）
+
+**標準：**
+- ✅ 所有 `FileTypeIcon` 必須使用 `size={36}`
+- ✅ 確保 PDF（紅色）、Excel（綠色）、Word（藍色）文字標籤清晰可見
+- ✅ 全局視覺一致性
+
 ---
 
 #### 步驟 5：更新路由（1 分鐘）

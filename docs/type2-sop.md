@@ -307,6 +307,31 @@ import { THUMBNAIL_PLACEHOLDER_SVG, THUMBNAIL_BACKGROUND } from '../../utils/ene
 - ✅ 無縮圖時顯示 `THUMBNAIL_PLACEHOLDER_SVG`
 - ✅ 引用 `thumbnailConstants.tsx`
 
+#### 📏 檔案圖示大小規範（2025-01-26 統一標準）
+
+**確認所有 FileTypeIcon 使用統一大小：**
+
+```typescript
+import { FileTypeIcon } from '../../../components/energy/FileTypeIcon'
+
+// ✅ 正確：統一使用 size={36}
+<FileTypeIcon fileType={fileType} size={36} />
+
+// ❌ 錯誤：使用其他大小（24、32 等）
+<FileTypeIcon fileType={fileType} size={24} />
+<FileTypeIcon fileType={fileType} size={32} />
+```
+
+**標準：**
+- ✅ 所有 `FileTypeIcon` 必須使用 `size={36}`
+- ✅ 適用於所有位置：上傳框（FileDropzone）、群組列表（GroupListItem）、使用記錄列表
+- ✅ 確保 PDF（紅色）、Excel（綠色）、Word（藍色）文字標籤清晰可見
+
+**效果：**
+- 文字標籤清晰可辨識（PDF、XLS、DOC）
+- 全局視覺一致性
+- 使用者體驗提升
+
 ---
 
 ### 步驟 10：測試（3 分鐘）

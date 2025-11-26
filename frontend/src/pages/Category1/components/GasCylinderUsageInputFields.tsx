@@ -9,7 +9,7 @@
 
 import { FileDropzone, MemoryFile, EvidenceFile as FileDropzoneEvidenceFile } from '../../../components/FileDropzone'
 import { Trash2 } from 'lucide-react'
-import { generateRecordId } from '../../../utils/idGenerator'
+import { createMemoryFile } from '../../../utils/fileUploadHelpers'
 import { GasCylinderSpec } from '../hooks/useGasCylinderSpecManager'
 import { CurrentEditingGroup } from '../common/mobileEnergyTypes'
 
@@ -114,14 +114,7 @@ export function GasCylinderUsageInputFields({
             onFileSelect={(files) => {
               const file = files[0]
               if (file) {
-                const newMemoryFile: MemoryFile = {
-                  id: generateRecordId(),
-                  file,
-                  preview: URL.createObjectURL(file),
-                  file_name: file.name,
-                  file_size: file.size,
-                  mime_type: file.type
-                }
+                const newMemoryFile = createMemoryFile(file)
                 onFileChange([newMemoryFile])
               }
             }}

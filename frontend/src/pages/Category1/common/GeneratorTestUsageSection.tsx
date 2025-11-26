@@ -13,6 +13,7 @@ import { Trash2 } from 'lucide-react'
 import { FileDropzone } from '../../../components/FileDropzone'
 import { FileTypeIcon } from '../../../components/energy/FileTypeIcon'
 import { getFileType } from '../../../utils/energy/fileTypeDetector'
+import { createMemoryFile } from '../../../utils/fileUploadHelpers'
 import type { MemoryFile } from '../../../services/documentHandler'
 import { GeneratorTestEditingGroup } from './mobileEnergyTypes'
 import { LAYOUT_CONSTANTS } from './mobileEnergyConstants'
@@ -338,7 +339,7 @@ export function GeneratorTestUsageSection(props: GeneratorTestUsageSectionProps)
                               }}
                             />
                           ) : (
-                            <FileTypeIcon fileType={getFileType(file.mime_type, file.file_name)} size={24} />
+                            <FileTypeIcon fileType={getFileType(file.mime_type, file.file_name)} size={36} />
                           )}
                         </div>
 

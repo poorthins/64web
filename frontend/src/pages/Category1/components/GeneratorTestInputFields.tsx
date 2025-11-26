@@ -10,6 +10,7 @@ import { Trash2 } from 'lucide-react'
 import { FileDropzone, MemoryFile } from '../../../components/FileDropzone'
 import { FileTypeIcon } from '../../../components/energy/FileTypeIcon'
 import { getFileType } from '../../../utils/energy/fileTypeDetector'
+import { createMemoryFile } from '../../../utils/fileUploadHelpers'
 import type { GeneratorTest } from '../GeneratorTestPage'
 
 // ==================== 介面定義 ====================
@@ -218,23 +219,11 @@ export function GeneratorTestInputFields({
                   if (!isReadOnly) {
                     // 建立 MemoryFile
                     const file = files[0]
-                    let preview = ''
-                    if (file.type.startsWith('image/')) {
-                      preview = URL.createObjectURL(file)
-                    }
-
-                    const memoryFile: MemoryFile = {
-                      id: `memory-${Date.now()}-${Math.random().toString(36).slice(2, 11)}`,
-                      file,
-                      preview,
-                      file_name: file.name,
-                      file_size: file.size,
-                      mime_type: file.type
-                    }
+                    const memoryFile = createMemoryFile(file)
 
                     // 更新 memoryFiles (只允許一個檔案)
                     onFieldChange('memoryFiles', [memoryFile])
-                    // 不清空 evidenceFiles，保留到提交時刪除
+                    // 不清空 evidenceFiles,保留到提交時刪除
                   }
                 }}
                 disabled={isReadOnly || (test.memoryFiles.length + (test.evidenceFiles?.length || 0)) >= 1}
@@ -303,7 +292,7 @@ export function GeneratorTestInputFields({
                               }}
                             />
                           ) : (
-                            <FileTypeIcon fileType={getFileType(file.mime_type, file.file_name)} size={24} />
+                            <FileTypeIcon fileType={getFileType(file.mime_type, file.file_name)} size={36} />
                           )}
                         </div>
 

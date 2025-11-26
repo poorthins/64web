@@ -8,7 +8,7 @@
 
 import { FileDropzone, MemoryFile } from '../../../components/FileDropzone'
 import { SettingsIcon } from '../../../components/icons/SettingsIcon'
-import { generateRecordId } from '../../../utils/idGenerator'
+import { createMemoryFile } from '../../../utils/fileUploadHelpers'
 import type { RefrigerantDevice } from '../RefrigerantPage'
 
 // ==================== 樣式常數 ====================
@@ -236,14 +236,7 @@ export function RefrigerantInputFields({
               onFileSelect={(files) => {
                 const file = files[0]
                 if (file) {
-                  const memoryFile: MemoryFile = {
-                    id: generateRecordId(),
-                    file,
-                    preview: URL.createObjectURL(file),
-                    file_name: file.name,
-                    file_size: file.size,
-                    mime_type: file.type
-                  }
+                  const memoryFile = createMemoryFile(file)
                   onFieldChange('memoryFiles', [memoryFile])
                 }
               }}

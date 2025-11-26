@@ -47,7 +47,8 @@
 
 import { useRef, useState } from 'react'
 import { Trash2 } from 'lucide-react'
-import { getFileType, getFileIconColor } from '../utils/energy/fileTypeDetector'
+import { getFileType } from '../utils/energy/fileTypeDetector'
+import { FileTypeIcon } from './energy/FileTypeIcon'
 
 export interface MemoryFile {
   id: string
@@ -193,7 +194,7 @@ export function FileDropzone({
     // 優先使用 MemoryFile
     if (fileData) {
       const mimeType = fileData.mime_type
-      const isImage = mimeType.startsWith('image/')
+      const isImage = mimeType?.startsWith('image/') ?? false
       const isClickable = isImage && onFileClick
 
       // 圖片：顯示預覽
@@ -229,9 +230,8 @@ export function FileDropzone({
         )
       }
 
-      // 非圖片：根據類型顯示不同顏色的文件 icon
+      // 非圖片：根據類型顯示不同顏色的文件 icon（帶文字標籤）
       const fileType = getFileType(mimeType, fileData.file_name)
-      const iconColor = getFileIconColor(fileType)
 
       return (
         <div
@@ -248,16 +248,7 @@ export function FileDropzone({
             justifyContent: 'center',
           }}
         >
-          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-            <path
-              d="M14 2H6C5.46957 2 4.96086 2.21071 4.58579 2.58579C4.21071 2.96086 4 3.46957 4 4V20C4 20.5304 4.21071 21.0391 4.58579 21.4142C4.96086 21.7893 5.46957 22 6 22H18C18.5304 22 19.0391 21.7893 19.4142 21.4142C19.7893 21.0391 20 20.5304 20 20V8L14 2Z"
-              stroke={iconColor}
-              strokeWidth="2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            />
-            <path d="M14 2V8H20" stroke={iconColor} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-          </svg>
+          <FileTypeIcon fileType={fileType} size={36} />
         </div>
       )
     }
@@ -265,7 +256,7 @@ export function FileDropzone({
     // 使用 EvidenceFile
     if (evidenceFileData) {
       const mimeType = evidenceFileData.mime_type
-      const isImage = mimeType.startsWith('image/')
+      const isImage = mimeType?.startsWith('image/') ?? false
       const isClickable = isImage && onEvidenceFileClick && previewUrl
 
       // 圖片：顯示預覽
@@ -301,9 +292,8 @@ export function FileDropzone({
         )
       }
 
-      // 非圖片：根據類型顯示不同顏色的文件 icon
+      // 非圖片：根據類型顯示不同顏色的文件 icon（帶文字標籤）
       const fileType = getFileType(mimeType, evidenceFileData.file_name)
-      const iconColor = getFileIconColor(fileType)
 
       return (
         <div
@@ -320,16 +310,7 @@ export function FileDropzone({
             justifyContent: 'center',
           }}
         >
-          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-            <path
-              d="M14 2H6C5.46957 2 4.96086 2.21071 4.58579 2.58579C4.21071 2.96086 4 3.46957 4 4V20C4 20.5304 4.21071 21.0391 4.58579 21.4142C4.96086 21.7893 5.46957 22 6 22H18C18.5304 22 19.0391 21.7893 19.4142 21.4142C19.7893 21.0391 20 20.5304 20 20V8L14 2Z"
-              stroke={iconColor}
-              strokeWidth="2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            />
-            <path d="M14 2V8H20" stroke={iconColor} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-          </svg>
+          <FileTypeIcon fileType={fileType} size={36} />
         </div>
       )
     }

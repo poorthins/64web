@@ -7,19 +7,16 @@ import Toast from '../../components/Toast';
 import { CommuteDownloadSection } from './components/CommuteDownloadSection';
 import { CommuteUploadSection } from './components/CommuteUploadSection';
 import { useEditPermissions } from '../../hooks/useEditPermissions';
-import { useFrontendStatus } from '../../hooks/useFrontendStatus';
 import { useApprovalStatus } from '../../hooks/useApprovalStatus';
 import { useReviewMode } from '../../hooks/useReviewMode';
 import { useEnergyData } from '../../hooks/useEnergyData';
-import { useEnergyClear } from '../../hooks/useEnergyClear';
-import { useSubmitGuard } from '../../hooks/useSubmitGuard';
 import { useGhostFileCleaner } from '../../hooks/useGhostFileCleaner';
 import { useRole } from '../../hooks/useRole';
 import { useAdminSave } from '../../hooks/useAdminSave';
-import { EvidenceFile } from '../../api/files';
-import { upsertEnergyEntry } from '../../api/entries';
-import { smartOverwriteFiles } from '../../api/smartFileOverwrite';
+import { EvidenceFile, deleteEvidenceFile } from '../../api/files';
+import { deleteEnergyEntry } from '../../api/entries';
 import type { MemoryFile } from '../../services/documentHandler';
+import { entryAPI, fileAPI } from '../../api/v2';
 
 const COMMUTE_CONFIG = {
   pageKey: 'employee_commute',
@@ -38,9 +35,9 @@ export default function CommutePage() {
 
   const pageKey = COMMUTE_CONFIG.pageKey;
   const [year] = useState(new Date().getFullYear());
-  const [initialStatus, setInitialStatus] = useState<EntryStatus>('submitted');
+  const [currentStatus, setCurrentStatus] = useState<EntryStatus>('submitted');
   const [currentEntryId, setCurrentEntryId] = useState<string | null>(null);
-  const { executeSubmit, submitting } = useSubmitGuard();
+  const [submitting, setSubmitting] = useState(false);
   const [showSuccessModal, setShowSuccessModal] = useState(false);
   const [successModalType, setSuccessModalType] = useState<'save' | 'submit'>('submit');
   const [showClearConfirmModal, setShowClearConfirmModal] = useState(false);
@@ -52,16 +49,22 @@ export default function CommutePage() {
   const [excelFile, setExcelFile] = useState<EvidenceFile[]>([]);
   const [excelMemoryFiles, setExcelMemoryFiles] = useState<MemoryFile[]>([]);
 
-  // 前端狀態管理 Hook
-  const frontendStatus = useFrontendStatus({
-    initialStatus,
-    entryId: currentEntryId,
-    onStatusChange: () => {},
-    onError: (error) => setError(error),
-    onSuccess: (message) => setSuccess(message)
-  });
-
-  const { currentStatus, setCurrentStatus, handleSubmitSuccess } = frontendStatus;
+  // 簡化的提交保護函數
+  const executeSubmit = async (fn: () => Promise<void>) => {
+    if (submitting) return;
+    setSubmitting(true);
+    setError(null);
+    setSuccess(null);
+    try {
+      await fn();
+    } catch (err) {
+      const message = err instanceof Error ? err.message : '操作失敗，請重試';
+      setError(message);
+      console.error('[CommuteePage] Error:', err);
+    } finally {
+      setSubmitting(false);
+    }
+  };
 
   // 角色檢查
   const { role } = useRole();
@@ -84,12 +87,6 @@ export default function CommutePage() {
   // 審核狀態 Hook
   const { reload: reloadApprovalStatus, ...approvalStatus } = useApprovalStatus(pageKey, year);
 
-  // 清除 Hook
-  const {
-    clear,
-    clearing: clearLoading
-  } = useEnergyClear(currentEntryId, currentStatus);
-
   // 幽靈檔案清理 Hook
   const { cleanFiles } = useGhostFileCleaner();
 
@@ -99,13 +96,12 @@ export default function CommutePage() {
   // 載入 entry 資料
   useEffect(() => {
     if (loadedEntry && !dataLoading) {
-      setInitialStatus(loadedEntry.status as EntryStatus);
       setCurrentEntryId(loadedEntry.id);
       setCurrentStatus(loadedEntry.status as EntryStatus);
     } else if (loadedEntry === null && !dataLoading) {
       // 無記錄，重置狀態
       setCurrentEntryId(null);
-      setInitialStatus('saved');
+      setCurrentStatus('submitted');
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loadedEntry, dataLoading]);
@@ -129,76 +125,70 @@ export default function CommutePage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loadedFiles]);
 
-  const handleSubmit = async () => {
+  // 統一提交函數
+  const submitData = async (isDraft: boolean) => {
+    // 檢查是否有檔案
+    if (excelFile.length === 0 && excelMemoryFiles.length === 0) {
+      throw new Error('請上傳 Excel 檔案');
+    }
+
     await executeSubmit(async () => {
-      // 建立填報輸入資料
-      const entryInput = {
+      // 1️⃣ 提交 entry（只記錄 metadata）
+      const response = await entryAPI.submitEnergyEntry({
         page_key: pageKey,
         period_year: year,
         unit: COMMUTE_CONFIG.unit,
-        monthly: { '1': 0 }, // 只上傳檔案，不記錄數值
+        monthly: { '1': 0 }, // Type 5 不記錄 monthly
         notes: '員工通勤資料',
-        payload: {}
-      };
-
-      // 新增或更新 energy_entries（使用 false 避免 RLS 錯誤）
-      const { entry_id } = await upsertEnergyEntry(entryInput, false);
-
-      if (!currentEntryId) {
-        setCurrentEntryId(entry_id);
-      }
-
-      // 使用智慧型檔案覆蓋（累積模式：保留舊檔案 + 追加新檔案）
-      await smartOverwriteFiles([
-        {
-          itemKey: 'excel',
-          newFiles: excelMemoryFiles,
-          existingFiles: excelFile,
-          fileType: 'other' as const,
-          mode: 'append' as const  // 累積模式：保留舊檔案
+        status: isDraft ? 'saved' : 'submitted',
+        payload: {
+          excelFileName: excelMemoryFiles[0]?.file_name || excelFile[0]?.file_name || '員工通勤.xlsx'
         }
-      ], {
-        entryId: entry_id,
-        pageKey,
-        year,
-        debug: true
       });
 
-      // 重新載入檔案
-      await reload();
+      setCurrentEntryId(response.entry_id);
 
-      // 清空記憶體檔案
+      // 2️⃣ 上傳 Excel 檔案
+      for (const memFile of excelMemoryFiles) {
+        await fileAPI.uploadEvidenceFile(memFile.file, {
+          page_key: pageKey,
+          period_year: year,
+          file_type: 'other',
+          entry_id: response.entry_id,
+          record_id: 'commute_excel', // 固定 ID
+          standard: '64'
+        });
+      }
+
+      // 3️⃣ 更新狀態
+      setSuccess(isDraft ? '暫存成功！資料已儲存' : '提交成功！');
+      setCurrentStatus(isDraft ? 'saved' : 'submitted');
       setExcelMemoryFiles([]);
 
-      // 提交成功
-      await handleSubmitSuccess();
-
-      // 重新載入審核狀態，更新狀態橫幅
+      // 4️⃣ 重新載入
+      await reload();
       reloadApprovalStatus();
 
-      setSuccessModalType('submit');
+      // 顯示成功彈窗
+      setSuccessModalType(isDraft ? 'save' : 'submit');
       setShowSuccessModal(true);
-    }).catch(error => {
-      console.error('[CommuteePage] Submit error:', error);
-      setError(error instanceof Error ? error.message : '提交失敗，請重試');
     });
   };
 
-  const handleSave = async () => {
-    await executeSubmit(async () => {
-      setError(null);
-      setSuccess(null);
+  const handleSubmit = async () => {
+    await submitData(false);
+  };
 
-      // 審核模式：使用 useAdminSave hook
-      if (isReviewMode && reviewEntryId) {
+  const handleSave = async () => {
+    // 審核模式：使用 adminSave hook
+    if (isReviewMode && reviewEntryId) {
+      await executeSubmit(async () => {
         console.log('📝 管理員審核模式：使用 useAdminSave hook', reviewEntryId);
 
-        const filesToUpload = [
-          ...excelMemoryFiles.map((mf: MemoryFile) => ({
-            file: mf.file,
-            metadata: { recordIndex: 0, allRecordIds: ['commute'] }
-          }))
-        ];
+        const filesToUpload = excelMemoryFiles.map((mf: MemoryFile) => ({
+          file: mf.file,
+          metadata: { recordIndex: 0, allRecordIds: ['commute'] }
+        }));
 
         await adminSave({
           updateData: {
@@ -215,58 +205,12 @@ export default function CommutePage() {
         reloadApprovalStatus();
         setExcelMemoryFiles([]);
         setSuccess('✅ 儲存成功！資料已更新');
-        return;
-      }
-
-      // 非審核模式：建立填報輸入資料
-      const entryInput = {
-        page_key: pageKey,
-        period_year: year,
-        unit: COMMUTE_CONFIG.unit,
-        monthly: { '1': 0 },
-        notes: '員工通勤資料',
-        payload: {}
-      };
-
-      // 新增或更新 energy_entries（使用 true 保持現有狀態）
-      const { entry_id } = await upsertEnergyEntry(entryInput, true);
-
-      if (!currentEntryId) {
-        setCurrentEntryId(entry_id);
-      }
-
-      // 使用智慧型檔案覆蓋（累積模式：保留舊檔案 + 追加新檔案）
-      await smartOverwriteFiles([
-        {
-          itemKey: 'excel',
-          newFiles: excelMemoryFiles,
-          existingFiles: excelFile,
-          fileType: 'other' as const,
-          mode: 'append' as const
-        }
-      ], {
-        entryId: entry_id,
-        pageKey,
-        year,
-        debug: true
       });
+      return;
+    }
 
-      // 重新載入檔案
-      await reload();
-
-      // 清空記憶體檔案
-      setExcelMemoryFiles([]);
-
-      // 重新載入審核狀態，更新狀態橫幅
-      reloadApprovalStatus();
-
-      setSuccess('暫存成功！資料已儲存');
-      setSuccessModalType('save');
-      setShowSuccessModal(true);
-    }).catch(error => {
-      console.error('[CommuteePage] Save error:', error);
-      setError(error instanceof Error ? error.message : '暫存失敗');
-    });
+    // 非審核模式：直接呼叫 submitData
+    await submitData(true);
   };
 
   const handleClear = () => {
@@ -275,23 +219,24 @@ export default function CommutePage() {
 
   const handleClearConfirm = async () => {
     try {
-      // 收集所有檔案
-      const allFiles = [...excelFile];
-      const allMemoryFiles = [...excelMemoryFiles];
+      // 刪除 entry
+      if (currentEntryId) {
+        await deleteEnergyEntry(currentEntryId);
+      }
 
-      // 使用 Hook 清除
-      await clear({
-        filesToDelete: allFiles,
-        memoryFilesToClean: allMemoryFiles
-      });
+      // 刪除所有檔案
+      for (const file of excelFile) {
+        await deleteEvidenceFile(file.id);
+      }
 
-      // 重置前端狀態
-      setExcelMemoryFiles([]);
+      // 重置狀態
       setExcelFile([]);
+      setExcelMemoryFiles([]);
       setCurrentEntryId(null);
+      setCurrentStatus('submitted');
       setShowClearConfirmModal(false);
 
-      // 重新載入審核狀態，清除狀態橫幅
+      // 重新載入
       await reload();
       reloadApprovalStatus();
 
@@ -377,7 +322,7 @@ export default function CommutePage() {
           show={showClearConfirmModal}
           onConfirm={handleClearConfirm}
           onCancel={() => setShowClearConfirmModal(false)}
-          isClearing={clearLoading}
+          isClearing={submitting}
         />
 
         {/* Toast 訊息 */}
@@ -400,7 +345,6 @@ export default function CommutePage() {
         {/* 提交成功彈窗 */}
         <SuccessModal
           show={showSuccessModal}
-          message={success || ''}
           type={successModalType}
           onClose={() => setShowSuccessModal(false)}
         />

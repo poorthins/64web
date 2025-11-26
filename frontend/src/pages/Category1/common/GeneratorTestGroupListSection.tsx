@@ -159,7 +159,7 @@ export function GeneratorTestGroupListSection(props: GeneratorTestGroupListSecti
                           }}
                         />
                       ) : (
-                        <FileTypeIcon fileType={fileType} size={32} />
+                        <FileTypeIcon fileType={fileType} size={36} />
                       )}
                     </div>
                   )}

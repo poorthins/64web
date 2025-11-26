@@ -8,6 +8,7 @@ import { FireExtinguisherSpecListSection } from './components/FireExtinguisherSp
 import { FireExtinguisherUsageInputFields } from './components/FireExtinguisherUsageInputFields'
 import { FileDropzone, type MemoryFile } from '../../components/FileDropzone'
 import { TYPE3_ALLOWED_FILE_TYPES, TYPE3_FILE_UPLOAD_HINT } from '../../constants/fileUpload'
+import { createMemoryFile } from '../../utils/fileUploadHelpers'
 
 export default function FireExtinguisherPage() {
   // Type 3 核心邏輯 + 全局檔案支援
@@ -123,14 +124,7 @@ function InspectionReportSection({
               onFileSelect={(files) => {
                 const file = files[0]
                 if (file) {
-                  const memoryFile: MemoryFile = {
-                    id: `memory-inspection-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`,
-                    file,
-                    preview: URL.createObjectURL(file),
-                    file_name: file.name,
-                    file_size: file.size,
-                    mime_type: file.type
-                  }
+                  const memoryFile = createMemoryFile(file)
                   setInspectionReport(memoryFile)
                 }
               }}

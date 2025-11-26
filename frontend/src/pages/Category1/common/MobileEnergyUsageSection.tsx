@@ -14,6 +14,7 @@ import { FileDropzone } from '../../../components/FileDropzone'
 import { RecordInputRow } from '../../../components/energy/RecordInputRow'
 import { FileTypeIcon } from '../../../components/energy/FileTypeIcon'
 import { getFileType } from '../../../utils/energy/fileTypeDetector'
+import { createMemoryFile } from '../../../utils/fileUploadHelpers'
 import type { MemoryFile } from '../../../services/documentHandler'
 import { CurrentEditingGroup } from './mobileEnergyTypes'
 import { LAYOUT_CONSTANTS } from './mobileEnergyConstants'
@@ -275,19 +276,7 @@ export function MobileEnergyUsageSection(props: MobileEnergyUsageSectionProps) {
                   if (!isReadOnly && !submitting && !approvalStatus.isApproved && editPermissions.canUploadFiles) {
                     // 建立 MemoryFile
                     const file = files[0]
-                    let preview = ''
-                    if (file.type.startsWith('image/')) {
-                      preview = URL.createObjectURL(file)
-                    }
-
-                    const memoryFile: MemoryFile = {
-                      id: `memory-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-                      file,
-                      preview,
-                      file_name: file.name,
-                      file_size: file.size,
-                      mime_type: file.type
-                    }
+                    const memoryFile = createMemoryFile(file)
 
                     // 更新 memoryFiles
                     setCurrentEditingGroup(prev => ({
@@ -374,7 +363,7 @@ export function MobileEnergyUsageSection(props: MobileEnergyUsageSectionProps) {
                               }}
                             />
                           ) : (
-                            <FileTypeIcon fileType={getFileType(file.mime_type, file.file_name)} size={24} />
+                            <FileTypeIcon fileType={getFileType(file.mime_type, file.file_name)} size={36} />
                           )}
                         </div>
 

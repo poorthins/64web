@@ -11,6 +11,8 @@ import { List } from 'lucide-react'
 import { getFileUrl } from '../../../api/files'
 import { AcetyleneSpec } from '../hooks/useAcetyleneSpecManager'
 import { ActionButtons } from '../../../components/energy/ActionButtons'
+import { getFileType } from '../../../utils/energy/fileTypeDetector'
+import { FileTypeIcon } from '../../../components/energy/FileTypeIcon'
 
 // ==================== 介面定義 ====================
 interface AcetyleneSpecListSectionProps {
@@ -77,49 +79,85 @@ export function AcetyleneSpecListSection({
               }}
             >
               {/* 縮圖 */}
-              {hasPhoto ? (
-                <div
-                  style={{
-                    width: '50px',
-                    height: '50px',
-                    borderRadius: '8px',
-                    overflow: 'hidden',
-                    border: '1px solid rgba(0, 0, 0, 0.1)',
-                    flexShrink: 0,
-                    cursor: 'pointer'
-                  }}
-                  onClick={() => {
-                    if (evidenceFile) {
-                      getFileUrl(evidenceFile.file_path).then(onImageClick)
-                    } else if (memoryFile?.file) {
-                      onImageClick(memoryFile.preview || URL.createObjectURL(memoryFile.file))
-                    }
-                  }}
-                >
-                  {photoPreview && (
-                    <img
-                      src={photoPreview}
-                      alt="重量證明"
-                      style={{ width: '100%', height: '100%', objectFit: 'cover' }}
-                    />
-                  )}
-                </div>
-              ) : (
-                <div
-                  style={{
-                    width: '50px',
-                    height: '50px',
-                    borderRadius: '8px',
-                    background: '#E5E7EB',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    flexShrink: 0
-                  }}
-                >
-                  <span style={{ fontSize: '20px' }}>📷</span>
-                </div>
-              )}
+              {(() => {
+                // 檢查檔案類型
+                const mimeType = memoryFile?.mime_type || evidenceFile?.mime_type
+                const fileName = memoryFile?.file_name || evidenceFile?.file_name
+                const fileType = getFileType(mimeType, fileName)
+                const isImage = fileType === 'image'
+
+                // 沒有檔案 → 顯示 📷 emoji
+                if (!hasPhoto) {
+                  return (
+                    <div
+                      style={{
+                        width: '50px',
+                        height: '50px',
+                        borderRadius: '8px',
+                        background: '#E5E7EB',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        flexShrink: 0
+                      }}
+                    >
+                      <span style={{ fontSize: '20px' }}>📷</span>
+                    </div>
+                  )
+                }
+
+                // 圖片檔案 → 顯示預覽
+                if (isImage) {
+                  return (
+                    <div
+                      style={{
+                        width: '50px',
+                        height: '50px',
+                        borderRadius: '8px',
+                        overflow: 'hidden',
+                        border: '1px solid rgba(0, 0, 0, 0.1)',
+                        flexShrink: 0,
+                        cursor: 'pointer'
+                      }}
+                      onClick={() => {
+                        if (evidenceFile) {
+                          getFileUrl(evidenceFile.file_path).then(onImageClick)
+                        } else if (memoryFile?.file) {
+                          onImageClick(memoryFile.preview || URL.createObjectURL(memoryFile.file))
+                        }
+                      }}
+                    >
+                      {photoPreview && (
+                        <img
+                          src={photoPreview}
+                          alt="重量證明"
+                          style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                        />
+                      )}
+                    </div>
+                  )
+                }
+
+                // PDF/Excel/Word → 顯示有顏色的文件 icon（帶文字標籤）
+                return (
+                  <div
+                    style={{
+                      width: '50px',
+                      height: '50px',
+                      borderRadius: '8px',
+                      overflow: 'hidden',
+                      flexShrink: 0,
+                      background: '#f0f0f0',
+                      border: '1px solid rgba(0, 0, 0, 0.1)',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                    }}
+                  >
+                    <FileTypeIcon fileType={fileType} size={36} />
+                  </div>
+                )
+              })()}
 
               {/* 規格資訊 */}
               <div style={{

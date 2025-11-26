@@ -2,8 +2,8 @@
 
 > 每次打開這個文件，就知道現在要做什麼
 
-**上次更新：** 2025-01-25
-**當前進度：** 13 / 16 頁完成 ✅（Type 1 ✅ 完成，Type 2 ✅ 完成，Type 3 ✅ 完成）
+**上次更新：** 2025-01-26
+**當前進度：** 14 / 16 頁完成 ✅（Type 1 ✅ 完成，Type 2 ✅ 完成，Type 3 ✅ 完成，Type 5 ✅ 完成）
 
 ---
 
@@ -21,9 +21,10 @@
 [x] 重構 AcetylenePage（第 11/16 頁）- Type 3 ✅ 完成
 [x] 重構 WeldingRodPage（第 12/16 頁）- Type 3 ✅ 完成
 [x] 重構 FireExtinguisherPage（第 13/16 頁）- Type 3 ✅ 完成（全局檔案功能）
+[x] 重構 CommuteePage（第 16/16 頁）- Type 5 ✅ 完成（30 分鐘）
 ```
 
-**Type 3 批次進度：5/5 完成 ✅**
+**Type 5 批次進度：1/1 完成 ✅**
 
 ### 🎉 重要里程碑：Type 3 全局檔案功能
 
@@ -35,9 +36,16 @@
 - ✅ 自動管理：載入、上傳、刪除、狀態同步全自動
 - ✅ 消除 Bug：解決了上傳後佐證顯示錯誤的狀態衝突問題
 
-下一步選項：
-1. **Type 5**：CommuteePage（Excel 上傳，最簡單，30 分鐘）
-2. **Type 4**：NaturalGasPage（電錶 + 帳單，最複雜）
+### 🎉 重要里程碑：Type 5 完成（2025-01-26）
+
+**成就：** CommuteePage 重構完成
+- ✅ 411 行簡化到 ~230 行（減少 44%）
+- ✅ 移除 3 個舊 hooks（useFrontendStatus, useSubmitGuard, useEnergyClear）
+- ✅ 統一使用新 API v2（entryAPI, fileAPI）
+- ✅ 統一檔案圖示規範（FileTypeIcon size={36}）
+
+下一步：
+**Type 4**：NaturalGasPage + ElectricityBillPage（電錶 + 帳單，最複雜）
 
 ---
 
@@ -97,7 +105,7 @@
 #### 前端直接呼叫 Supabase（❌ 要改掉）
 - **問題：** 商業邏輯在前端
 - **解決方案：** 全部改用後端 API
-- **進度：** 3 / 16 頁完成 ✅ RefrigerantPage, SF6Page, GeneratorTestPage
+- **進度：** 14 / 16 頁完成 ✅
 
 ---
 
@@ -107,7 +115,7 @@
 **Type 2（一筆佐證 → 多筆資料）：** 5 / 5 ✅ (DieselPage ✅, GasolinePage ✅, UreaPage ✅, SepticTankPage ✅, DieselStationarySourcesPage ✅)
 **Type 3（規格 + 使用記錄）：** 5 / 5 ✅ (WD40Page ✅, LPGPage ✅, AcetylenePage ✅, WeldingRodPage ✅, FireExtinguisherPage ✅)
 **Type 4（電錶 + 帳單）：** 0 / 2 🔜
-**Type 5（Excel 上傳）：** 0 / 1 🔜
+**Type 5（Excel 上傳）：** 1 / 1 ✅ (CommuteePage ✅)
 
 ---
 

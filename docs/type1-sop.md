@@ -240,6 +240,31 @@ import { THUMBNAIL_PLACEHOLDER_SVG, THUMBNAIL_BACKGROUND, THUMBNAIL_BORDER } fro
 - 視覺一致（所有頁面相同）
 - 程式碼不重複（SVG 只寫一次）
 
+#### 📏 檔案圖示大小規範（2025-01-26 統一標準）
+
+**確認所有 FileTypeIcon 使用統一大小：**
+
+```typescript
+import { FileTypeIcon } from '../../../components/energy/FileTypeIcon'
+
+// ✅ 正確：統一使用 size={36}
+<FileTypeIcon fileType={fileType} size={36} />
+
+// ❌ 錯誤：使用其他大小（24、32 等）
+<FileTypeIcon fileType={fileType} size={24} />
+<FileTypeIcon fileType={fileType} size={32} />
+```
+
+**標準：**
+- ✅ 所有 `FileTypeIcon` 必須使用 `size={36}`
+- ✅ 適用於所有位置：上傳框（FileDropzone）、列表、詳情頁
+- ✅ 確保 PDF（紅色）、Excel（綠色）、Word（藍色）文字標籤清晰可見
+
+**效果：**
+- 文字標籤清晰可辨識（PDF、XLS、DOC）
+- 全局視覺一致性
+- 使用者體驗提升
+
 ---
 
 ### 步驟 9：測試（3 分鐘）

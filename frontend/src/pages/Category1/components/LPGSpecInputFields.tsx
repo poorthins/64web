@@ -8,7 +8,7 @@
  */
 
 import { FileDropzone, MemoryFile, EvidenceFile as FileDropzoneEvidenceFile } from '../../../components/FileDropzone'
-import { generateRecordId } from '../../../utils/idGenerator'
+import { createMemoryFile } from '../../../utils/fileUploadHelpers'
 import { TYPE3_ALLOWED_FILE_TYPES, TYPE3_FILE_UPLOAD_HINT } from '../../../constants/fileUpload'
 import { LPGSpec } from '../hooks/useLPGSpecManager'
 import type { EvidenceFile } from '../../../api/files'
@@ -182,17 +182,8 @@ export function LPGSpecInputFields({
             evidenceFile={evidenceFileForDropzone}  // ⭐ 已儲存的檔案
             evidenceFileUrl={thumbnailUrl}  // ⭐ 縮圖 URL
             onFileSelect={(files) => {
-              const file = files[0]
-              if (file) {
-                const newMemoryFile: MemoryFile = {
-                  id: generateRecordId(),
-                  file,
-                  preview: URL.createObjectURL(file),
-                  file_name: file.name,
-                  file_size: file.size,
-                  mime_type: file.type
-                }
-                onFieldChange('memoryFiles', [newMemoryFile])
+              if (files[0]) {
+                onFieldChange('memoryFiles', [createMemoryFile(files[0])])
               }
             }}
             onRemove={() => {

@@ -62,8 +62,11 @@ export function getFileType(mimeType?: string, fileName?: string): FileType {
   // 2. 圖片檔案
   if (mimeType?.startsWith('image/')) return 'image'
 
-  // 3. PDF 檔案
-  if (mimeType === 'application/pdf') return 'pdf'
+  // 3. PDF 檔案（檢查 MIME type 和副檔名）
+  if (
+    mimeType === 'application/pdf' ||
+    fileName?.match(/\.pdf$/i)
+  ) return 'pdf'
 
   // 4. Excel 檔案（檢查 MIME type 和副檔名）
   if (

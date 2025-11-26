@@ -44,14 +44,14 @@ export interface EvidenceFile {
  * 推斷檔案 MIME 類型
  */
 function inferMimeType(file: File): string {
-  // 優先使用 file.type
-  if (file.type) {
+  // 優先使用 file.type（排除通用型）
+  if (file.type && file.type !== 'application/octet-stream') {
     return file.type
   }
 
-  // 如果 file.type 為空，嘗試從副檔名推斷
+  // 如果 file.type 為空或是通用型，嘗試從副檔名推斷
   const extension = file.name.split('.').pop()?.toLowerCase()
-  
+
   switch (extension) {
     case 'jpg':
     case 'jpeg':
@@ -68,6 +68,14 @@ function inferMimeType(file: File): string {
       return 'image/heif'
     case 'pdf':
       return 'application/pdf'
+    case 'xlsx':
+      return 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+    case 'xls':
+      return 'application/vnd.ms-excel'
+    case 'docx':
+      return 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+    case 'doc':
+      return 'application/msword'
     default:
       return 'application/octet-stream'
   }
