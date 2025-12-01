@@ -85,7 +85,8 @@
       "Bash(npx:*)",
       "Bash(cmd /c \"dir /B c:\\Users\\Tim\\Desktop\\python\\64web\\frontend\\src\\pages\\Category1\\components\")",
       "Bash(\"c:\\Users\\Tim\\Desktop\\python\\64web\\frontend\\src\\pages\\Category1\\NaturalGasPage.tmp\")",
-      "Bash(git -C \"c:\\Users\\Tim\\Desktop\\python\\64web\" status --short)"
+      "Bash(git -C \"c:\\Users\\Tim\\Desktop\\python\\64web\" status --short)",
+      "Bash(git -C \"c:\\Users\\Tim\\Desktop\\python\\64web\" checkout -- frontend/src/pages/Category1/NaturalGasPage.tsx)"
     ],
     "deny": [],
     "ask": []

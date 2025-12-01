@@ -1,5 +1,5 @@
 /**
- * NaturalGasBillSection - 天然氣帳單編輯區塊
+ * ElectricityBillSection - 電力帳單編輯區塊
  *
  * 包含：
  * - 使用數據標題
@@ -10,24 +10,24 @@
  */
 
 import { Trash2 } from 'lucide-react'
-import { NaturalGasBillRecord, NaturalGasMeter, BillEditingGroup } from '../../../types/naturalGasTypes'
+import { ElectricityBillRecord, ElectricityMeter, BillEditingGroup } from '../../../types/electricityTypes'
 import { EvidenceFile } from '../../../api/files'
 import { MemoryFile } from '../../../services/documentHandler'
 import { FileDropzone } from '../../../components/FileDropzone'
 import { createMemoryFile } from '../../../utils/fileUploadHelpers'
 import { FileTypeIcon } from '../../../components/energy/FileTypeIcon'
 import { getFileType } from '../../../utils/energy/fileTypeDetector'
-import { NaturalGasBillInputFields } from './NaturalGasBillInputFields'
-import { MobileEnergyGroupListSection } from '../common/MobileEnergyGroupListSection'
+import { ElectricityBillInputFields } from './ElectricityBillInputFields'
+import { MobileEnergyGroupListSection } from '../../Category1/common/MobileEnergyGroupListSection'
 
-interface NaturalGasBillSectionProps {
+interface ElectricityBillSectionProps {
   // 編輯狀態
   currentEditingGroup: BillEditingGroup
   setCurrentEditingGroup: (group: BillEditingGroup | ((prev: BillEditingGroup) => BillEditingGroup)) => void
-  savedGroups: NaturalGasBillRecord[]
+  savedGroups: ElectricityBillRecord[]
 
-  // 錶號資料
-  meters: NaturalGasMeter[]
+  // 表號資料
+  meters: ElectricityMeter[]
 
   // 權限
   canEdit: boolean
@@ -36,7 +36,7 @@ interface NaturalGasBillSectionProps {
   isReadOnly: boolean
 
   // 事件處理
-  onUpdateRecord: (id: string, field: keyof NaturalGasBillRecord, value: any) => void
+  onUpdateRecord: (id: string, field: keyof ElectricityBillRecord, value: any) => void
   onDeleteRecord: (id: string) => void
   onAddRecord: () => void
   onEditGroup: (groupId: string) => void
@@ -46,12 +46,13 @@ interface NaturalGasBillSectionProps {
 
   // 審核狀態
   approvalStatus: any
+  isReviewMode: boolean
 
   // 縮圖
   thumbnails: Record<string, string>
 }
 
-export const NaturalGasBillSection = ({
+export const ElectricityBillSection = ({
   currentEditingGroup,
   setCurrentEditingGroup,
   savedGroups,
@@ -68,14 +69,15 @@ export const NaturalGasBillSection = ({
   onDeleteEvidence,
   onPreviewImage,
   approvalStatus,
+  isReviewMode,
   thumbnails
-}: NaturalGasBillSectionProps) => {
+}: ElectricityBillSectionProps) => {
   return (
     <div style={{ marginTop: '13.75px' }}>
       {/* 使用數據標題 */}
       <div data-section="bill-editing" style={{ marginTop: '103px', marginLeft: '367px' }}>
         <div className="flex items-center gap-[29px]">
-          <div className="w-[42px] h-[42px] rounded-[10px] flex items-center justify-center flex-shrink-0" style={{ backgroundColor: '#49A1C7' }}>
+          <div className="w-[42px] h-[42px] rounded-[10px] flex items-center justify-center flex-shrink-0" style={{ backgroundColor: '#60B389' }}>
             <svg xmlns="http://www.w3.org/2000/svg" width="29" height="29" viewBox="0 0 29 29" fill="none">
               <path d="M25.375 6.04163C25.375 8.04366 20.5061 9.66663 14.5 9.66663C8.4939 9.66663 3.625 8.04366 3.625 6.04163M25.375 6.04163C25.375 4.03959 20.5061 2.41663 14.5 2.41663C8.4939 2.41663 3.625 4.03959 3.625 6.04163M25.375 6.04163V22.9583C25.375 24.9641 20.5417 26.5833 14.5 26.5833C8.45833 26.5833 3.625 24.9641 3.625 22.9583V6.04163M25.375 14.5C25.375 16.5058 20.5417 18.125 14.5 18.125C8.45833 18.125 3.625 16.5058 3.625 14.5" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
             </svg>
@@ -96,7 +98,7 @@ export const NaturalGasBillSection = ({
             minHeight: '487px',
             borderRadius: '28px',
             border: '1px solid rgba(0, 0, 0, 0.25)',
-            background: '#49A1C7',
+            background: '#60B389',
             padding: '27px 49px 38px 49px',
             display: 'flex',
             gap: '49px',
@@ -179,6 +181,7 @@ export const NaturalGasBillSection = ({
                           alignItems: 'center',
                           padding: '16px 21px',
                           gap: '12px',
+                          marginBottom: '12px'
                         }}
                       >
                         {/* 檔案縮圖 */}
@@ -262,12 +265,12 @@ export const NaturalGasBillSection = ({
 
           {/* 右側：表單區域 */}
           <div style={{ flex: 1 }}>
-            <NaturalGasBillInputFields
+            <ElectricityBillInputFields
               currentGroup={currentEditingGroup}
               onUpdate={onUpdateRecord}
               onDelete={onDeleteRecord}
               meters={meters}
-              isReadOnly={isReadOnly || (isApproved && false)}
+              isReadOnly={isReadOnly || (isApproved && !isReviewMode)}
             />
           </div>
         </div>
@@ -277,7 +280,7 @@ export const NaturalGasBillSection = ({
       <div style={{ marginTop: '46px' }} className="flex justify-center">
         <button
           onClick={onAddRecord}
-          disabled={!canEdit || isApproved || submitting}
+          disabled={!canEdit && !isApproved}
           style={{
             width: '227px',
             height: '52px',
@@ -288,8 +291,8 @@ export const NaturalGasBillSection = ({
             fontFamily: 'Inter',
             fontSize: '20px',
             fontWeight: 400,
-            cursor: canEdit && !isApproved && !submitting ? 'pointer' : 'not-allowed',
-            opacity: canEdit && !isApproved && !submitting ? 1 : 0.5,
+            cursor: (canEdit || isApproved) ? 'pointer' : 'not-allowed',
+            opacity: (canEdit || isApproved) ? 1 : 0.5,
             transition: 'background 0.2s, opacity 0.2s'
           }}
           className="hover:opacity-80"
@@ -306,10 +309,11 @@ export const NaturalGasBillSection = ({
             thumbnails={thumbnails}
             isReadOnly={isReadOnly}
             approvalStatus={approvalStatus}
+            isReviewMode={isReviewMode}
             onEditGroup={onEditGroup}
             onDeleteGroup={onDeleteGroup}
             onPreviewImage={onPreviewImage}
-            iconColor="#49A1C7"
+            iconColor="#60B389"
           />
         </div>
       )}
