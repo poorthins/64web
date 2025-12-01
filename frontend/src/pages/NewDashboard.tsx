@@ -226,7 +226,7 @@ const NewDashboard = () => {
   }
 
   return (
-    <div className="fixed inset-0 overflow-x-hidden overflow-y-auto z-40 bg-white flex justify-center">
+    <div id="dashboard-container" className="fixed inset-0 overflow-x-hidden overflow-y-auto z-40 bg-white flex justify-center">
       <div style={{
         width: '1920px',
         minHeight: '100vh',

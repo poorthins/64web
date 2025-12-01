@@ -2,8 +2,8 @@
 
 > 每次打開這個文件，就知道現在要做什麼
 
-**上次更新：** 2025-01-26
-**當前進度：** 14 / 16 頁完成 ✅（Type 1 ✅ 完成，Type 2 ✅ 完成，Type 3 ✅ 完成，Type 5 ✅ 完成）
+**上次更新：** 2025-01-27
+**當前進度：** 15 / 16 頁完成 ✅（Type 1 ✅，Type 2 ✅，Type 3 ✅，Type 4 🚧 1/2，Type 5 ✅）
 
 ---
 
@@ -22,9 +22,10 @@
 [x] 重構 WeldingRodPage（第 12/16 頁）- Type 3 ✅ 完成
 [x] 重構 FireExtinguisherPage（第 13/16 頁）- Type 3 ✅ 完成（全局檔案功能）
 [x] 重構 CommuteePage（第 16/16 頁）- Type 5 ✅ 完成（30 分鐘）
+[x] 重構 NaturalGasPage（第 14/16 頁）- Type 4 ✅ 完成（2 小時）
 ```
 
-**Type 5 批次進度：1/1 完成 ✅**
+**Type 4 批次進度：1/2 完成 🚧**
 
 ### 🎉 重要里程碑：Type 3 全局檔案功能
 
@@ -36,16 +37,39 @@
 - ✅ 自動管理：載入、上傳、刪除、狀態同步全自動
 - ✅ 消除 Bug：解決了上傳後佐證顯示錯誤的狀態衝突問題
 
-### 🎉 重要里程碑：Type 5 完成（2025-01-26）
+### 🎉 重要里程碑：Type 4 開始（2025-01-27）
 
-**成就：** CommuteePage 重構完成
-- ✅ 411 行簡化到 ~230 行（減少 44%）
-- ✅ 移除 3 個舊 hooks（useFrontendStatus, useSubmitGuard, useEnergyClear）
-- ✅ 統一使用新 API v2（entryAPI, fileAPI）
-- ✅ 統一檔案圖示規範（FileTypeIcon size={36}）
+**成就：** NaturalGasPage 重構完成 - Type 2 架構 + 自訂 Hooks
+- ✅ **程式碼瘦身**：2100 行 → 1211 行（**-42%，削減 889 行**）
+- ✅ **建立 3 個專用 Hooks**（502 行新檔案）：
+  - `useNaturalGasSubmit.ts` (205 行) - Type 2 提交邏輯
+  - `useNaturalGasData.ts` (139 行) - Type 2 資料載入與檔案分配
+  - `useMonthlyCalculation.ts` (158 行) - 月份用量與覆蓋度計算
+- ✅ **刪除重複程式碼**：
+  - 165 行日期/月份計算函式（改用 utils）
+  - 650 行舊帳單管理、驗證、提交邏輯
+  - 120 行舊資料載入 useEffect
+- ✅ **Type 2 UI 替換**：
+  - `<MobileEnergyUsageSection>` 編輯卡（支援多筆帳單共用佐證）
+  - `<MobileEnergyGroupListSection>` 資料列表
+  - `<NaturalGasBillInputFields>` 自訂輸入欄位
+- ✅ **TypeScript 品質**：0 個編譯錯誤 ✅
+- ✅ **向後相容**：自動補 groupId，舊資料無痛升級
+
+**關鍵技術特點：**
+- Type 2 架構：一份佐證綁定多筆帳單（record_id 使用逗號分隔）
+- 月份覆蓋度計算：精確計算帳單期間與目標年份的交集
+- 低位熱值管理：固定 record_id = 'heat_value'
+- 錶號清單：支援多個天然氣錶
+
+**待完成（已標記 TODO）：**
+- 泛型化共用組件（避免 `as any`）
+- 實作 Type 2 檔案刪除邏輯
+- 建立 useNaturalGasValidation hook
+- 整合 HeatValueSection 和 MeterSection
 
 下一步：
-**Type 4**：NaturalGasPage + ElectricityBillPage（電錶 + 帳單，最複雜）
+**Type 4 完結**：ElectricityBillPage（電錶 + 帳單，最後一頁）
 
 ---
 
@@ -173,28 +197,44 @@
 
 ## 🎯 下一步
 
-Type 1 完成回顧：
-1. ✅ RefrigerantPage 完成（2025-01-18，2h）
-2. ✅ SF6Page 完成（2025-01-19，3h）
-3. ✅ GeneratorTestPage 完成（2025-01-19，1h）
-4. ✅ Type 1 批次總耗時：6 小時（提前完成）
+**已完成批次回顧：**
+- ✅ Type 1（3 頁）- 6 小時完成（RefrigerantPage, SF6Page, GeneratorTestPage）
+- ✅ Type 2（5 頁）- 完成（DieselPage, GasolinePage, UreaPage, SepticTankPage, DieselStationarySourcesPage）
+- ✅ Type 3（5 頁）- 完成（WD40Page, LPGPage, AcetylenePage, WeldingRodPage, FireExtinguisherPage）
+- ✅ Type 5（1 頁）- 2 小時完成（CommuteePage）
 
-下一個批次：Type 2（一筆佐證 → 多筆資料）
-- 研究 Type 2 架構（groupId + records）
-- 選擇 Pilot 頁面（建議：DieselPage）
-- 規劃 Type 2 重構策略
+**當前進度：14/16 頁完成（87.5%）**
+
+---
+
+### 下一個批次：Type 4（2 頁，最複雜）
+
+**Type 4 特性：電錶 + 帳單（雙重資料來源）**
+- 頁面 1：NaturalGasPage（天然氣）
+- 頁面 2：ElectricityBillPage（外購電力）
+
+**Type 4 挑戰：**
+- 資料來源 1：電錶讀數（monthly data）
+- 資料來源 2：帳單掃描（佐證檔案）
+- 需要同步兩種資料並計算總量
+
+**預估工作：**
+- 研究 Type 4 架構（雙重資料源）
+- 設計資料結構和 API schema
+- 選擇 Pilot 頁面（建議：NaturalGasPage）
+- 預計 2-3 天完成
 
 ---
 
 **批次計畫：**
 - 批次 1：Type 1（3 頁）- ✅ 完成（6h）
-- 批次 2：Type 2（5 頁）- 2 天
-- 批次 3：Type 5（1 頁）- 0.5 天
-- 批次 4：Type 3（5 頁）- 3 天
-- 批次 5：Type 4（2 頁）- 2 天
+- 批次 2：Type 2（5 頁）- ✅ 完成
+- 批次 3：Type 5（1 頁）- ✅ 完成（2h）
+- 批次 4：Type 3（5 頁）- ✅ 完成
+- 批次 5：Type 4（2 頁）- 🔜 下一個
 
-**總計：約 8.5 天完成全部 16 頁**
+**總計：預計 8.5 天完成全部 16 頁（目前 87.5% 完成）**
 
 ---
 
-**下一個：Type 2 批次（5 頁，預計 2 天）**
+**下一個：Type 4 批次（2 頁，預計 2-3 天）**

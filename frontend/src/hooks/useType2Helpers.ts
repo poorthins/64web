@@ -107,7 +107,7 @@ export function useType2Helpers<T extends {
     if (filesToDelete.length > 0) {
       for (const fileId of filesToDelete) {
         try {
-          await adminDeleteEvidence(fileId)
+          await deleteEvidence(fileId)  // ✅ 修復後的 deleteEvidence() 已由 RLS Policy 控制權限
         } catch (error) {
           // 靜默失敗
         }

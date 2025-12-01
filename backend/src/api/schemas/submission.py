@@ -11,7 +11,7 @@ class EntrySubmitRequest(BaseModel):
     page_key: str = Field(..., description="能源類型鍵值")
     period_year: int = Field(..., ge=2020, le=2100, description="填報年份")
     unit: str = Field(..., description="單位")
-    monthly: Dict[str, float] = Field(..., description="月份數據 {month: value}")
+    monthly: Optional[Dict[str, float]] = Field(None, description="月份數據 {month: value}（Type 5 不需要）")
     notes: Optional[str] = Field(None, max_length=1000, description="備註")
     payload: Optional[Dict[str, Any]] = Field(None, description="主要 payload 數據")
     extraPayload: Optional[Dict[str, Any]] = Field(None, description="額外 payload 數據")
@@ -20,6 +20,9 @@ class EntrySubmitRequest(BaseModel):
     @validator('monthly')
     def validate_monthly(cls, v):
         """驗證月份數據"""
+        if v is None:
+            return v
+
         for month_str, value in v.items():
             # 驗證月份
             try:

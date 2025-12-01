@@ -13,7 +13,7 @@ export interface EntrySubmitRequest {
   page_key: string
   period_year: number
   unit: string
-  monthly: Record<string, number>
+  monthly?: Record<string, number>  // Optional (Type 5 不需要)
   notes?: string
   payload?: Record<string, any>
   extraPayload?: Record<string, any>

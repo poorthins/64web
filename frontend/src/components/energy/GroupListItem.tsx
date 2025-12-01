@@ -90,6 +90,10 @@ export function GroupListItem({
   const isImage = mimeType?.startsWith('image/')
   const canClickFile = isImage && onFileClick && (evidenceFile || memoryFile)
 
+  // ⭐ 使用父元件傳入的 thumbnailUrl (已由 useThumbnailLoader 批次載入)
+  // evidenceFile: 使用 thumbnailUrl, memoryFile: 使用 preview
+  const imageUrl = thumbnailUrl || memoryFile?.preview || null
+
   return (
     <div
       className="flex items-center"
@@ -130,9 +134,9 @@ export function GroupListItem({
       >
         {isImage ? (
           // 圖片檔案
-          thumbnailUrl || memoryFile?.preview ? (
+          imageUrl ? (
             <img
-              src={memoryFile?.preview || thumbnailUrl || ''}
+              src={imageUrl}
               alt="preview"
               style={{ width: '100%', height: '100%', objectFit: 'cover' }}
             />

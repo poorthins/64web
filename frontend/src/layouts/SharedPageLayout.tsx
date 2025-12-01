@@ -203,6 +203,7 @@ const SharedPageLayout: React.FC<SharedPageLayoutProps> = ({
       const message = typeof bottomActionBar.submitSuccessMessage === 'function'
         ? bottomActionBar.submitSuccessMessage()
         : (bottomActionBar.submitSuccessMessage || '提交成功')
+      setSuccessModalType('submit')  // ⭐ 修復：明確設置為提交類型
       setSuccessMessage(message)
       setShowSuccessModal(true)
     } catch (err) {
@@ -227,6 +228,7 @@ const SharedPageLayout: React.FC<SharedPageLayoutProps> = ({
       const message = typeof bottomActionBar.saveSuccessMessage === 'function'
         ? bottomActionBar.saveSuccessMessage()
         : (bottomActionBar.saveSuccessMessage || '暫存成功')
+      setSuccessModalType('save')  // ⭐ 修復：明確設置為儲存類型
       setSuccessMessage(message)
       setShowSuccessModal(true)
     } catch (err) {

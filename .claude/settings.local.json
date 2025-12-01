@@ -81,7 +81,11 @@
       "Bash(npm run type-check:*)",
       "Bash(npm run:*)",
       "Bash(Stop-Process -Id 8836 -Force)",
-      "Bash(cmd /c \"taskkill /F /PID 8836\")"
+      "Bash(cmd /c \"taskkill /F /PID 8836\")",
+      "Bash(npx:*)",
+      "Bash(cmd /c \"dir /B c:\\Users\\Tim\\Desktop\\python\\64web\\frontend\\src\\pages\\Category1\\components\")",
+      "Bash(\"c:\\Users\\Tim\\Desktop\\python\\64web\\frontend\\src\\pages\\Category1\\NaturalGasPage.tmp\")",
+      "Bash(git -C \"c:\\Users\\Tim\\Desktop\\python\\64web\" status --short)"
     ],
     "deny": [],
     "ask": []

@@ -1,47 +1,51 @@
-import { useState, useEffect, useMemo, useCallback } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { useSearchParams } from 'react-router-dom'
-import { AlertCircle, CheckCircle, Loader2, X, Trash2, Plus, Eye } from 'lucide-react'
-import EvidenceUpload, { MemoryFile } from '../../components/EvidenceUpload'
+import { Trash2 } from 'lucide-react'
+import { EvidenceFile, getEntryFiles } from '../../api/files'
+import { MemoryFile } from '../../services/documentHandler'
 import { EntryStatus } from '../../components/StatusSwitcher'
-import Toast, { ToastType } from '../../components/Toast'
-import BottomActionBar from '../../components/BottomActionBar'
-import ReviewSection from '../../components/ReviewSection'
+import { ToastType } from '../../components/Toast'
+import { FileTypeIcon } from '../../components/energy/FileTypeIcon'
+import { getFileType } from '../../utils/energy/fileTypeDetector'
 import { useEditPermissions } from '../../hooks/useEditPermissions'
-import { useFrontendStatus } from '../../hooks/useFrontendStatus'
 import { useApprovalStatus } from '../../hooks/useApprovalStatus'
-import { useStatusBanner, getBannerColorClasses } from '../../hooks/useStatusBanner'
+import { useFrontendStatus } from '../../hooks/useFrontendStatus'
+import { useStatusBanner } from '../../hooks/useStatusBanner'
+import { useRole } from '../../hooks/useRole'
 import { useEnergyData } from '../../hooks/useEnergyData'
 import { useEnergySubmit } from '../../hooks/useEnergySubmit'
 import { useEnergyClear } from '../../hooks/useEnergyClear'
-import { useSubmitGuard } from '../../hooks/useSubmitGuard'
 import { useGhostFileCleaner } from '../../hooks/useGhostFileCleaner'
-import { useRole } from '../../hooks/useRole'
-import { useAdminSave } from '../../hooks/useAdminSave'
-import { commitEvidence, getEntryFiles, EvidenceFile, uploadEvidenceWithEntry, deleteEvidenceFile } from '../../api/files'
-import { upsertEnergyEntry, UpsertEntryInput, updateEntryStatus, getEntryByPageKeyAndYear, deleteEnergyEntry } from '../../api/entries'
-import { supabase } from '../../lib/supabaseClient'
+import { useThumbnailLoader } from '../../hooks/useThumbnailLoader'
+import { useReviewMode } from '../../hooks/useReviewMode'
+import { useSubmitGuard } from '../../hooks/useSubmitGuard'
+import { upsertEnergyEntry, UpsertEntryInput, getEntryByPageKeyAndYear, deleteEnergyEntry } from '../../api/entries'
+import { submitEnergyEntry } from '../../api/v2/entryAPI'
 import { designTokens } from '../../utils/designTokens'
+import { generateRecordId } from '../../utils/idGenerator'
 import MonthlyProgressGrid, { MonthStatus } from '../../components/MonthlyProgressGrid'
-import { DocumentHandler } from '../../services/documentHandler'
-
-// 天然氣錶資料結構
-interface Meter {
-  id: string
-  meterNumber: string  // 天然氣錶號碼
-}
-
-// 簡化的帳單資料結構
-interface SimpleBillData {
-  id: string
-  meterId?: string     // ⭐ 新增：關聯到哪個天然氣錶
-  paymentMonth: number // 繳費月份 (1-12)
-  billingStart: string // 計費開始日期 (民國年格式)
-  billingEnd: string   // 計費結束日期 (民國年格式)
-  billingDays: number  // 計費天數 (自動計算)
-  billingUnits: number // 計費度數
-  files: EvidenceFile[]
-}
-
+import SharedPageLayout from '../../layouts/SharedPageLayout'
+import ConfirmClearModal from '../../components/ConfirmClearModal'
+import { FileDropzone } from '../../components/FileDropzone'
+import { createMemoryFile } from '../../utils/fileUploadHelpers'
+import { ImageLightbox } from './common/ImageLightbox'
+import { MobileEnergyUsageSection } from './common/MobileEnergyUsageSection'
+import { MobileEnergyGroupListSection } from './common/MobileEnergyGroupListSection'
+import { NaturalGasBillInputFields } from './components/NaturalGasBillInputFields'
+import { MonthlyHeatValueGrid } from './components/MonthlyHeatValueGrid'
+import { MonthlyHeatValueInput } from './components/MonthlyHeatValueInput'
+import { HeatValueReportUpload } from './components/HeatValueReportUpload'
+import { MeterManagementSection } from './components/MeterManagementSection'
+import { HeatValue, NaturalGasMeter, NaturalGasBill, NaturalGasBillRecord, BillEditingGroup, HeatValueEditingState } from '../../types/naturalGasTypes'
+import { calculateBillingDays, getDaysInMonth, parseROCDate, validateRocDate, rocToISO, isoToROC, rocToDate } from '../../utils/bill/dateCalculations'
+import { calculateMonthlyDistribution } from '../../utils/bill/monthlyDistribution'
+import { useNaturalGasData } from './hooks/useNaturalGasData'
+import { useNaturalGasSubmit } from './hooks/useNaturalGasSubmit'
+import { useMonthlyCalculation } from './hooks/useMonthlyCalculation'
+import { useNaturalGasValidation } from './hooks/useNaturalGasValidation'
+import { useNaturalGasHeatValue } from './hooks/useNaturalGasHeatValue'
+import { useNaturalGasMeter } from './hooks/useNaturalGasMeter'
+import { useNaturalGasAdminSave } from './hooks/useNaturalGasAdminSave'
 
 const NaturalGasPage = () => {
   const [searchParams] = useSearchParams()
@@ -52,16 +56,35 @@ const NaturalGasPage = () => {
   const reviewUserId = searchParams.get('userId')
 
   // 基本狀態
-  const { executeSubmit, submitting } = useSubmitGuard()
   const [error, setError] = useState<string | null>(null)
   const [toast, setToast] = useState<{ message: string; type: ToastType } | null>(null)
+  const [lightboxSrc, setLightboxSrc] = useState<string | null>(null)
 
   // 表單資料
   const [year] = useState(new Date().getFullYear())
   const [heatValue, setHeatValue] = useState(9000)
-  const [heatValueFiles, setHeatValueFiles] = useState<EvidenceFile[]>([])
-  const [meters, setMeters] = useState<Meter[]>([])  // ⭐ 天然氣錶清單
-  const [bills, setBills] = useState<SimpleBillData[]>([])
+  const [meters, setMeters] = useState<NaturalGasMeter[]>([])  // ⭐ 天然氣錶清單
+  const [newMeterInput, setNewMeterInput] = useState('')  // ⭐ 新錶號輸入
+
+  // ⭐ Type 2 架構：分離「當前編輯」和「已保存群組」
+  const createEmptyBill = (): NaturalGasBillRecord => ({
+    id: generateRecordId(),
+    meterId: undefined,
+    billingStart: '',
+    billingEnd: '',
+    billingUnits: 0,
+    files: [],
+    memoryFiles: [],
+    evidenceFiles: []
+  })
+
+  const [currentEditingGroup, setCurrentEditingGroup] = useState<BillEditingGroup>({
+    groupId: null,
+    records: [createEmptyBill()],
+    memoryFiles: []
+  })
+
+  const [savedGroups, setSavedGroups] = useState<NaturalGasBillRecord[]>([])
 
   // 狀態管理
   const [currentEntryId, setCurrentEntryId] = useState<string | null>(null)
@@ -69,13 +92,21 @@ const NaturalGasPage = () => {
   const [hasSubmittedBefore, setHasSubmittedBefore] = useState(false)
   const [showSuccessModal, setShowSuccessModal] = useState(false)
   const [showClearModal, setShowClearModal] = useState(false)
+  const [filesToDelete, setFilesToDelete] = useState<string[]>([])  // ⭐ 待刪除檔案
 
-  // ⭐ 天然氣錶管理狀態
-  const [newMeterNumber, setNewMeterNumber] = useState('')
+  // ⭐ Type 2 架構：低位熱值臨時編輯狀態
+  const [currentEditingHeatValue, setCurrentEditingHeatValue] = useState<HeatValueEditingState>({
+    month: 1,  // 預設選擇 1 月
+    value: 0,
+    memoryFiles: [],
+    evidenceFiles: []
+  })
 
-  // 記憶體檔案狀態
-  const [heatValueMemoryFiles, setHeatValueMemoryFiles] = useState<MemoryFile[]>([])
-  const [billMemoryFiles, setBillMemoryFiles] = useState<Record<string, MemoryFile[]>>({})
+  // ⭐ 已暫存的月度熱值（點「儲存」後的數據）
+  const [monthlyHeatValues, setMonthlyHeatValues] = useState<Record<number, number>>({})  // 各月熱值
+  const [monthlyHeatValueFiles, setMonthlyHeatValueFiles] = useState<Record<number, EvidenceFile[]>>({})  // 各月已上傳檔案
+  const [monthlyHeatValueMemoryFiles, setMonthlyHeatValueMemoryFiles] = useState<Record<number, MemoryFile[]>>({})  // 各月暫存檔案
+  const [showMonthPicker, setShowMonthPicker] = useState(false)  // 月份選擇器顯示狀態
 
   const pageKey = 'natural_gas'
 
@@ -99,12 +130,198 @@ const NaturalGasPage = () => {
   // 審核模式下只有管理員可編輯
   const isReadOnly = isReviewMode && role !== 'admin'
 
-  // 管理員審核儲存 Hook
-  const { save: adminSave, saving: adminSaving } = useAdminSave(pageKey, reviewEntryId)
-
   const effectiveStatus = (approvalStatus?.status || frontendStatus?.currentStatus || initialStatus) as EntryStatus
   const editPermissions = useEditPermissions(effectiveStatus, isReadOnly, role ?? undefined)
   const { cleanFiles } = useGhostFileCleaner()
+
+  // ⭐ 縮圖載入
+  const thumbnails = useThumbnailLoader({
+    records: savedGroups,
+    fileExtractor: (record) => record.evidenceFiles || []
+  })
+
+  // ==================== Type 2 操作函式 ====================
+
+  // ⭐ 低位熱值操作函式
+
+  // 選擇月份（載入該月數據到編輯區，如果已填寫則載入；否則清空）
+  const handleSelectMonth = (month: number) => {
+    const existingValue = monthlyHeatValues[month]
+    const existingMemoryFiles = monthlyHeatValueMemoryFiles[month] || []
+    const existingEvidenceFiles = monthlyHeatValueFiles[month] || []  // ✅ 載入已上傳的檔案
+
+    setCurrentEditingHeatValue({
+      month,
+      value: existingValue || 0,
+      memoryFiles: existingMemoryFiles,
+      evidenceFiles: existingEvidenceFiles  // ✅ 編輯模式時顯示已存在檔案
+    })
+
+    setShowMonthPicker(false)
+  }
+
+  // 儲存低位熱值到已暫存狀態 / 關閉查看框（審核通過後）
+  const handleSaveHeatValueToState = () => {
+    const { month, value, memoryFiles } = currentEditingHeatValue
+
+    if (month === null) {
+      setError('請選擇月份')
+      return
+    }
+
+    // ⭐ 審核通過後：只關閉編輯框，不儲存數據
+    if (approvalStatus.isApproved) {
+      setCurrentEditingHeatValue({
+        month: 1,
+        value: 0,
+        memoryFiles: [],
+        evidenceFiles: []
+      })
+      return
+    }
+
+    // 驗證：熱值必須填寫
+    if (!value || value === 0) {
+      setError('請填寫低位熱值')
+      return
+    }
+
+    // 判斷是新增還是編輯
+    const isEdit = monthlyHeatValues[month] !== undefined
+
+    // 儲存到已暫存狀態
+    setMonthlyHeatValues(prev => ({
+      ...prev,
+      [month]: value
+    }))
+
+    setMonthlyHeatValueMemoryFiles(prev => ({
+      ...prev,
+      [month]: memoryFiles
+    }))
+
+    // 重置編輯區（保持月份選擇，清空數值和檔案）
+    setCurrentEditingHeatValue({
+      month,
+      value: 0,
+      memoryFiles: [],
+      evidenceFiles: []
+    })
+
+    setToast({
+      message: isEdit ? '已更新' : '已暫存',
+      type: 'success'
+    })
+  }
+
+  // 編輯已填月份（從進度表點鉛筆）
+  const handleEditHeatValueMonth = (month: number) => {
+    handleSelectMonth(month)
+  }
+
+  // ⭐ 帳單操作函式
+
+  // 新增/編輯帳單：保存當前編輯的記錄
+  const addRecordToCurrentGroup = () => {
+    const { groupId, records, memoryFiles } = currentEditingGroup
+
+    // 判斷是編輯模式還是新增模式
+    const isEditMode = groupId !== null
+
+    // ⭐ 過濾出完整填寫的記錄
+    const validationResult = validateGroup(records)
+
+    // 驗證失敗：顯示錯誤
+    if (!validationResult.isValid) {
+      setError(validationResult.error || '請填寫完整資料')
+      return
+    }
+
+    // 沒有有效記錄：顯示提示
+    if (validationResult.validRecords.length === 0) {
+      setError('請至少填寫一筆完整的帳單資料')
+      return
+    }
+
+    // 決定 groupId：編輯模式使用原 groupId，新增模式產生新 ID
+    const finalGroupId = isEditMode ? groupId : generateRecordId()
+
+    // 將 groupId 和 memoryFiles 套用到有效記錄
+    const recordsWithGroupId = validationResult.validRecords.map(r => ({
+      ...r,
+      groupId: finalGroupId,
+      memoryFiles: [...memoryFiles]
+    }))
+
+    if (isEditMode) {
+      // 編輯模式：更新該群組（移除舊的，加入新的）
+      setSavedGroups(prev => [
+        ...recordsWithGroupId,
+        ...prev.filter(r => r.groupId !== groupId)
+      ])
+    } else {
+      // 新增模式：加入已保存列表
+      setSavedGroups(prev => [...recordsWithGroupId, ...prev])
+    }
+
+    // 重置編輯區為一筆空白記錄
+    setCurrentEditingGroup({
+      groupId: null,
+      records: [createEmptyBill()],
+      memoryFiles: []
+    })
+  }
+
+  // 更新編輯區的帳單欄位
+  const updateCurrentGroupRecord = (id: string, field: keyof NaturalGasBillRecord, value: any) => {
+    setCurrentEditingGroup(prev => ({
+      ...prev,
+      records: prev.records.map(record =>
+        record.id === id ? { ...record, [field]: value } : record
+      )
+    }))
+  }
+
+  // 從編輯區移除帳單
+  const removeRecordFromCurrentGroup = (id: string) => {
+    setCurrentEditingGroup(prev => ({
+      ...prev,
+      records: prev.records.filter(r => r.id !== id)
+    }))
+  }
+
+  // 載入群組到編輯區
+  const loadGroupToEditor = (groupId: string) => {
+    const groupRecords = savedGroups.filter(r => r.groupId === groupId)
+    if (groupRecords.length === 0) return
+
+    setCurrentEditingGroup({
+      groupId,
+      records: groupRecords.map(r => ({ ...r })),  // ⭐ 保留所有欄位（memoryFiles + evidenceFiles）
+      memoryFiles: groupRecords[0]?.memoryFiles || []  // ⭐ 載入群組級別的 memoryFiles
+    })
+
+    setToast({ message: '已載入帳單群組到編輯區', type: 'info' })
+  }
+
+  // 刪除已保存的群組
+  const deleteSavedGroup = (groupId: string) => {
+    setSavedGroups(prev => prev.filter(r => r.groupId !== groupId))
+  }
+
+  // 刪除佐證檔案（Type 2 架構）
+  const handleDeleteEvidence = async (fileId: string) => {
+    setFilesToDelete(prev => [...prev, fileId])
+  }
+
+  // ⭐ 統一儲存函數
+  const handleSave = async () => {
+    if (isReviewMode && reviewEntryId) {
+      await handleAdminSave()
+    } else {
+      await hookHandleSave()
+    }
+  }
 
   // 🔍 Debug: 審核狀態檢查
   useEffect(() => {
@@ -131,1606 +348,680 @@ const NaturalGasPage = () => {
   // 統一 loading 狀態
   const loading = dataLoading
 
-  // useEnergySubmit Hook - 處理提交邏輯
-  const { submit: submitEnergy, save: saveEnergy, submitting: energySubmitting, success: submitSuccess } = useEnergySubmit(pageKey, year, approvalStatus.status)  // ✅ 使用資料庫狀態
-
   // useEnergyClear Hook - 處理清除邏輯
   const { clear: clearEnergy, clearing } = useEnergyClear(
     currentEntryId,
     frontendStatus?.currentStatus || initialStatus
   )
 
-  // 監聽帳單變化，確保月份格子即時更新
-  useEffect(() => {
-    console.log('帳單資料更新，月份格子將重新渲染', {
-      帳單數量: bills.length,
-      帳單內容: bills.map(b => ({
-        id: b.id,
-        開始: b.billingStart,
-        結束: b.billingEnd,
-        度數: b.billingUnits
-      }))
-    })
-    // monthlyTotals 會自動重新計算，因為它依賴 bills
-  }, [bills])
+  // ⭐ Type 2 資料載入 Hook
+  useNaturalGasData({
+    pageKey,
+    loadedEntry,
+    loadedFiles,
+    dataLoading,
+    savedGroups,
+    setSavedGroups,
+    setMeters,
+    setHeatValue,
+    setMonthlyHeatValues,  // ⭐ 新增
+    setHeatValueFiles: setMonthlyHeatValueFiles,  // ⭐ 改用月度版本
+    setInitialStatus,
+    setCurrentEntryId
+    // setCurrentStatus 是可選的，暫時省略
+  })
 
-  // 獲取指定月份的天數
-  const getDaysInMonth = (month: number, rocYear: number = 113): number => {
-    const year = rocYear + 1911  // 轉換為西元年
-    // JavaScript Date 的月份是 0-indexed，所以用 month 作為參數時，會得到下個月的第0天（即當月最後一天）
-    return new Date(year, month, 0).getDate()
-  }
+  // ⭐ 月份計算 Hook
+  const { monthlyProgress, monthlyTotals, totalUsage, filledMonthsCount } = useMonthlyCalculation({
+    savedGroups,
+    year
+  })
 
-  // 解析民國日期字串
-  const parseROCDate = (dateStr: string): [number, number, number] | null => {
-    if (!dateStr || !validateRocDate(dateStr)) return null
-    const [year, month, day] = dateStr.split('/').map(Number)
-    return [year, month, day]
-  }
+  // ⭐ 管理員儲存 Hook
+  const {
+    handleAdminSave,
+    saving: adminSaving,
+    error: adminError,
+    success: adminSuccess,
+    clearError: clearAdminError,
+    clearSuccess: clearAdminSuccess
+  } = useNaturalGasAdminSave({
+    pageKey,
+    year,
+    reviewEntryId,
+    savedGroups,
+    meters,
+    heatValue,
+    monthlyHeatValues,
+    monthlyHeatValueFiles,
+    monthlyHeatValueMemoryFiles,
+    monthlyTotals,
+    filesToDelete,
+    setFilesToDelete,
+    setCurrentEditingGroup,
+    setMonthlyHeatValueMemoryFiles,
+    setCurrentEditingHeatValue,
+    reload,
+    reloadApprovalStatus
+  })
 
-  // 日期驗證函數
-  const validateRocDate = (dateStr: string): boolean => {
-    if (!dateStr.trim()) return false
-    const regex = /^(\d{2,3})\/(\d{1,2})\/(\d{1,2})$/
-    if (!regex.test(dateStr)) return false
-
-    const [yearStr, monthStr, dayStr] = dateStr.split('/')
-    const year = parseInt(yearStr)
-    const month = parseInt(monthStr)
-    const day = parseInt(dayStr)
-
-    return year >= 100 && year <= 150 &&
-           month >= 1 && month <= 12 &&
-           day >= 1 && day <= 31
-  }
-
-  // ROC 日期轉 ISO 日期 (113/1/5 → 2024-01-05)
-  const rocToISO = (rocDate: string): string => {
-    try {
-      if (!rocDate || !validateRocDate(rocDate)) {
-        console.log('🔍 [rocToISO] 無效的 ROC 日期:', rocDate)
-        return ''
-      }
-      const [rocYear, month, day] = rocDate.split('/').map(Number)
-      const isoYear = rocYear + 1911
-      const result = `${isoYear}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`
-      console.log('✅ [rocToISO] 轉換成功:', rocDate, '→', result)
-      return result
-    } catch (error) {
-      console.error('❌ [rocToISO] 轉換失敗:', rocDate, error)
-      return ''
+  // ⭐ Type 2 提交 Hook
+  const {
+    handleSubmit,
+    handleSave: hookHandleSave,  // ⭐ 重命名，稍後覆蓋
+    submitting,
+    submitError,
+    submitSuccess: submitSuccessMsg,
+    setSubmitError,
+    setSubmitSuccess
+  } = useNaturalGasSubmit({
+    pageKey,
+    year,
+    savedGroups,
+    meters,
+    heatValue,
+    monthlyHeatValues,  // ⭐ 傳遞月度熱值
+    heatValueFiles: monthlyHeatValueFiles,  // ⭐ 改用月度版本
+    heatValueMemoryFiles: monthlyHeatValueMemoryFiles,  // ⭐ 改用月度版本
+    monthlyTotals,
+    filesToDelete,
+    setFilesToDelete,
+    setCurrentEntryId,
+    reload,
+    reloadApprovalStatus,
+    handleSubmitSuccess: async () => {
+      // ⭐ handleSubmitSuccess 會自動設置 submitSuccess
     }
-  }
-
-  // ISO 日期轉 ROC 日期 (2024-01-05 → 113/1/5)
-  const isoToROC = (isoDate: string): string => {
-    try {
-      if (!isoDate) {
-        console.log('🔍 [isoToROC] 空白日期')
-        return ''
-      }
-      const [isoYear, month, day] = isoDate.split('-').map(Number)
-      const rocYear = isoYear - 1911
-      const result = `${rocYear}/${month}/${day}`
-      console.log('✅ [isoToROC] 轉換成功:', isoDate, '→', result)
-      return result
-    } catch (error) {
-      console.error('❌ [isoToROC] 轉換失敗:', isoDate, error)
-      return ''
-    }
-  }
-
-  // ROC 日期轉 Date 物件（用於日期比較）
-  const rocToDate = (rocDate: string): Date | null => {
-    if (!rocDate || !validateRocDate(rocDate)) return null
-    const [rocYear, month, day] = rocDate.split('/').map(Number)
-    const isoYear = rocYear + 1911
-    return new Date(isoYear, month - 1, day)
-  }
-
-  // 計算計費天數
-  const calculateBillingDays = (startDate: string, endDate: string): number => {
-    if (!validateRocDate(startDate) || !validateRocDate(endDate)) return 0
-
-    try {
-      const [startYear, startMonth, startDay] = startDate.split('/').map(Number)
-      const [endYear, endMonth, endDay] = endDate.split('/').map(Number)
-
-      const start = new Date(startYear + 1911, startMonth - 1, startDay)
-      const end = new Date(endYear + 1911, endMonth - 1, endDay)
-
-      const diffTime = end.getTime() - start.getTime()
-      const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24)) + 1
-
-      return Math.max(0, Math.min(70, diffDays)) // 限制在70天內
-    } catch {
-      return 0
-    }
-  }
-
-  // 簡化的月份分配計算（⭐ 加入目標年份過濾）
-  const calculateMonthlyDistribution = (bill: SimpleBillData, targetYear: number): Record<number, number> => {
-    if (!bill.billingStart || !bill.billingEnd || !bill.billingUnits || bill.billingDays <= 0) {
-      return {}
-    }
-
-    try {
-      const [startYear, startMonth, startDay] = bill.billingStart.split('/').map(Number)
-      const [endYear, endMonth, endDay] = bill.billingEnd.split('/').map(Number)
-
-      // 轉換為西元年
-      const startISOYear = startYear + 1911
-      const endISOYear = endYear + 1911
-
-      // 建立帳單期間的日期物件
-      const billStart = new Date(startISOYear, startMonth - 1, startDay)
-      const billEnd = new Date(endISOYear, endMonth - 1, endDay)
-
-      // ⭐ 計算與目標年份的交集
-      const targetYearStart = new Date(targetYear, 0, 1)  // 目標年份的 1 月 1 日
-      const targetYearEnd = new Date(targetYear, 11, 31, 23, 59, 59)  // 目標年份的 12 月 31 日
-
-      const effectiveStart = new Date(Math.max(billStart.getTime(), targetYearStart.getTime()))
-      const effectiveEnd = new Date(Math.min(billEnd.getTime(), targetYearEnd.getTime()))
-
-      // ⭐ 如果帳單期間與目標年份沒有交集，回傳空物件
-      if (effectiveStart > effectiveEnd) {
-        console.log(`⚠️ 帳單 ${bill.billingStart} ~ ${bill.billingEnd} 不在目標年份 ${targetYear} 內，跳過計算`)
-        return {}
-      }
-
-      // ⭐ 計算有效天數（只計算在目標年份內的天數）
-      const effectiveDays = Math.ceil((effectiveEnd.getTime() - effectiveStart.getTime()) / (1000 * 60 * 60 * 24)) + 1
-
-      // ⭐ 計算有效用量（按比例）
-      const effectiveUnits = bill.billingUnits * (effectiveDays / bill.billingDays)
-
-      // 根據有效期間分配到月份
-      const result: Record<number, number> = {}
-      const startEffMonth = effectiveStart.getMonth() + 1
-      const endEffMonth = effectiveEnd.getMonth() + 1
-      const startEffDay = effectiveStart.getDate()
-      const endEffDay = effectiveEnd.getDate()
-
-      // 同月份：全部有效用量歸該月
-      if (startEffMonth === endEffMonth) {
-        result[startEffMonth] = effectiveUnits
-      } else {
-        // 跨月份：按天數比例分配有效用量
-        const firstMonthDays = getDaysInMonth(startEffMonth, targetYear - 1911) - startEffDay + 1
-        const secondMonthDays = endEffDay
-
-        result[startEffMonth] = (effectiveUnits * firstMonthDays / effectiveDays)
-        result[endEffMonth] = (effectiveUnits * secondMonthDays / effectiveDays)
-      }
-
-      // 四捨五入到小數點後兩位
-      Object.keys(result).forEach(month => {
-        result[Number(month)] = Math.round(result[Number(month)] * 100) / 100
-      })
-
-      console.log(`✅ 帳單分配 (目標年份=${targetYear}):`, {
-        原始期間: `${bill.billingStart} ~ ${bill.billingEnd}`,
-        原始天數: bill.billingDays,
-        原始用量: bill.billingUnits,
-        有效期間: `${effectiveStart.toLocaleDateString()} ~ ${effectiveEnd.toLocaleDateString()}`,
-        有效天數: effectiveDays,
-        有效用量: effectiveUnits.toFixed(2),
-        月份分配: result
-      })
-
-      return result
-    } catch (error) {
-      console.error('月份分配計算失敗:', error)
-      return {}
-    }
-  }
-
-  // 計算每月總使用量和狀態 - 使用 useMemo 確保即時更新
-  const monthlyData = useMemo(() => {
-    console.log('重新計算月份資料，帳單數:', bills.length)
-
-    const totals: Record<number, number> = {}
-    const statuses: Record<number, { status: 'empty' | 'partial' | 'complete', percentage: number, coveredDays: number, daysInMonth: number }> = {}
-
-    // 初始化12個月的狀態
-    for (let month = 1; month <= 12; month++) {
-      const daysInMonth = getDaysInMonth(month, 113)
-      statuses[month] = {
-        status: 'empty',
-        percentage: 0,
-        coveredDays: 0,
-        daysInMonth
-      }
-      totals[month] = 0
-    }
-
-    // 計算每張帳單的月份分配和覆蓋天數
-    bills.forEach(bill => {
-      // ⭐ 計算用量分配（傳入目標年份）
-      const distribution = calculateMonthlyDistribution(bill, year)
-      Object.entries(distribution).forEach(([month, usage]) => {
-        const monthNum = Number(month)
-        totals[monthNum] = (totals[monthNum] || 0) + usage
-      })
-
-      // ⭐ 計算覆蓋天數（也要過濾目標年份）
-      // ✅ 移除 billingUnits > 0 條件，只要有日期就計算覆蓋度
-      if (bill.billingStart && bill.billingEnd) {
-        const startParts = parseROCDate(bill.billingStart)
-        const endParts = parseROCDate(bill.billingEnd)
-        if (startParts && endParts) {
-          const [startYear, startMonth, startDay] = startParts
-          const [endYear, endMonth, endDay] = endParts
-
-          // 建立帳單期間的日期物件
-          const startISOYear = startYear + 1911
-          const endISOYear = endYear + 1911
-          const billStart = new Date(startISOYear, startMonth - 1, startDay)
-          const billEnd = new Date(endISOYear, endMonth - 1, endDay)
-
-          // ⭐ 計算與目標年份的交集
-          const targetYearStart = new Date(year, 0, 1)
-          const targetYearEnd = new Date(year, 11, 31, 23, 59, 59)
-          const effectiveStart = new Date(Math.max(billStart.getTime(), targetYearStart.getTime()))
-          const effectiveEnd = new Date(Math.min(billEnd.getTime(), targetYearEnd.getTime()))
-
-          // 只計算在目標年份內的覆蓋天數
-          if (effectiveStart <= effectiveEnd) {
-            const startEffMonth = effectiveStart.getMonth() + 1
-            const endEffMonth = effectiveEnd.getMonth() + 1
-            const startEffDay = effectiveStart.getDate()
-            const endEffDay = effectiveEnd.getDate()
-
-            if (startEffMonth === endEffMonth) {
-              // 同月份
-              statuses[startEffMonth].coveredDays += (endEffDay - startEffDay + 1)
-            } else {
-              // 開始月份
-              const daysInStartMonth = getDaysInMonth(startEffMonth, year - 1911)
-              statuses[startEffMonth].coveredDays += (daysInStartMonth - startEffDay + 1)
-              // 結束月份
-              statuses[endEffMonth].coveredDays += endEffDay
-            }
-          }
-        }
-      }
-    })
-
-    // 更新狀態
-    Object.keys(statuses).forEach(monthStr => {
-      const month = Number(monthStr)
-      const status = statuses[month]
-
-      // 確保不超過該月總天數
-      status.coveredDays = Math.min(status.coveredDays, status.daysInMonth)
-
-      // 計算百分比和狀態
-      if (status.coveredDays === 0) {
-        status.status = 'empty'
-        status.percentage = 0
-      } else if (status.coveredDays >= status.daysInMonth) {
-        status.status = 'complete'
-        status.percentage = 100
-      } else {
-        status.status = 'partial'
-        status.percentage = Math.round((status.coveredDays / status.daysInMonth) * 100)
-      }
-    })
-
-    console.log('月份狀態更新:', statuses)
-    return { totals, statuses }
-  }, [bills, year])
-
-  const monthlyTotals = monthlyData.totals
-
-
-  // 計算月份涵蓋度（該月被帳單涵蓋的天數百分比）
-  const calculateMonthCoverage = (month: number, bills: SimpleBillData[]): number => {
-    const year = new Date().getFullYear()
-    const daysInMonth = new Date(year, month, 0).getDate() // 該月總天數
-    let coveredDays = 0
-
-    bills.forEach(bill => {
-      if (!bill.billingStart || !bill.billingEnd || bill.billingUnits <= 0) return
-
-      try {
-        const [startYear, startMonth, startDay] = bill.billingStart.split('/').map(Number)
-        const [endYear, endMonth, endDay] = bill.billingEnd.split('/').map(Number)
-
-        // 計算該帳單與指定月份的重疊天數
-        const billStartDate = new Date(startYear + 1911, startMonth - 1, startDay)
-        const billEndDate = new Date(endYear + 1911, endMonth - 1, endDay)
-        const monthStartDate = new Date(year, month - 1, 1)
-        const monthEndDate = new Date(year, month - 1, daysInMonth)
-
-        // 找出重疊期間
-        const overlapStart = new Date(Math.max(billStartDate.getTime(), monthStartDate.getTime()))
-        const overlapEnd = new Date(Math.min(billEndDate.getTime(), monthEndDate.getTime()))
-
-        if (overlapStart <= overlapEnd) {
-          const overlapDays = Math.ceil((overlapEnd.getTime() - overlapStart.getTime()) / (1000 * 60 * 60 * 24)) + 1
-          coveredDays += Math.max(0, overlapDays)
-        }
-      } catch {
-        // 日期解析失敗，跳過
-      }
-    })
-
-    // 確保不超過100%
-    return Math.min(100, (coveredDays / daysInMonth) * 100)
-  }
-
-  // 月份進度狀態
-  const monthlyProgress: MonthStatus[] = useMemo(() => {
-    // 計算年度總量
-    const yearlyTotal = Object.values(monthlyTotals).reduce((sum, usage) => sum + usage, 0)
-    // 預期每月平均用量（如果有資料的話）
-    const expectedMonthlyTotal = yearlyTotal > 0 ? yearlyTotal / 12 : 0
-
-    return Array.from({ length: 12 }, (_, i) => {
-      const month = i + 1
-      const usage = monthlyTotals[month] || 0
-
-      // 計算百分比 - 基於該月帳單涵蓋天數的概念
-      let coverage = 0
-      let status: 'complete' | 'partial' | 'empty' = 'empty'
-
-      if (usage > 0) {
-        // 檢查該月是否被帳單完全涵蓋
-        const monthCoverage = calculateMonthCoverage(month, bills)
-
-        if (monthCoverage >= 100) {
-          // 該月被完全涵蓋
-          coverage = 100
-          status = 'complete'
-        } else if (monthCoverage > 0) {
-          // 該月被部分涵蓋
-          coverage = monthCoverage
-          status = 'partial'
-        }
-      }
-
-      return {
-        month,
-        status,
-        coverage,
-        details: usage > 0 ? `${usage.toFixed(2)} m³` : undefined
-      }
-    })
-  }, [monthlyTotals, bills])
-
-  // 判斷兩個日期區間是否重疊
-  const isDateRangeOverlapping = (
-    start1: string,
-    end1: string,
-    start2: string,
-    end2: string
-  ): boolean => {
-    const date1Start = rocToDate(start1)
-    const date1End = rocToDate(end1)
-    const date2Start = rocToDate(start2)
-    const date2End = rocToDate(end2)
-
-    // 如果任何日期無效，視為不重疊
-    if (!date1Start || !date1End || !date2Start || !date2End) {
-      return false
-    }
-
-    // 重疊條件：start1 <= end2 AND end1 >= start2
-    return date1Start <= date2End && date1End >= date2Start
-  }
-
-  // 檢測所有帳單的重疊情況
-  const detectDateOverlaps = (bills: SimpleBillData[]): Map<string, string[]> => {
-    const overlaps = new Map<string, string[]>()
-
-    // 只檢查有完整日期的帳單
-    const validBills = bills.filter(b => b.billingStart && b.billingEnd)
-
-    for (let i = 0; i < validBills.length; i++) {
-      for (let j = i + 1; j < validBills.length; j++) {
-        const billA = validBills[i]
-        const billB = validBills[j]
-
-        if (isDateRangeOverlapping(
-          billA.billingStart, billA.billingEnd,
-          billB.billingStart, billB.billingEnd
-        )) {
-          // 記錄重疊關係
-          if (!overlaps.has(billA.id)) overlaps.set(billA.id, [])
-          if (!overlaps.has(billB.id)) overlaps.set(billB.id, [])
-
-          // 找到原始索引（用於顯示「第幾張帳單」）
-          const originalIndexA = bills.findIndex(b => b.id === billA.id)
-          const originalIndexB = bills.findIndex(b => b.id === billB.id)
-
-          overlaps.get(billA.id)!.push(`第${originalIndexB + 1}張帳單`)
-          overlaps.get(billB.id)!.push(`第${originalIndexA + 1}張帳單`)
-        }
-      }
-    }
-
-    return overlaps
-  }
-
-  // ⭐ 即時計算帳單重疊狀態
-  const billOverlaps = useMemo(() => {
-    return detectDateOverlaps(bills)
-  }, [bills])
-
-  // 處理帳單變更 - 簡化版本專注即時更新
-  const handleBillChange = (id: string, field: keyof SimpleBillData, value: any) => {
-    setBills(prev => prev.map(bill => {
-      if (bill.id !== id) return bill
-
-      const updated = { ...bill, [field]: value }
-
-      // 當日期變更時，立即重新計算天數
-      if (field === 'billingStart' || field === 'billingEnd') {
-        updated.billingDays = calculateBillingDays(updated.billingStart, updated.billingEnd)
-      }
-
-      // 當有完整資料時，立即計算月份分配並觸發格子更新
-      if (updated.billingStart && updated.billingEnd && updated.billingUnits > 0) {
-        const distribution = calculateMonthlyDistribution(updated, year)
-        const affectedMonths = Object.keys(distribution).map(Number)
-        console.log(`帳單 ${id} 影響月份:`, affectedMonths, '分配:', distribution)
-
-        // 影響月份將在下次 render 時自動更新
-      }
-
-      return updated
-    }))
-  }
-
-  // 新增帳單
-  const addBill = () => {
-    const newBill: SimpleBillData = {
-      id: Date.now().toString(),
-      meterId: bills[bills.length - 1]?.meterId || '',  // ⭐ 自動帶入上一張的天然氣錶
-      paymentMonth: bills.length + 1,  // 自動設定期數（第1期、第2期...）
-      billingStart: '',
-      billingEnd: '',
-      billingDays: 0,
-      billingUnits: 0,
-      files: []
-    }
-    setBills(prev => [...prev, newBill])
-  }
-
-  // 移除帳單
-  const removeBill = (id: string) => {
-    setBills(prev => prev.filter(bill => bill.id !== id))
-  }
+  })
+
+  // ⭐ 驗證 Hook
+  const {
+    validateGroup,
+    validateMeter,
+    checkDuplicateMeter
+  } = useNaturalGasValidation()
 
   // ⭐ 天然氣錶管理函式
   const addMeterFromInput = () => {
-    const trimmed = newMeterNumber.trim()
-    if (!trimmed) {
-      setError('請輸入天然氣錶號碼')
+    // ⭐ 使用驗證 Hook
+    const meterValidation = validateMeter(newMeterInput)
+    if (!meterValidation.isValid) {
+      setError(meterValidation.error || '錶號驗證失敗')
       return
     }
 
-    // 檢查重複
-    if (meters.some(m => m.meterNumber === trimmed)) {
-      setError('此天然氣錶號碼已存在')
+    const trimmed = newMeterInput.trim()
+
+    // ⭐ 使用重複檢查 Hook
+    const duplicateCheck = checkDuplicateMeter(trimmed, meters)
+    if (!duplicateCheck.isValid) {
+      setError(duplicateCheck.error || '錶號重複')
       return
     }
 
-    const newMeter: Meter = {
-      id: Date.now().toString(),
+    const newMeter: NaturalGasMeter = {
+      id: generateRecordId(),
       meterNumber: trimmed
     }
     setMeters(prev => [...prev, newMeter])
-    setNewMeterNumber('')
-    setToast({ message: '天然氣錶新增成功', type: 'success' })
+    setNewMeterInput('')
   }
 
   const deleteMeter = (id: string) => {
-    // 檢查是否有帳單使用此天然氣錶
-    const usedByBills = bills.filter(b => b.meterId === id)
+    // ⭐ Type 2 架構：檢查 savedGroups 中是否有使用此錶號
+    const usedByBills = savedGroups.filter(b => b.meterId === id)
     if (usedByBills.length > 0) {
-      setError(`無法刪除：有 ${usedByBills.length} 張帳單正在使用此天然氣錶`)
+      setError('此錶號已被帳單使用，無法刪除')
       return
     }
 
     setMeters(prev => prev.filter(m => m.id !== id))
-    setToast({ message: '天然氣錶刪除成功', type: 'success' })
   }
 
-  // 驗證資料
-  const validateData = (): string[] => {
-    const errors: string[] = []
+  // ⚠️ 舊的驗證/提交/清除邏輯已被 useNaturalGasSubmit hook 取代，這些函式已刪除
+  // - validateData() → 移至 useNaturalGasValidation hook
+  // - handleSubmit() → useNaturalGasSubmit.handleSubmit()
+  // - handleSave() → useNaturalGasSubmit.handleSave()
 
-    // 檢查熱值設定
-    if (heatValue <= 0) {
-      errors.push('請輸入天然氣熱值')
-    } else if (heatValue < 8000 || heatValue > 12000) {
-      errors.push('天然氣熱值應在 8,000 - 12,000 kcal/m³ 範圍內')
-    }
-
-    // 檢查熱值佐證文件（包含已提交檔案和記憶體暫存檔案）
-    const totalHeatValueFiles = heatValueFiles.length + heatValueMemoryFiles.length
-    if (totalHeatValueFiles === 0) {
-      errors.push('請上傳熱值佐證文件')
-    }
-
-    if (bills.length === 0) {
-      errors.push('請至少新增一筆帳單資料')
-      return errors
-    }
-
-    bills.forEach((bill, index) => {
-      const billNum = index + 1
-
-      // ⭐ 檢查天然氣錶選擇
-      if (!bill.meterId) {
-        errors.push(`第${billNum}筆帳單：請選擇天然氣錶號碼`)
-      }
-
-      if (!bill.billingStart) {
-        errors.push(`第${billNum}筆帳單：請填入計費開始日期`)
-      } else if (!validateRocDate(bill.billingStart)) {
-        errors.push(`第${billNum}筆帳單：計費開始日期格式不正確`)
-      }
-
-      if (!bill.billingEnd) {
-        errors.push(`第${billNum}筆帳單：請填入計費結束日期`)
-      } else if (!validateRocDate(bill.billingEnd)) {
-        errors.push(`第${billNum}筆帳單：計費結束日期格式不正確`)
-      }
-
-      if (bill.billingDays <= 0 || bill.billingDays > 70) {
-        errors.push(`第${billNum}筆帳單：計費天數異常 (${bill.billingDays}天)`)
-      }
-
-      if (bill.billingUnits <= 0) {
-        errors.push(`第${billNum}筆帳單：請輸入計費度數`)
-      }
-
-      // 檢查帳單檔案（包含已提交檔案和記憶體暫存檔案）
-      const billMemoryFilesForThisBill = billMemoryFiles[bill.id] || []
-      const totalBillFiles = bill.files.length + billMemoryFilesForThisBill.length
-      if (totalBillFiles === 0) {
-        errors.push(`第${billNum}筆帳單：請上傳帳單檔案`)
-      }
-    })
-
-    // ⭐ 檢測帳單時間重疊
-    const overlaps = detectDateOverlaps(bills)
-    if (overlaps.size > 0) {
-      overlaps.forEach((conflictsWith, billId) => {
-        const billIndex = bills.findIndex(b => b.id === billId)
-        errors.push(
-          `第${billIndex + 1}張帳單的計費期間與 ${conflictsWith.join('、')} 重疊，請調整日期以避免重複計算`
-        )
-      })
-    }
-
-    // ✅ 移除「必須填滿 12 個月」的強制檢查
-    // 使用者可以只填部分月份，稍後繼續填寫
-    // entries.ts 的 total > 0 檢查已確保至少有一個月有資料
-
-    return errors
-  }
-
-  // 提交資料
-  const handleSubmit = async () => {
-    // ✅ 防止重複提交
-    if (submitting || energySubmitting) {
-      console.log('⚠️ 已經在提交中，忽略重複點擊')
-      return
-    }
-
-    const errors = validateData()
-    if (errors.length > 0) {
-      setError(errors.join('\n'))
-      return
-    }
-
+  // ⭐ Type 2 清除邏輯
+  const handleClearConfirm = async () => {
     try {
-      // 建立月份資料
-      const monthly: Record<string, number> = {}
-      Object.entries(monthlyTotals).forEach(([month, usage]) => {
-        if (usage > 0) {
-          monthly[month] = usage * heatValue // 轉換為千卡
-        }
-      })
-
-      // 準備帳單資料
-      const billData = bills.map(bill => ({
-        id: bill.id,
-        meterId: bill.meterId,  // ⭐ 保存天然氣錶關聯
-        paymentMonth: bill.paymentMonth,
-        billingStartDate: bill.billingStart,
-        billingEndDate: bill.billingEnd,
-        billingDays: bill.billingDays,
-        billingUnits: bill.billingUnits
-      }))
-
-      // ✅ 加入除錯日誌
-      console.log('📤 [NaturalGas] 準備提交的 billData:', billData)
-      console.log('📤 [NaturalGas] 帳單數量:', bills.length)
-      console.log('📤 [NaturalGas] 檔案數量:', Object.keys(billMemoryFiles).length)
-
-      // ✅ 使用 Hook 提交（不傳帳單檔案）
-      const entry_id = await submitEnergy({
-        formData: {
-          monthly,
-          unit: 'kcal',
-          extraPayload: {
-            billData,
-            meters,  // ⭐ 保存天然氣錶清單
-            heatValue,
-            notes: `天然氣用量填報 - ${bills.length}筆帳單，熱值${heatValue}kcal/m³`
-          }
-        },
-        evidenceFiles: heatValueMemoryFiles,  // ✅ 熱值佐證檔案（上傳為 'other' 類型）
-        msdsFiles: [],
-        monthlyFiles: Array(12).fill([])  // ✅ 空陣列，不用這個參數
-      })
-
-      // ✅ 複製要上傳的檔案陣列（避免 state 清空後丟失）
-      const billFilesToUpload = bills.map((bill, i) => ({
-        index: i,
-        files: [...(billMemoryFiles[bill.id] || [])]
-      }))
-
-      // ✅ 立刻清空記憶體檔案（在上傳前，避免重複顯示）
-      setHeatValueMemoryFiles([])
-      setBillMemoryFiles({})
-
-      // ✅ 手動上傳每張帳單的檔案（使用複製的陣列）
-      for (const { index, files } of billFilesToUpload) {
-        for (const memFile of files) {
-          try {
-            await uploadEvidenceWithEntry(memFile.file, {
-              entryId: entry_id,
-              pageKey,
-              standard: '64',
-              recordIndex: index,  // ✅ 用帳單索引，支援無限帳單
-              fileType: 'usage_evidence'  // ✅ 明確指定檔案類型，避免預設為 'other'
-            })
-          } catch (error) {
-            console.error(`上傳第 ${index} 筆帳單的檔案失敗:`, error)
-          }
-        }
-      }
-
-      setCurrentEntryId(entry_id)
-
-      // ✅ 重新載入資料（包含剛上傳的檔案）
-      await reload()
-
-      // 更新前端狀態
-      await frontendStatus?.handleSubmitSuccess()
-
-      // 重新載入審核狀態，更新狀態橫幅
-      reloadApprovalStatus()
-
-      // 顯示成功訊息（使用 Hook 的成功訊息）
-      const totalUsage = Object.values(monthlyTotals).reduce((sum, usage) => sum + usage, 0)
-      const filledMonths = Object.values(monthlyTotals).filter(v => v > 0).length
-      setToast({
-        message: `提交成功！已填寫 ${filledMonths}/12 個月，您可以隨時回來繼續填寫`,
-        type: 'success'
-      })
-      setShowSuccessModal(true)
-      setHasSubmittedBefore(true)
-
-    } catch (error) {
-      console.error('❌ [NaturalGas] 提交失敗:', error)
-      setError(error instanceof Error ? error.message : '提交失敗')
-    }
-  }
-
-  // 暫存資料（不驗證）
-  const handleSave = async () => {
-    // ✅ 防止重複提交
-    if (submitting || energySubmitting) {
-      console.log('⚠️ 已經在暫存中，忽略重複點擊')
-      return
-    }
-
-    try {
-      // 建立月份資料
-      const monthly: Record<string, number> = {}
-      Object.entries(monthlyTotals).forEach(([month, usage]) => {
-        if (usage > 0) {
-          monthly[month] = usage * heatValue // 轉換為千卡
-        }
-      })
-
-      // 準備帳單資料
-      const billData = bills.map(bill => ({
-        id: bill.id,
-        meterId: bill.meterId,  // ⭐ 保存天然氣錶關聯
-        paymentMonth: bill.paymentMonth,
-        billingStartDate: bill.billingStart,
-        billingEndDate: bill.billingEnd,
-        billingDays: bill.billingDays,
-        billingUnits: bill.billingUnits
-      }))
-
-      const totalAmount = Object.values(monthly).reduce((sum, val) => sum + val, 0)
-
-      // 審核模式：使用 useAdminSave hook
-      if (isReviewMode && reviewEntryId) {
-        console.log('📝 管理員審核模式：使用 useAdminSave hook', reviewEntryId)
-
-        // 準備帳單檔案列表
-        const filesToUpload: Array<{
-          file: File
-          metadata: {
-            recordIndex: number
-            fileType: 'usage_evidence' | 'msds' | 'other'
-          }
-        }> = []
-
-        // 收集每張帳單的檔案
-        bills.forEach((bill, billIndex) => {
-          const memFiles = billMemoryFiles[bill.id] || []
-          memFiles.forEach(mf => {
-            filesToUpload.push({
-              file: mf.file,
-              metadata: {
-                recordIndex: billIndex,
-                fileType: 'usage_evidence' as const
-              }
-            })
-          })
-        })
-
-        // 收集熱值佐證檔案
-        heatValueMemoryFiles.forEach((mf, index) => {
-          filesToUpload.push({
-            file: mf.file,
-            metadata: {
-              recordIndex: index,
-              fileType: 'other' as const
-            }
-          })
-        })
-
-        await adminSave({
-          updateData: {
-            unit: 'kcal',
-            amount: totalAmount,
-            payload: {
-              billData,
-              meters,
-              heatValue,
-              notes: `天然氣用量填報 - ${bills.length}筆帳單，熱值${heatValue}kcal/m³`
-            }
-          },
-          files: filesToUpload
-        })
-
-        await reload()
-        reloadApprovalStatus()
-        // 清空記憶體檔案（在 reload 之後，避免檔案暫時消失）
-        setHeatValueMemoryFiles([])
-        setBillMemoryFiles({})
-        setToast({ message: '✅ 儲存成功！資料已更新', type: 'success' })
-        return
-      }
-
-      // 非審核模式：原本的邏輯
-      // ✅ 使用 Hook 暫存（不傳帳單檔案）
-      const entry_id = await saveEnergy({
-        formData: {
-          monthly,
-          unit: 'kcal',
-          extraPayload: {
-            billData,
-            meters,  // ⭐ 保存天然氣錶清單
-            heatValue,
-            notes: `天然氣用量填報 - ${bills.length}筆帳單，熱值${heatValue}kcal/m³`
-          }
-        },
-        evidenceFiles: heatValueMemoryFiles,  // ✅ 熱值佐證檔案（上傳為 'other' 類型）
-        msdsFiles: [],
-        monthlyFiles: Array(12).fill([])
-      })
-
-      // ✅ 複製要上傳的檔案陣列（避免 state 清空後丟失）
-      const billFilesToUpload = bills.map((bill, i) => ({
-        index: i,
-        files: [...(billMemoryFiles[bill.id] || [])]
-      }))
-
-      // ✅ 立刻清空記憶體檔案（在上傳前，避免重複顯示）
-      setHeatValueMemoryFiles([])
-      setBillMemoryFiles({})
-
-      // ✅ 手動上傳每張帳單的檔案（使用複製的陣列）
-      for (const { index, files } of billFilesToUpload) {
-        for (const memFile of files) {
-          try {
-            await uploadEvidenceWithEntry(memFile.file, {
-              entryId: entry_id,
-              pageKey,
-              standard: '64',
-              recordIndex: index,
-              fileType: 'usage_evidence'
-            })
-          } catch (error) {
-            console.error(`上傳第 ${index} 筆帳單的檔案失敗:`, error)
-          }
-        }
-      }
-
-      setCurrentEntryId(entry_id)
-
-      // ✅ 重新載入資料（包含剛上傳的檔案）
-      await reload()
-
-      // 重新載入審核狀態，更新狀態橫幅
-      reloadApprovalStatus()
-
-      // 暫存成功，顯示訊息（但不觸發 handleSubmitSuccess）
-      setToast({
-        message: '暫存成功！資料已儲存',
-        type: 'success'
-      })
-
-    } catch (error) {
-      console.error('❌ [NaturalGas] 暫存失敗:', error)
-      setError(error instanceof Error ? error.message : '暫存失敗')
-    }
-  }
-
-  // 清除所有資料
-  const handleClear = async () => {
-    try {
-      // 收集所有檔案（熱值檔案 + 所有帳單檔案）
-      const allFilesToDelete: EvidenceFile[] = [...heatValueFiles]
-      bills.forEach(bill => {
-        allFilesToDelete.push(...bill.files)
-      })
-
-      // 收集所有記憶體檔案
-      const allMemoryFilesToClean: MemoryFile[] = [...heatValueMemoryFiles]
-      Object.values(billMemoryFiles).forEach(files => {
-        allMemoryFilesToClean.push(...files)
-      })
+      // 收集所有檔案（包含編輯中和已保存的）
+      const allFiles = [
+        ...currentEditingGroup.records.flatMap(r => r.evidenceFiles || []),
+        ...savedGroups.flatMap(r => r.evidenceFiles || []),
+        ...Object.values(monthlyHeatValueFiles).flat()  // ⭐ 月度熱值檔案
+      ]
+      const allMemoryFiles = [
+        ...currentEditingGroup.memoryFiles,  // ✅ 展開陣列
+        ...savedGroups.flatMap(r => r.memoryFiles || []),  // ✅ 使用 flatMap
+        ...currentEditingHeatValue.memoryFiles,  // ✅ 展開陣列
+        ...Object.values(monthlyHeatValueMemoryFiles).flat()  // ⭐ 月度暫存熱值檔案
+      ]
 
       // 使用 Hook 清除
       await clearEnergy({
-        filesToDelete: allFilesToDelete,
-        memoryFilesToClean: allMemoryFilesToClean
+        filesToDelete: allFiles,
+        memoryFilesToClean: allMemoryFiles
       })
 
-      // ✅ 清除成功後，重置前端狀態
+      // 重置前端狀態
+      setCurrentEditingGroup({
+        groupId: null,
+        records: [createEmptyBill()],
+        memoryFiles: []
+      })
+      setSavedGroups([])
+      setMeters([])
+      setNewMeterInput('')
+
+      // ⭐ 重置低位熱值相關狀態
+      setCurrentEditingHeatValue({
+        month: 1,
+        value: 0,
+        memoryFiles: [],
+        evidenceFiles: []
+      })
+      setMonthlyHeatValues({})
+      setMonthlyHeatValueFiles({})
+      setMonthlyHeatValueMemoryFiles({})
+
       setCurrentEntryId(null)
-      setHasSubmittedBefore(false)
-      setHeatValue(9000)  // 重置為預設值
-      setHeatValueFiles([])
-      setHeatValueMemoryFiles([])
-      setBillMemoryFiles({})
-      setMeters([])  // ⭐ 清除天然氣錶清單
-      setNewMeterNumber('')  // ⭐ 清除輸入框
-      setBills([{  // 重置為一張空白帳單
-        id: Date.now().toString(),
-        meterId: '',  // ⭐ 加入天然氣錶欄位
-        paymentMonth: 1,
-        billingStart: '',
-        billingEnd: '',
-        billingDays: 0,
-        billingUnits: 0,
-        files: []
-      }])
-
-      // ✅ 關閉確認彈窗
       setShowClearModal(false)
-
-      // ✅ 顯示成功訊息
-      setToast({ message: '資料已完全清除', type: 'success' })
-      setError(null)
-
-    } catch (error) {
-      console.error('❌ 清除操作失敗:', error)
-      const errorMessage = error instanceof Error ? error.message : '清除操作失敗，請重試'
-      setError(errorMessage)
-      setShowClearModal(false)
+    } catch (err) {
+      console.error('清除失敗:', err)
+      setError('清除失敗，請重試')
     }
   }
 
-  // 處理 Hook 載入的資料
-  useEffect(() => {
-    const processLoadedData = async () => {
-      // ⭐ 等待資料載入完成（避免在 files = [] 時執行）
-      if (dataLoading) {
-        console.log('🔍 [NaturalGasPage] 等待資料載入中...')
-        return
-      }
-
-      if (!loadedEntry) {
-        return
-      }
-
-      try {
-        // 設置基本狀態
-        const entryStatus = loadedEntry.status as EntryStatus
-        setInitialStatus(entryStatus)
-        frontendStatus.setCurrentStatus(entryStatus)  // 同步前端狀態
-        setCurrentEntryId(loadedEntry.id)
-        setHasSubmittedBefore(true)
-
-        // ⭐ 載入天然氣錶清單
-        const metersSource = loadedEntry.payload?.meters || loadedEntry.extraPayload?.meters
-        if (metersSource && Array.isArray(metersSource)) {
-          setMeters(metersSource)
-          console.log('📥 [NaturalGas] Loaded meters:', metersSource.length)
-        }
-
-        // 載入帳單資料（從 payload.billData 讀取）
-        const billDataSource = loadedEntry.payload?.billData || loadedEntry.extraPayload?.billData
-        console.log('📥 [NaturalGas] billDataSource:', billDataSource)
-        console.log('📥 [NaturalGas] payload:', loadedEntry.payload)
-        console.log('📥 [NaturalGas] extraPayload:', loadedEntry.extraPayload)
-
-        if (billDataSource && Array.isArray(billDataSource) && billDataSource.length > 0) {
-          console.log('📊 [NaturalGas] Loading bill data from payload:', {
-            billCount: billDataSource.length,
-            source: loadedEntry.payload?.billData ? 'payload' : 'extraPayload'
-          })
-
-          // 清理幽靈檔案
-          const validFiles = await cleanFiles(loadedFiles)
-
-          const billDataWithFiles = billDataSource.map((bill: any, index: number) => {
-            try {
-              const correctPaymentMonth = bill.paymentMonth || (index + 1)
-
-              // ✅ 根據帳單索引（record_index）關聯檔案，不用 paymentMonth
-              const associatedFiles = validFiles.filter(f =>
-                f.file_type === 'usage_evidence' &&
-                f.page_key === pageKey &&
-                f.record_index === index  // ✅ 用 recordIndex
-              )
-
-              return {
-                id: bill.id || Date.now().toString(),
-                meterId: bill.meterId || '',  // ⭐ 載入天然氣錶關聯
-                paymentMonth: correctPaymentMonth,
-                billingStart: bill.billingStartDate || '',
-                billingEnd: bill.billingEndDate || '',
-                billingDays: bill.billingDays || 0,
-                billingUnits: bill.billingUnits || 0,
-                files: associatedFiles  // ✅ 正確關聯
-              }
-            } catch (error) {
-              console.warn(`載入帳單 ${bill.id} 的檔案時發生錯誤:`, error)
-              return {
-                id: bill.id || Date.now().toString(),
-                meterId: bill.meterId || '',  // ⭐ 載入天然氣錶關聯
-                paymentMonth: bill.paymentMonth || (index + 1),
-                billingStart: bill.billingStartDate || '',
-                billingEnd: bill.billingEndDate || '',
-                billingDays: bill.billingDays || 0,
-                billingUnits: bill.billingUnits || 0,
-                files: []
-              }
-            }
-          })
-
-          setBills(billDataWithFiles)
-          console.log('✅ [NaturalGas] Successfully loaded', billDataWithFiles.length, 'bills')
-        } else {
-          // ✅ 如果沒有資料，確保至少有一張空白帳單
-          console.log('⚠️ [NaturalGas] 沒有載入到帳單資料')
-          if (bills.length === 0) {
-            console.log('📝 [NaturalGas] 新增空白帳單（來自 else 分支）')
-            addBill()
-          }
-        }
-
-        // 載入熱值（從 payload.heatValue 讀取）
-        const heatValueSource = loadedEntry.payload?.heatValue || loadedEntry.extraPayload?.heatValue
-        if (heatValueSource) {
-          setHeatValue(heatValueSource)
-          console.log('✅ [NaturalGas] Heat value loaded:', heatValueSource)
-        }
-
-        // 載入熱值佐證文件（向後相容：支援舊的 'msds' 類型和新的 'other' 類型）
-        const validFiles = await cleanFiles(loadedFiles)
-        const heatValueFilesFiltered = validFiles.filter(f =>
-          (f.file_type === 'other' || f.file_type === 'msds') && f.month === null
-        )
-        setHeatValueFiles(heatValueFilesFiltered)
-
-      } catch (error) {
-        console.error('處理載入資料時發生錯誤:', error)
-        setError('載入資料失敗')
-      }
-    }
-
-    processLoadedData()
-  }, [loadedEntry, loadedFiles, pageKey, dataLoading])
-
-  // 初始化時新增一筆空白帳單（只有在沒有資料可載入時）
-  useEffect(() => {
-    if (!loading && bills.length === 0 && !loadedEntry) {
-      console.log('📝 [NaturalGas] 沒有資料可載入，新增空白帳單')
-      addBill()
-    }
-  }, [loading, bills.length, loadedEntry])
-
-  // 載入中狀態
-  if (loading) {
-    return (
-      <div className="min-h-screen bg-green-50 flex items-center justify-center">
-        <div className="text-center">
-          <Loader2 className="w-12 h-12 animate-spin mx-auto mb-4" style={{ color: designTokens.colors.accentPrimary }} />
-          <p style={{ color: designTokens.colors.textPrimary }}>載入中...</p>
-        </div>
-      </div>
-    )
-  }
+  // ⚠️ 舊的資料載入 useEffect 已被 useNaturalGasData hook 取代（Line 272-286）
 
   return (
-    <div className="min-h-screen bg-green-50">
-      {/* 主要內容區域 - 簡化結構，移除多層嵌套 */}
-      <div className="max-w-6xl mx-auto px-6 py-8 space-y-6">
-
-        {/* 頁面標題 - 無背景框 */}
-        <div className="text-center mb-8">
-          <h1 className="text-3xl font-semibold mb-3" style={{ color: designTokens.colors.textPrimary }}>
-            天然氣使用量填報
-          </h1>
-          <p className="text-base" style={{ color: designTokens.colors.textSecondary }}>
-            請填入天然氣帳單資料，系統將自動計算各月份使用量
-          </p>
-        </div>
-
-        {/* 審核狀態橫幅 - 統一管理 */}
-        {banner && (
-          <div className={`border-l-4 p-4 mb-6 rounded-r-lg ${getBannerColorClasses(banner.type)}`}>
-            <div className="flex items-center">
-              <div className="text-2xl mr-3">{banner.icon}</div>
-              <div className="flex-1">
-                <p className="font-bold text-lg">{banner.title}</p>
-                {banner.message && <p className="text-sm mt-1">{banner.message}</p>}
-                {banner.reason && (
-                  <div className="mt-3 p-3 bg-red-50 rounded-md border border-red-200">
-                    <p className="text-base font-bold text-red-800 mb-1">退回原因：</p>
-                    <p className="text-lg font-semibold text-red-900">{banner.reason}</p>
-                  </div>
-                )}
-                {banner.reviewedAt && (
-                  <p className="text-xs mt-2 opacity-75">
-                    {banner.type === 'rejected' ? '退回時間' : '審核完成時間'}：
-                    {new Date(banner.reviewedAt).toLocaleString()}
-                  </p>
-                )}
-              </div>
-            </div>
+    <>
+    {/* 隱藏數字輸入框箭頭 */}
+    <style>
+      {`
+        .custom-number-input::-webkit-inner-spin-button,
+        .custom-number-input::-webkit-outer-spin-button {
+          -webkit-appearance: none;
+          margin: 0;
+        }
+        .custom-number-input[type=number] {
+          -moz-appearance: textfield;
+        }
+      `}
+    </style>
+    <SharedPageLayout
+      pageHeader={{
+        category: 'N',
+        title: '天然氣',
+        subtitle: 'Natural Gas',
+        categoryPosition: { left: 720, top: 39 },
+        iconColor: '#49A1C7'
+      }}
+      statusBanner={banner ? {
+        approvalStatus,
+        isReviewMode,
+        accentColor: '#49A1C7'
+      } : undefined}
+      instructionText="請輸入各月份低位熱值並上傳熱值報表；可於填寫進度表中點選「        」修改資料；建立表號清單後，上傳繳費<br />單據並填寫天然氣帳單資訊；點選「＋ 新增下一筆資料」以填寫下一月份數據，系統將自動計算各月份使用量。"
+      bottomActionBar={{
+        currentStatus: frontendStatus?.currentStatus || initialStatus,
+        submitting,
+        onSubmit: handleSubmit, // 來自 useNaturalGasSubmit hook
+        onSave: handleSave, // 來自 useNaturalGasSubmit hook
+        onClear: () => setShowClearModal(true), // TODO: 實作 Type 2 清除
+        show: !isReadOnly && !approvalStatus.isApproved && !isReviewMode,
+        accentColor: '#49A1C7'
+      }}
+      reviewSection={isReviewMode ? {
+        isReviewMode,
+        reviewEntryId,
+        reviewUserId,
+        currentEntryId,
+        pageKey,
+        year,
+        category: 'N',
+        amount: totalUsage,
+        unit: 'm³',
+        role: role || null,
+        onSave: handleSave,
+        isSaving: adminSaving
+      } : undefined}
+      notificationState={{
+        success: submitSuccessMsg || adminSuccess,
+        error: error || submitError || adminError,
+        clearSuccess: () => {
+          setSubmitSuccess(null)
+          clearAdminSuccess()
+        },
+        clearError: () => {
+          setError(null)
+          setSubmitError(null)
+          clearAdminError()
+        }
+      }}
+    >
+      {/* 低位熱值填寫進度 */}
+      <div style={{ marginTop: '103px', marginLeft: '367px' }}>
+        <div className="flex items-center gap-[29px]">
+          <div className="w-[42px] h-[42px] rounded-[10px] flex items-center justify-center flex-shrink-0" style={{ backgroundColor: '#49A1C7' }}>
+            <svg xmlns="http://www.w3.org/2000/svg" width="31" height="31" viewBox="0 0 31 31" fill="none">
+              <path d="M15.4999 28.4167C22.6336 28.4167 28.4166 22.6337 28.4166 15.5C28.4166 8.36636 22.6336 2.58337 15.4999 2.58337C8.36624 2.58337 2.58325 8.36636 2.58325 15.5C2.58325 22.6337 8.36624 28.4167 15.4999 28.4167Z" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+              <path d="M15.4999 23.25C19.7801 23.25 23.2499 19.7802 23.2499 15.5C23.2499 11.2198 19.7801 7.75004 15.4999 7.75004C11.2197 7.75004 7.74992 11.2198 7.74992 15.5C7.74992 19.7802 11.2197 23.25 15.4999 23.25Z" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+              <path d="M15.4999 18.0834C16.9267 18.0834 18.0833 16.9268 18.0833 15.5C18.0833 14.0733 16.9267 12.9167 15.4999 12.9167C14.0732 12.9167 12.9166 14.0733 12.9166 15.5C12.9166 16.9268 14.0732 18.0834 15.4999 18.0834Z" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+            </svg>
           </div>
-        )}
-
-        {/* 審核模式指示器 */}
-        {isReviewMode && (
-          <div className="mb-4 p-3 bg-orange-100 border-2 border-orange-300 rounded-lg">
-            <div className="flex items-center justify-center">
-              <Eye className="w-5 h-5 text-orange-600 mr-2" />
-              <span className="text-orange-800 font-medium">
-                📋 審核模式 - 查看填報內容
-              </span>
-            </div>
-            <p className="text-sm text-orange-600 mt-1 text-center">
-              所有輸入欄位已鎖定，僅供審核查看
-            </p>
-          </div>
-        )}
-
-        {/* 月份進度格子 - 移到最上面 */}
-        <div
-          className="rounded-lg border p-6"
-          style={{
-            backgroundColor: designTokens.colors.cardBg,
-            borderColor: designTokens.colors.border,
-            boxShadow: designTokens.shadows.sm
-          }}
-        >
-          {/* 標題 */}
-          <div className="mb-4">
-            <h3 className="text-lg font-medium mb-3 text-gray-700">
-              {year}年度填寫進度
+          <div className="flex flex-col justify-center h-[86px]">
+            <h3 className="text-[28px] font-bold text-black">
+              低位熱值填寫進度
             </h3>
-            <div className="flex gap-6 text-base text-gray-600">
-              <div className="flex items-center gap-2">
-                <span className="w-4 h-4 bg-green-100 border border-green-300 rounded"></span>
-                <span>完全填寫 (100%)</span>
-              </div>
-              <div className="flex items-center gap-2">
-                <span className="w-4 h-4 bg-red-100 border border-red-300 rounded"></span>
-                <span>部分填寫 (1-99%)</span>
-              </div>
-              <div className="flex items-center gap-2">
-                <span className="w-4 h-4 bg-gray-100 border border-gray-300 rounded"></span>
-                <span>未填寫 (0%)</span>
-              </div>
-            </div>
-          </div>
-
-          {/* 12格月份網格 - 顯示度數版本 */}
-          <div className="monthly-progress-grid grid grid-cols-6 gap-2">
-            {Array.from({ length: 12 }, (_, i) => {
-              const month = i + 1
-              const monthStatus = monthlyData.statuses[month]
-              const monthTotal = monthlyData.totals[month] || 0
-
-              // 根據狀態決定顏色
-              let bgColor, borderColor, textColor
-              if (monthStatus.status === 'complete') {
-                bgColor = 'bg-green-100 hover:bg-green-200'
-                borderColor = 'border-green-300'
-                textColor = 'text-green-700'
-              } else if (monthStatus.status === 'partial') {
-                bgColor = 'bg-red-100 hover:bg-red-200'
-                borderColor = 'border-red-300'
-                textColor = 'text-red-700'
-              } else {
-                bgColor = 'bg-gray-100 hover:bg-gray-200'
-                borderColor = 'border-gray-300'
-                textColor = 'text-gray-400'
-              }
-
-              // 建立詳細的 tooltip
-              let tooltipContent = `${month}月 (${monthStatus.daysInMonth}天)`
-              if (monthStatus.status === 'complete') {
-                tooltipContent += `\n完整覆蓋\n用量: ${monthTotal.toFixed(2)} m³`
-              } else if (monthStatus.status === 'partial') {
-                tooltipContent += `\n部分覆蓋 (${monthStatus.percentage}%)\n已填: ${monthStatus.coveredDays}天\n用量: ${monthTotal.toFixed(2)} m³`
-              } else {
-                tooltipContent += '\n無資料'
-              }
-
-              return (
-                <div
-                  key={month}
-                  className={`
-                    rounded-lg p-4 text-center border-2 transition-all duration-200 cursor-help
-                    ${bgColor} ${borderColor}
-                  `}
-                  title={tooltipContent}
-                >
-                  {/* 月份標籤 */}
-                  <div className="text-sm font-medium text-gray-700 mb-2">
-                    {month}月
-                  </div>
-
-                  {/* 用量顯示 */}
-                  <div className={`mt-2 ${textColor}`}>
-                    {monthStatus.status === 'empty' ? (
-                      <span className="text-2xl">○</span>
-                    ) : (
-                      <div className="text-lg font-bold">
-                        {monthTotal.toFixed(1)} m³
-                      </div>
-                    )}
-                  </div>
-                </div>
-              )
-            })}
-          </div>
-
-          {/* 響應式布局說明（手機版改為3x4） */}
-          <style>{`
-            @media (max-width: 640px) {
-              .monthly-progress-grid {
-                grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
-              }
-            }
-          `}</style>
-        </div>
-
-        {/* 天然氣熱值設定與佐證文件 */}
-        <div className="rounded-lg border p-6" style={{
-          backgroundColor: designTokens.colors.cardBg,
-          borderColor: designTokens.colors.border,
-          boxShadow: designTokens.shadows.sm
-        }}>
-          <h2 className="text-xl font-medium mb-6 text-center" style={{ color: designTokens.colors.textPrimary }}>
-            天然氣低位熱值設定與佐證文件
-          </h2>
-
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            {/* 左側：熱值設定 */}
-            <div>
-              <label className="block text-sm font-medium mb-3" style={{ color: designTokens.colors.textPrimary }}>
-                低位熱值 (kcal/m³)
-              </label>
-              <input
-                type="number"
-                min="8000"
-                max="12000"
-                value={heatValue}
-                onChange={(e) => setHeatValue(Number(e.target.value))}
-                className="w-full px-4 py-3 border rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500"
-                style={{
-                  borderColor: designTokens.colors.border,
-                  color: designTokens.colors.textPrimary
-                }}
-                disabled={isReadOnly || approvalStatus.isApproved}
-                placeholder="9000"
-              />
-              <p className="text-xs mt-2" style={{ color: designTokens.colors.textSecondary }}>
-                一般為 9,000 kcal/m³
-              </p>
-            </div>
-
-            {/* 右側：佐證文件 */}
-            <div>
-              <label className="block text-sm font-medium mb-3" style={{ color: designTokens.colors.textPrimary }}>
-                佐證文件
-              </label>
-              <EvidenceUpload
-                pageKey={pageKey}
-                files={heatValueFiles}
-                onFilesChange={setHeatValueFiles}
-                memoryFiles={heatValueMemoryFiles}
-                onMemoryFilesChange={setHeatValueMemoryFiles}
-                maxFiles={3}
-                kind="annual_evidence"
-                mode={isReadOnly || approvalStatus.isApproved ? "view" : "edit"}
-                            isAdminReviewMode={isReviewMode && role === 'admin'}
-                disabled={submitting || isReadOnly || approvalStatus.isApproved}
-              />
-            </div>
           </div>
         </div>
-
-        {/* ⭐ 天然氣錶管理區塊 - 分離顯示與編輯邏輯 */}
-        {/* 顯示條件：有天然氣錶資料 OR 有編輯權限 */}
-        {(meters.length > 0 || (!isReadOnly && !approvalStatus.isApproved)) && (
-          <div className="bg-white border border-gray-300 rounded-lg p-4 mb-6">
-            <h3 className="text-sm font-medium text-gray-700 mb-3">🔥 天然氣錶清單</h3>
-
-            {/* 新增天然氣錶輸入框 - 編輯模式 + 管理員審核模式 */}
-            {!isReadOnly && !approvalStatus.isApproved && (
-              <div className="flex gap-2 mb-3">
-                <input
-                  type="text"
-                  value={newMeterNumber}
-                  onChange={(e) => setNewMeterNumber(e.target.value)}
-                  onKeyPress={(e) => e.key === 'Enter' && addMeterFromInput()}
-                  placeholder="輸入天然氣錶號碼"
-                  className="flex-1 px-3 py-2 text-sm border border-gray-300 rounded focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                  disabled={submitting}
-                />
-                <button
-                  onClick={addMeterFromInput}
-                  disabled={submitting || !newMeterNumber.trim()}
-                  className="px-4 py-2 bg-blue-500 hover:bg-blue-600 text-white text-sm rounded transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  新增
-                </button>
-              </div>
-            )}
-
-            {/* 天然氣錶列表 - 永遠顯示（如果有資料） */}
-            {meters.length === 0 ? (
-              <p className="text-xs text-gray-400 text-center py-2">尚無天然氣錶</p>
-            ) : (
-              <div className="space-y-1">
-                {meters.map(meter => (
-                  <div
-                    key={meter.id}
-                    className="flex items-center justify-between px-3 py-2 bg-gray-50 rounded text-sm"
-                  >
-                    <span className="text-gray-900">{meter.meterNumber}</span>
-                    {/* 刪除按鈕 - 編輯模式 + 管理員審核模式 */}
-                    {!isReadOnly && !approvalStatus.isApproved && (
-                      <button
-                        onClick={() => deleteMeter(meter.id)}
-                        className="text-xs text-red-600 hover:underline"
-                      >
-                        刪除
-                      </button>
-                    )}
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-        )}
-
-        {/* 新增帳單按鈕 - 移到這裡（熱值區和帳單列表之間） */}
-        {!isReadOnly && !approvalStatus.isApproved && !isReviewMode && (
-          <button
-            onClick={addBill}
-            disabled={submitting}
-            className="w-full py-4 bg-green-500 hover:bg-green-600 text-white rounded-lg font-semibold text-lg transition-colors shadow-md hover:shadow-lg"
-          >
-            ➕ 新增帳單資料
-          </button>
-        )}
-
-        {/* 帳單卡片列表 */}
-        {bills.length > 0 && (
-          <div className="space-y-4">
-            {bills.map((bill, index) => (
-              <div
-                key={bill.id}
-                className={`
-                  bg-white border-2 rounded-xl p-6 transition-all
-                  ${billOverlaps.has(bill.id)
-                    ? 'border-red-500 bg-red-50'
-                    : 'border-gray-200 hover:border-green-300'
-                  }
-                `}
-              >
-                {/* ⭐ 重疊警告訊息 */}
-                {billOverlaps.has(bill.id) && (
-                  <div className="mb-4 p-3 bg-red-100 border border-red-300 rounded-lg">
-                    <div className="flex items-start gap-2">
-                      <AlertCircle className="w-5 h-5 text-red-600 flex-shrink-0 mt-0.5" />
-                      <div className="text-sm text-red-700">
-                        <strong>⚠️ 時間重疊警告：</strong>
-                        <br />
-                        此帳單的計費期間與 {billOverlaps.get(bill.id)!.join('、')} 重疊，請調整日期以避免重複計算。
-                      </div>
-                    </div>
-                  </div>
-                )}
-
-                {/* 卡片標題 */}
-                <div className="flex items-center justify-between mb-6 pb-4 border-b-2 border-gray-100">
-                  <h3 className="text-lg font-semibold text-green-700 flex items-center gap-2">
-                    📄 帳單資料
-                  </h3>
-                  {!isReadOnly && !approvalStatus.isApproved && bills.length > 1 && (
-                    <button
-                      onClick={() => removeBill(bill.id)}
-                      className="w-8 h-8 bg-red-500 hover:bg-red-600 text-white rounded-md flex items-center justify-center transition-all hover:scale-110"
-                      disabled={submitting}
-                      title="刪除帳單"
-                    >
-                      ×
-                    </button>
-                  )}
-                </div>
-
-                {/* ⭐ 天然氣錶選擇 */}
-                <div className="mb-4">
-                  <label className="block text-sm font-medium mb-3 text-gray-700">
-                    天然氣錶號碼 <span className="text-red-500">*</span>
-                  </label>
-                  <select
-                    value={bill.meterId || ''}
-                    onChange={(e) => handleBillChange(bill.id, 'meterId', e.target.value)}
-                    className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-500 transition-all"
-                    disabled={submitting || isReadOnly || approvalStatus.isApproved}
-                  >
-                    <option value="">請選擇天然氣錶</option>
-                    {meters.map(meter => (
-                      <option key={meter.id} value={meter.id}>
-                        {meter.meterNumber}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-
-                {/* 計費期間 */}
-                <div className="mb-4">
-                  <label className="block text-sm font-medium mb-3 text-gray-700">
-                    計費期間
-                  </label>
-                  <div className="grid grid-cols-2 gap-4">
-                    <div>
-                      <span className="block text-xs text-gray-500 mb-2">開始日期</span>
-                      <input
-                        type="date"
-                        value={rocToISO(bill.billingStart)}
-                        onChange={(e) => handleBillChange(bill.id, 'billingStart', isoToROC(e.target.value))}
-                        className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-500 transition-all"
-                        disabled={submitting || isReadOnly || approvalStatus.isApproved}
-                      />
-                    </div>
-                    <div>
-                      <span className="block text-xs text-gray-500 mb-2">結束日期</span>
-                      <input
-                        type="date"
-                        value={rocToISO(bill.billingEnd)}
-                        onChange={(e) => handleBillChange(bill.id, 'billingEnd', isoToROC(e.target.value))}
-                        className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-500 transition-all"
-                        disabled={submitting || isReadOnly || approvalStatus.isApproved}
-                      />
-                    </div>
-                  </div>
-                </div>
-
-                {/* 自動計算天數 */}
-                {bill.billingDays > 0 && (
-                  <div className="bg-gray-50 rounded-lg p-3 text-center mb-4">
-                    <span className="text-gray-600 text-sm">
-                      計費天數：<strong className="text-green-700 text-base">{bill.billingDays} 天</strong>（自動計算）
-                    </span>
-                  </div>
-                )}
-
-                {/* 計費度數 */}
-                <div className="mb-4">
-                  <label className="block text-sm font-medium mb-3 text-gray-700">
-                    計費度數 (m³)
-                  </label>
-                  <input
-                    type="number"
-                    placeholder="0"
-                    min="0"
-                    step="0.1"
-                    value={bill.billingUnits || ''}
-                    onChange={(e) => handleBillChange(bill.id, 'billingUnits', Number(e.target.value) || 0)}
-                    className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-500"
-                    disabled={submitting || isReadOnly || approvalStatus.isApproved}
-                  />
-                </div>
-
-                {/* 帳單檔案 */}
-                <div>
-                  <label className="block text-sm font-medium mb-3 text-gray-700">
-                    帳單檔案
-                  </label>
-                  <EvidenceUpload
-                    pageKey={pageKey}
-                    files={bill.files}
-                    onFilesChange={(files) => handleBillChange(bill.id, 'files', files)}
-                    memoryFiles={billMemoryFiles[bill.id] || []}
-                    onMemoryFilesChange={(files) => setBillMemoryFiles(prev => ({...prev, [bill.id]: files}))}
-                    maxFiles={3}
-                    kind="usage_evidence"
-                    mode={isReadOnly || approvalStatus.isApproved ? "view" : "edit"}
-                            isAdminReviewMode={isReviewMode && role === 'admin'}
-                    disabled={submitting || isReadOnly || approvalStatus.isApproved}
-                  />
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-
-        {/* 審核區域 */}
-        {isReviewMode && reviewEntryId && reviewUserId && (
-          <ReviewSection
-            entryId={reviewEntryId}
-            userId={reviewUserId}
-            category="天然氣使用量"
-            userName="填報用戶"
-            amount={Object.values(monthlyTotals).reduce((sum, usage) => sum + usage, 0) * heatValue}
-            unit="kcal"
-            role={role}
-            onSave={handleSave}
-            isSaving={submitting || energySubmitting}
-            onApprove={() => reload()}
-            onReject={() => reload()}
-          />
-        )}
-
-        {/* 底部空間 */}
-        <div className="h-20"></div>
       </div>
 
-      {/* 錯誤模態框 */}
-      {error && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50 p-4">
-          <div className="bg-white rounded-lg shadow-lg max-w-md w-full p-6">
-            <div className="flex items-start space-x-3 mb-4">
-              <AlertCircle className="w-6 h-6 text-red-500 flex-shrink-0 mt-0.5" />
-              <div className="flex-1">
-                <h3 className="text-lg font-semibold text-gray-900 mb-2">發生錯誤</h3>
-                <div className="text-sm text-gray-600 space-y-1">
-                  {error.split('\n').map((line, index) => (
-                    <div key={index}>{line}</div>
-                  ))}
-                </div>
-              </div>
+      {/* 月曆檢視 - 完全照抄化糞池樣式 */}
+      <div style={{ marginTop: '34px', marginBottom: '32px' }}>
+        {/* 整個月曆區域 - 包含顏色說明和網格，一起置中 */}
+        <div className="flex justify-center">
+          <div>
+            {/* 顏色說明區 - 在月份框框往上28px處，靠左對齊月曆 */}
+            {/* 月度低位熱值進度表格 */}
+            <MonthlyHeatValueGrid
+              monthlyHeatValues={monthlyHeatValues}
+              monthlyHeatValueFiles={monthlyHeatValueFiles}
+              monthlyHeatValueMemoryFiles={monthlyHeatValueMemoryFiles}
+              canEdit={editPermissions.canEdit}
+              isApproved={approvalStatus.isApproved}
+              onEdit={handleEditHeatValueMonth}
+            />
+          </div>
+        </div>
+      </div>
+
+      {/* 低位熱值標題 */}
+      <div data-section="heat-value" style={{ marginTop: '103px', marginLeft: '367px' }}>
+        <div className="flex items-center gap-[29px]">
+          <div className="w-[42px] h-[42px] rounded-[10px] flex items-center justify-center flex-shrink-0" style={{ backgroundColor: '#49A1C7' }}>
+            <svg xmlns="http://www.w3.org/2000/svg" width="29" height="29" viewBox="0 0 29 29" fill="none">
+              <path d="M25.375 6.04175C25.375 8.04378 20.5061 9.66675 14.5 9.66675C8.4939 9.66675 3.625 8.04378 3.625 6.04175M25.375 6.04175C25.375 4.03972 20.5061 2.41675 14.5 2.41675C8.4939 2.41675 3.625 4.03972 3.625 6.04175M25.375 6.04175V22.9584C25.375 24.9642 20.5417 26.5834 14.5 26.5834C8.45833 26.5834 3.625 24.9642 3.625 22.9584V6.04175M25.375 14.5001C25.375 16.5059 20.5417 18.1251 14.5 18.1251C8.45833 18.1251 3.625 16.5059 3.625 14.5001" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+            </svg>
+          </div>
+          <div className="flex flex-col justify-center h-[86px]">
+            <h3 className="text-[28px] font-bold text-black">
+              低位熱值
+            </h3>
+          </div>
+        </div>
+      </div>
+
+      {/* 填寫框 - Type 3 樣式 */}
+      <div className="flex justify-center" style={{ marginTop: '39px' }}>
+        <div
+          style={{
+            width: '1005px',
+            minHeight: '520px',
+            flexShrink: 0,
+            borderRadius: '37px',
+            background: '#49A1C7',
+            paddingTop: '27px',
+            paddingLeft: '49px',
+            paddingRight: '49px',
+            paddingBottom: '45px'
+          }}
+        >
+          {/* ⭐ 月份與低位熱值區域 - 左右並排 */}
+          <MonthlyHeatValueInput
+            selectedMonth={currentEditingHeatValue.month || 1}
+            onMonthChange={handleSelectMonth}
+            showMonthPicker={showMonthPicker}
+            onToggleMonthPicker={setShowMonthPicker}
+            heatValue={currentEditingHeatValue.value}
+            onHeatValueChange={(value) => {
+              setCurrentEditingHeatValue(prev => ({
+                ...prev,
+                value
+              }))
+            }}
+            canEdit={editPermissions.canEdit}
+            isApproved={approvalStatus.isApproved}
+          />
+
+          {/* 熱值報表上傳 */}
+          <HeatValueReportUpload
+            selectedMonth={currentEditingHeatValue.month || 1}
+            monthlyMemoryFiles={{
+              [currentEditingHeatValue.month || 1]: currentEditingHeatValue.memoryFiles
+            }}
+            monthlyFiles={{
+              ...monthlyHeatValueFiles,
+              [currentEditingHeatValue.month || 1]: currentEditingHeatValue.evidenceFiles || []  // ✅ 編輯模式顯示已載入的檔案
+            }}
+            onMemoryFilesChange={(month, files) => {
+              setCurrentEditingHeatValue(prev => ({
+                ...prev,
+                memoryFiles: files
+              }))
+            }}
+            onFilesChange={(month, files) => {
+              // ✅ 同時更新編輯狀態和全局狀態
+              setCurrentEditingHeatValue(prev => ({
+                ...prev,
+                evidenceFiles: files
+              }))
+              setMonthlyHeatValueFiles(prev => ({
+                ...prev,
+                [month]: files
+              }))
+            }}
+            onDeleteEvidence={handleDeleteEvidence}
+            onError={setError}
+            onLightboxOpen={setLightboxSrc}
+            canEdit={editPermissions.canEdit}
+            isApproved={approvalStatus.isApproved}
+          />
+        </div>
+      </div>
+
+      {/* ⭐ 儲存低位熱值按鈕 / 關閉查看框按鈕（審核通過後） */}
+      <div style={{ marginTop: '46px' }} className="flex justify-center">
+        <button
+          onClick={handleSaveHeatValueToState}
+          disabled={!editPermissions.canEdit && !approvalStatus.isApproved}
+          style={{
+            width: '227px',
+            height: '52px',
+            borderRadius: '8px',
+            background: '#000',
+            border: 'none',
+            color: '#FFF',
+            fontFamily: 'Inter',
+            fontSize: '20px',
+            fontWeight: 400,
+            cursor: (editPermissions.canEdit || approvalStatus.isApproved) ? 'pointer' : 'not-allowed',
+            opacity: (editPermissions.canEdit || approvalStatus.isApproved) ? 1 : 0.5,
+            transition: 'background 0.2s, opacity 0.2s'
+          }}
+          className="hover:opacity-80"
+        >
+          {currentEditingHeatValue.month && monthlyHeatValues[currentEditingHeatValue.month] !== undefined ? '變更儲存' : '儲存'}
+        </button>
+      </div>
+
+      {/* 錶號管理區塊 */}
+      <MeterManagementSection
+        meters={meters}
+        savedGroups={savedGroups}
+        newMeterInput={newMeterInput}
+        onNewMeterInputChange={setNewMeterInput}
+        onAddMeter={addMeterFromInput}
+        onDeleteMeter={deleteMeter}
+        canEdit={editPermissions.canEdit}
+        isApproved={approvalStatus.isApproved}
+      />
+
+      {/* 使用數據 - Type 2 架構 */}
+      <div style={{ marginTop: '13.75px' }}>
+        {/* 使用數據標題 */}
+        <div data-section="bill-editing" style={{ marginTop: '103px', marginLeft: '367px' }}>
+          <div className="flex items-center gap-[29px]">
+            <div className="w-[42px] h-[42px] rounded-[10px] flex items-center justify-center flex-shrink-0" style={{ backgroundColor: '#49A1C7' }}>
+              <svg xmlns="http://www.w3.org/2000/svg" width="29" height="29" viewBox="0 0 29 29" fill="none">
+                <path d="M25.375 6.04163C25.375 8.04366 20.5061 9.66663 14.5 9.66663C8.4939 9.66663 3.625 8.04366 3.625 6.04163M25.375 6.04163C25.375 4.03959 20.5061 2.41663 14.5 2.41663C8.4939 2.41663 3.625 4.03959 3.625 6.04163M25.375 6.04163V22.9583C25.375 24.9641 20.5417 26.5833 14.5 26.5833C8.45833 26.5833 3.625 24.9641 3.625 22.9583V6.04163M25.375 14.5C25.375 16.5058 20.5417 18.125 14.5 18.125C8.45833 18.125 3.625 16.5058 3.625 14.5" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+              </svg>
             </div>
-            <div className="flex justify-end">
-              <button
-                onClick={() => setError(null)}
-                className="px-4 py-2 bg-red-500 text-white rounded-lg hover:bg-red-600"
-              >
-                確定
-              </button>
+            <div className="flex flex-col justify-center h-[86px]">
+              <h3 className="text-[28px] font-bold text-black">
+                使用數據
+              </h3>
             </div>
           </div>
         </div>
-      )}
 
-      {/* 成功模態框 */}
-      {showSuccessModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50 p-4">
-          <div className="bg-white rounded-lg shadow-lg max-w-md w-full p-6">
-            <div className="text-center">
-              <CheckCircle className="w-12 h-12 text-green-500 mx-auto mb-4" />
-              <h3 className="text-lg font-semibold text-gray-900 mb-2">提交成功！</h3>
-              <p className="text-gray-600 mb-6">天然氣使用量資料已成功儲存</p>
-              <button
-                onClick={() => setShowSuccessModal(false)}
-                className="px-6 py-2 bg-green-500 text-white rounded-lg hover:bg-green-600"
-              >
-                確認
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+        {/* 藍色容器框 - 上傳區 + 表單 */}
+        <div style={{ marginTop: '34px' }} className="flex justify-center">
+          <div
+            style={{
+              width: '1005px',
+              minHeight: '487px',
+              borderRadius: '28px',
+              border: '1px solid rgba(0, 0, 0, 0.25)',
+              background: '#49A1C7',
+              padding: '27px 49px 38px 49px',
+              display: 'flex',
+              gap: '49px',
+              alignItems: 'flex-start'
+            }}
+          >
+            {/* 左側：檔案上傳區 */}
+            <div style={{ width: '358px', flexShrink: 0, position: 'relative' }}>
+              {/* 繳費單據標籤 - 與表號水平對齊 */}
+              <label style={{
+                position: 'absolute',
+                top: '0',
+                left: '0',
+                color: '#000',
+                fontFamily: 'Inter',
+                fontSize: '20px',
+                fontWeight: 400,
+                lineHeight: 'normal'
+              }}>
+                繳費單據
+              </label>
 
-      {/* 清除確認模態框 */}
-      {showClearModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50 p-4">
-          <div className="bg-white rounded-lg shadow-lg max-w-md w-full p-6">
-            <div className="flex items-start space-x-3 mb-4">
-              <AlertCircle className="w-6 h-6 text-orange-500 flex-shrink-0 mt-0.5" />
-              <div>
-                <h3 className="text-lg font-semibold text-gray-900 mb-2">確認清除</h3>
-                <p className="text-gray-600">清除後，所有帳單資料都會被移除，確定要繼續嗎？</p>
-              </div>
-            </div>
-            <div className="flex justify-end space-x-3">
-              <button
-                onClick={() => setShowClearModal(false)}
-                className="px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50"
-              >
-                取消
-              </button>
-              <button
-                onClick={handleClear}
-                disabled={clearing}
-                className="px-4 py-2 text-white rounded-lg transition-colors font-medium flex items-center justify-center"
-                style={{
-                  backgroundColor: clearing ? '#9ca3af' : designTokens.colors.error,
-                  opacity: clearing ? 0.7 : 1
-                }}
-                onMouseEnter={(e) => {
-                  if (!clearing) {
-                    (e.target as HTMLButtonElement).style.backgroundColor = '#dc2626';
+              {/* 上傳框 - 距離藍色框頂部 68px */}
+              <div style={{ position: 'absolute', top: '41px', left: '0' }}>
+                <FileDropzone
+                  width="358px"
+                  height="308px"
+                  accept=".xlsx,.xls,.pdf,.jpg,.jpeg,.png,.gif,.webp,.bmp,.svg,image/*,application/pdf,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                  multiple={false}
+                  onFileSelect={(files) => {
+                    if (editPermissions.canEdit && !approvalStatus.isApproved) {
+                      const file = files[0]
+                      const memoryFile = createMemoryFile(file)
+                      setCurrentEditingGroup(prev => ({
+                        ...prev,
+                        memoryFiles: [memoryFile]
+                      }))
+                    }
+                  }}
+                  disabled={
+                    !editPermissions.canEdit ||
+                    approvalStatus.isApproved ||
+                    submitting ||
+                    currentEditingGroup.memoryFiles.length > 0 ||
+                    (currentEditingGroup.records[0]?.evidenceFiles?.length || 0) > 0
                   }
-                }}
-                onMouseLeave={(e) => {
-                  if (!clearing) {
-                    (e.target as HTMLButtonElement).style.backgroundColor = designTokens.colors.error;
-                  }
-                }}
-              >
-                {clearing ? (
-                  <>
-                    <Loader2 className="w-4 h-4 animate-spin mr-2" />
-                    清除中...
-                  </>
-                ) : (
-                  '確定清除'
+                  readOnly={!editPermissions.canEdit || approvalStatus.isApproved}
+                  file={currentEditingGroup.memoryFiles[0] || null}
+                  onRemove={() => {
+                    setCurrentEditingGroup(prev => ({
+                      ...prev,
+                      memoryFiles: []
+                    }))
+                  }}
+                  showFileActions={editPermissions.canEdit && !approvalStatus.isApproved}
+                  onFileClick={(file) => {
+                    if (file.preview) {
+                      setLightboxSrc(file.preview)
+                    }
+                  }}
+                  primaryText="點擊或拖放檔案暫存"
+                  secondaryText="支援所有檔案格式，最大 10MB"
+                />
+
+                {/* ⭐ 已儲存的佐證檔案（可刪除） */}
+                {currentEditingGroup.records[0]?.evidenceFiles && currentEditingGroup.records[0].evidenceFiles.length > 0 && (
+                  <div style={{ marginTop: '19px', width: '358px' }}>
+                    {currentEditingGroup.records[0].evidenceFiles.map((file) => {
+                      const isImage = file.mime_type.startsWith('image/')
+                      const thumbnailUrl = thumbnails[file.id]
+
+                      return (
+                        <div
+                          key={file.id}
+                          style={{
+                            borderRadius: '28px',
+                            border: '1px solid rgba(0, 0, 0, 0.25)',
+                            background: '#FFF',
+                            display: 'flex',
+                            alignItems: 'center',
+                            padding: '16px 21px',
+                            gap: '12px',
+                          }}
+                        >
+                          {/* 檔案縮圖 */}
+                          <div
+                            style={{
+                              width: '48px',
+                              height: '48px',
+                              borderRadius: '8px',
+                              overflow: 'hidden',
+                              flexShrink: 0,
+                              cursor: isImage ? 'pointer' : 'default',
+                              background: '#f0f0f0',
+                              border: '1px solid rgba(0, 0, 0, 0.1)',
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                            }}
+                            onClick={() => {
+                              if (isImage && thumbnailUrl) {
+                                setLightboxSrc(thumbnailUrl)
+                              }
+                            }}
+                          >
+                            {isImage && thumbnailUrl ? (
+                              <img
+                                src={thumbnailUrl}
+                                alt={file.file_name}
+                                style={{
+                                  width: '100%',
+                                  height: '100%',
+                                  objectFit: 'cover',
+                                }}
+                              />
+                            ) : (
+                              <FileTypeIcon fileType={getFileType(file.mime_type, file.file_name)} size={36} />
+                            )}
+                          </div>
+
+                          {/* 檔名 */}
+                          <div className="flex-1 overflow-hidden">
+                            <p className="text-[14px] font-medium text-black truncate">
+                              {file.file_name}
+                            </p>
+                            <p className="text-[12px] text-gray-500">
+                              {file.file_size ? (file.file_size / 1024).toFixed(1) : '0.0'} KB
+                            </p>
+                          </div>
+
+                          {/* 刪除按鈕 */}
+                          {editPermissions.canEdit && !approvalStatus.isApproved && (
+                            <button
+                              onClick={() => {
+                                // ✅ 標記檔案為待刪除
+                                handleDeleteEvidence(file.id)
+
+                                // 從 records 中移除該檔案
+                                setCurrentEditingGroup(prev => ({
+                                  ...prev,
+                                  records: prev.records.map((r, idx) => {
+                                    if (idx === 0 && r.evidenceFiles) {
+                                      return {
+                                        ...r,
+                                        evidenceFiles: r.evidenceFiles.filter(f => f.id !== file.id)
+                                      }
+                                    }
+                                    return r
+                                  })
+                                }))
+                              }}
+                              className="p-2 text-black hover:text-red-600 hover:bg-red-50 rounded transition-colors"
+                              title="刪除檔案"
+                            >
+                              <Trash2 style={{ width: '32px', height: '32px' }} />
+                            </button>
+                          )}
+                        </div>
+                      )
+                    })}
+                  </div>
                 )}
-              </button>
+              </div>
+            </div>
+
+            {/* 右側：表單區域 */}
+            <div style={{ flex: 1 }}>
+              <NaturalGasBillInputFields
+                currentGroup={currentEditingGroup}
+                onUpdate={updateCurrentGroupRecord}
+                onDelete={removeRecordFromCurrentGroup}
+                meters={meters}
+                isReadOnly={isReadOnly || (approvalStatus.isApproved && !isReviewMode)}
+              />
             </div>
           </div>
         </div>
-      )}
 
-      {/* 底部操作欄 - 只在非唯讀模式且未通過時顯示 */}
-      {!isReadOnly && !approvalStatus.isApproved && !isReviewMode && (
-        <BottomActionBar
-          currentStatus={frontendStatus?.currentStatus || initialStatus}
-          submitting={submitting}
-          onSubmit={handleSubmit}
-          onSave={handleSave}
-          onClear={() => setShowClearModal(true)}
-        />
-      )}
+        {/* 新增下一筆資料 / 儲存變更按鈕 - 在藍色框外 */}
+        <div style={{ marginTop: '46px' }} className="flex justify-center">
+          <button
+            onClick={addRecordToCurrentGroup}
+            disabled={!editPermissions.canEdit || approvalStatus.isApproved || submitting}
+            style={{
+              width: '227px',
+              height: '52px',
+              borderRadius: '8px',
+              background: '#000',
+              border: 'none',
+              color: '#FFF',
+              fontFamily: 'Inter',
+              fontSize: '20px',
+              fontWeight: 400,
+              cursor: editPermissions.canEdit && !approvalStatus.isApproved && !submitting ? 'pointer' : 'not-allowed',
+              opacity: editPermissions.canEdit && !approvalStatus.isApproved && !submitting ? 1 : 0.5,
+              transition: 'background 0.2s, opacity 0.2s'
+            }}
+            className="hover:opacity-80"
+          >
+            {currentEditingGroup.groupId ? '儲存變更' : '+ 新增下一筆資料'}
+          </button>
+        </div>
 
-      {/* Toast 通知 */}
-      {toast && (
-        <Toast
-          message={toast.message}
-          type={toast.type}
-          onClose={() => setToast(null)}
-        />
-      )}
+        {/* ⭐ Type 2 資料列表 */}
+        {savedGroups.length > 0 && (
+          <div style={{ marginTop: '34px' }}>
+            <MobileEnergyGroupListSection
+              savedGroups={savedGroups as any}
+              thumbnails={thumbnails}
+              isReadOnly={isReadOnly}
+              approvalStatus={approvalStatus}
+              onEditGroup={loadGroupToEditor}
+              onDeleteGroup={deleteSavedGroup}
+              onPreviewImage={(src) => setLightboxSrc(src)}
+              iconColor="#49A1C7"
+            />
+          </div>
+        )}
+      </div>
+    </SharedPageLayout>
 
-    </div>
+    {/* 清除確認 Modal */}
+    <ConfirmClearModal
+      show={showClearModal}
+      onConfirm={handleClearConfirm}
+      onCancel={() => setShowClearModal(false)}
+      isClearing={clearing}
+    />
+
+    {/* 圖片放大檢視 */}
+    <ImageLightbox
+      src={lightboxSrc}
+      onClose={() => setLightboxSrc(null)}
+    />
+    </>
   )
 }
 

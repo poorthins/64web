@@ -6,7 +6,7 @@ export interface UpsertEntryInput {
   page_key: string
   period_year: number
   unit: string
-  monthly: Record<string, number>
+  monthly?: Record<string, number>  // Optional（Type 5 不需要）
   notes?: string
   payload?: any       // 主要的 payload 數據
   extraPayload?: any  // 額外的 payload 數據
@@ -111,13 +111,13 @@ export async function upsertEnergyEntry(
       user_id: user.id,
       page_key: input.page_key,
       period_year: input.period_year,
-      monthly_data_count: Object.keys(input.monthly).length,
+      monthly_data_count: Object.keys(input.monthly || {}).length,
       preserve_status: preserveStatus,
       initial_status: initialStatus
     })
 
     // 計算總使用量
-    const total = sumMonthly(input.monthly)
+    const total = sumMonthly(input.monthly || {})
 
     // 純檔案上傳頁面（只需要檔案，不需要數值）
     const PURE_FILE_UPLOAD_PAGES = ['employee_commute'];

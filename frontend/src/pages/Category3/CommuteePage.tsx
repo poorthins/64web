@@ -45,9 +45,9 @@ export default function CommutePage() {
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
 
-  // 檔案狀態（只保留 Excel 檔案）
-  const [excelFile, setExcelFile] = useState<EvidenceFile[]>([]);
-  const [excelMemoryFiles, setExcelMemoryFiles] = useState<MemoryFile[]>([]);
+  // 檔案狀態（只保留 Excel 檔案）- Type 5 單檔上傳
+  const [excelFile, setExcelFile] = useState<EvidenceFile | null>(null);
+  const [excelMemoryFile, setExcelMemoryFile] = useState<MemoryFile | null>(null);
 
   // 簡化的提交保護函數
   const executeSubmit = async (fn: () => Promise<void>) => {
@@ -112,15 +112,23 @@ export default function CommutePage() {
       const cleanAndAssignFiles = async () => {
         const validFiles = await cleanFiles(loadedFiles);
 
-        // 只處理 Excel 檔案（支援 .xlsx 和 .xls）
+        // 只處理 Excel 檔案（支援 .xlsx 和 .xls）- Type 5 單檔
         const excelFiles = validFiles.filter(f =>
           f.file_type === 'other' &&
           /\.(xlsx|xls)$/i.test(f.file_name)
         );
 
-        setExcelFile(excelFiles);
+        const newExcelFile = excelFiles[0] || null;
+        setExcelFile(newExcelFile);
+
+        // 如果載入到新檔案，清除暫存（表示已上傳成功）
+        if (newExcelFile) {
+          setExcelMemoryFile(null);
+        }
       };
       cleanAndAssignFiles();
+    } else {
+      setExcelFile(null);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loadedFiles]);
@@ -128,7 +136,7 @@ export default function CommutePage() {
   // 統一提交函數
   const submitData = async (isDraft: boolean) => {
     // 檢查是否有檔案
-    if (excelFile.length === 0 && excelMemoryFiles.length === 0) {
+    if (!excelFile && !excelMemoryFile) {
       throw new Error('請上傳 Excel 檔案');
     }
 
@@ -138,19 +146,18 @@ export default function CommutePage() {
         page_key: pageKey,
         period_year: year,
         unit: COMMUTE_CONFIG.unit,
-        monthly: { '1': 0 }, // Type 5 不記錄 monthly
         notes: '員工通勤資料',
         status: isDraft ? 'saved' : 'submitted',
         payload: {
-          excelFileName: excelMemoryFiles[0]?.file_name || excelFile[0]?.file_name || '員工通勤.xlsx'
+          excelFileName: excelMemoryFile?.file_name || excelFile?.file_name || '員工通勤.xlsx'
         }
       });
 
       setCurrentEntryId(response.entry_id);
 
       // 2️⃣ 上傳 Excel 檔案
-      for (const memFile of excelMemoryFiles) {
-        await fileAPI.uploadEvidenceFile(memFile.file, {
+      if (excelMemoryFile) {
+        await fileAPI.uploadEvidenceFile(excelMemoryFile.file, {
           page_key: pageKey,
           period_year: year,
           file_type: 'other',
@@ -163,9 +170,8 @@ export default function CommutePage() {
       // 3️⃣ 更新狀態
       setSuccess(isDraft ? '暫存成功！資料已儲存' : '提交成功！');
       setCurrentStatus(isDraft ? 'saved' : 'submitted');
-      setExcelMemoryFiles([]);
 
-      // 4️⃣ 重新載入
+      // 4️⃣ 重新載入（useEffect 會自動清除 memory file）
       await reload();
       reloadApprovalStatus();
 
@@ -185,25 +191,23 @@ export default function CommutePage() {
       await executeSubmit(async () => {
         console.log('📝 管理員審核模式：使用 useAdminSave hook', reviewEntryId);
 
-        const filesToUpload = excelMemoryFiles.map((mf: MemoryFile) => ({
-          file: mf.file,
+        const filesToUpload = excelMemoryFile ? [{
+          file: excelMemoryFile.file,
           metadata: { recordIndex: 0, allRecordIds: ['commute'] }
-        }));
+        }] : [];
 
         await adminSave({
           updateData: {
             unit: COMMUTE_CONFIG.unit,
             amount: 0,
-            payload: {
-              monthly: { '1': 0 }
-            }
+            payload: {}
           },
           files: filesToUpload
         });
 
+        // reload（useEffect 會自動清除 memory file）
         await reload();
         reloadApprovalStatus();
-        setExcelMemoryFiles([]);
         setSuccess('✅ 儲存成功！資料已更新');
       });
       return;
@@ -224,14 +228,14 @@ export default function CommutePage() {
         await deleteEnergyEntry(currentEntryId);
       }
 
-      // 刪除所有檔案
-      for (const file of excelFile) {
-        await deleteEvidenceFile(file.id);
+      // 刪除檔案
+      if (excelFile) {
+        await deleteEvidenceFile(excelFile.id);
       }
 
       // 重置狀態
-      setExcelFile([]);
-      setExcelMemoryFiles([]);
+      setExcelFile(null);
+      setExcelMemoryFile(null);
       setCurrentEntryId(null);
       setCurrentStatus('submitted');
       setShowClearConfirmModal(false);
@@ -307,9 +311,9 @@ export default function CommutePage() {
           iconColor={COMMUTE_CONFIG.iconColor}
           pageKey={pageKey}
           excelFile={excelFile}
-          excelMemoryFiles={excelMemoryFiles}
-          onExcelFilesChange={setExcelFile}
-          onExcelMemoryFilesChange={setExcelMemoryFiles}
+          excelMemoryFile={excelMemoryFile}
+          onExcelFileChange={setExcelFile}
+          onExcelMemoryFileChange={setExcelMemoryFile}
           disabled={submitting || !editPermissions.canUploadFiles}
           isReadOnly={isReadOnly || approvalStatus.isApproved}
           canUploadFiles={editPermissions.canUploadFiles}

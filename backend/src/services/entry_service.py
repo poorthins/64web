@@ -48,16 +48,18 @@ def get_category_from_page_key(page_key: str) -> str:
     return CATEGORY_MAP[page_key]
 
 
-def calculate_amount(monthly: Dict[str, float]) -> float:
+def calculate_amount(monthly: Optional[Dict[str, float]]) -> float:
     """
     計算月份數據總和
 
     Args:
-        monthly: 月份數據 {month: value}
+        monthly: 月份數據 {month: value}（Type 5 可為 None）
 
     Returns:
         總量
     """
+    if monthly is None:
+        return 0.0
     return round(sum(monthly.values()), 2)
 
 
@@ -82,7 +84,7 @@ def create_energy_entry(
     page_key: str,
     period_year: int,
     unit: str,
-    monthly: Dict[str, float],
+    monthly: Optional[Dict[str, float]] = None,
     notes: Optional[str] = None,
     payload: Optional[Dict[str, Any]] = None,
     extraPayload: Optional[Dict[str, Any]] = None,
@@ -97,7 +99,7 @@ def create_energy_entry(
         page_key: 能源類型鍵值
         period_year: 填報年份
         unit: 單位
-        monthly: 月份數據
+        monthly: 月份數據（Type 5 可為 None）
         notes: 備註
         payload: 主要 payload
         extraPayload: 額外 payload
@@ -119,7 +121,10 @@ def create_energy_entry(
 
         # 2. 合併所有數據到 payload（將 monthly 和 extraPayload 都放入 payload）
         final_payload = payload or {}
-        final_payload['monthly'] = monthly
+
+        # 只有當 monthly 不為 None 時才寫入（Type 5 不需要 monthly）
+        if monthly is not None:
+            final_payload['monthly'] = monthly
 
         # 如果有 extraPayload，合併到 final_payload 中（資料庫只有 payload 欄位）
         if extraPayload is not None:
