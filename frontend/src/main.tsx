@@ -1,6 +1,6 @@
 import React from 'react'
 import ReactDOM from 'react-dom/client'
-import AppRouter from './routes/AppRouter.tsx'
+import AppRouter from './AppRouter.tsx'
 import './index.css'
 
 // 開發環境載入測試工具
