@@ -1,6 +1,6 @@
 import { useType2Helpers } from './useType2Helpers'
 import { uploadEvidenceFile } from '../api/v2/fileAPI'
-import type { MemoryFile } from '../services/documentHandler'
+import type { MemoryFile } from '../utils/documentHandler'
 
 /**
  * Type 3 頁面共用的輔助函數 Hook

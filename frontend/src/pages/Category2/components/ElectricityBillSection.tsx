@@ -12,7 +12,7 @@
 import { Trash2 } from 'lucide-react'
 import { ElectricityBillRecord, ElectricityMeter, BillEditingGroup } from '../../../types/electricityTypes'
 import { EvidenceFile } from '../../../api/files'
-import { MemoryFile } from '../../../services/documentHandler'
+import { MemoryFile } from '../../../utils/documentHandler'
 import { FileDropzone } from '../../../components/FileDropzone'
 import { createMemoryFile } from '../../../utils/fileUploadHelpers'
 import { FileTypeIcon } from '../../../components/energy/FileTypeIcon'

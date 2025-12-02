@@ -12,7 +12,7 @@ import { Trash2 } from 'lucide-react'
 import { createMemoryFile } from '../../../utils/fileUploadHelpers'
 import { FireExtinguisherSpec } from '../hooks/useFireExtinguisherSpecManager'
 import { CurrentEditingGroup } from '../common/mobileEnergyTypes'
-import { TYPE3_ALLOWED_FILE_TYPES, TYPE3_FILE_UPLOAD_HINT } from '../../../constants/fileUpload'
+import { TYPE3_ALLOWED_FILE_TYPES, TYPE3_FILE_UPLOAD_HINT } from '../../../utils/fileUpload'
 
 interface FireExtinguisherUsageInputFieldsProps {
   currentGroup: CurrentEditingGroup

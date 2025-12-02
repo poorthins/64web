@@ -7,7 +7,7 @@ import { FireExtinguisherSpecInputFields } from './components/FireExtinguisherSp
 import { FireExtinguisherSpecListSection } from './components/FireExtinguisherSpecListSection'
 import { FireExtinguisherUsageInputFields } from './components/FireExtinguisherUsageInputFields'
 import { FileDropzone, type MemoryFile } from '../../components/FileDropzone'
-import { TYPE3_ALLOWED_FILE_TYPES, TYPE3_FILE_UPLOAD_HINT } from '../../constants/fileUpload'
+import { TYPE3_ALLOWED_FILE_TYPES, TYPE3_FILE_UPLOAD_HINT } from '../../utils/fileUpload'
 import { createMemoryFile } from '../../utils/fileUploadHelpers'
 
 export default function FireExtinguisherPage() {

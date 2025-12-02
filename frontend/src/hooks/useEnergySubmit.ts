@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { upsertEnergyEntry, sumMonthly, type UpsertEntryInput } from '../api/entries'
 import { uploadEvidenceWithEntry, type EvidenceFile } from '../api/files'
 import { debugRLSOperation } from '../utils/authDiagnostics'
-import { type MemoryFile } from '../services/documentHandler'
+import { type MemoryFile } from '../utils/documentHandler'
 
 /**
  * 提交參數介面

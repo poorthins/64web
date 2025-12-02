@@ -9,7 +9,7 @@
 
 import { useState } from 'react'
 import { EvidenceFile } from '../../../api/files'
-import { MemoryFile } from '../../../services/documentHandler'
+import { MemoryFile } from '../../../utils/documentHandler'
 import { HeatValueEditingState } from '../../../types/naturalGasTypes'
 
 type ToastType = 'info' | 'success' | 'warning' | 'error'

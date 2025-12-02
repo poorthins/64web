@@ -15,7 +15,7 @@ import { useType2Helpers } from '../../../hooks/useType2Helpers'
 import { useSubmitGuard } from '../../../hooks/useSubmitGuard'
 import { NaturalGasBillRecord, NaturalGasMeter } from '../../../types/naturalGasTypes'
 import { EvidenceFile } from '../../../api/files'
-import { MemoryFile } from '../../../services/documentHandler'
+import { MemoryFile } from '../../../utils/documentHandler'
 
 interface UseNaturalGasSubmitParams {
   pageKey: string

@@ -4,7 +4,7 @@
 
 import { useState } from 'react'
 import { uploadEvidenceWithEntry, EvidenceFile } from '../../../api/files'
-import { MemoryFile } from '../../../services/documentHandler'
+import { MemoryFile } from '../../../utils/documentHandler'
 import { useAdminSave } from '../../../hooks/useAdminSave'
 import { useType2Helpers } from '../../../hooks/useType2Helpers'
 import type { NaturalGasBillRecord } from '../../../types/naturalGasTypes'

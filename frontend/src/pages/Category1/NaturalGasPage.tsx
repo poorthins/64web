@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { EvidenceFile, getEntryFiles } from '../../api/files'
-import { MemoryFile } from '../../services/documentHandler'
+import { MemoryFile } from '../../utils/documentHandler'
 import { EntryStatus } from '../../components/StatusSwitcher'
 import { ToastType } from '../../components/Toast'
 import { useEditPermissions } from '../../hooks/useEditPermissions'

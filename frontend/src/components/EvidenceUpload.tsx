@@ -2,7 +2,7 @@ import { useState, useRef, useEffect } from 'react'
 import { Upload, X, File, AlertCircle, CheckCircle, FileText, Trash2, Eye, FileSpreadsheet } from 'lucide-react'
 import { uploadEvidence, uploadEvidenceSimple, deleteEvidence, deleteEvidenceFile, adminDeleteEvidence, getFileUrl, EvidenceFile, listMSDSFiles, listUsageEvidenceFiles, getCategoryFromPageKey } from '../api/files'
 import FilePreview from './FilePreview'
-import { MemoryFile } from '../services/documentHandler'
+import { MemoryFile } from '../utils/documentHandler'
 import { supabase } from '../supabaseClient'
 
 export type { MemoryFile }

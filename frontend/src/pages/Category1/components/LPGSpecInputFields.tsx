@@ -9,7 +9,7 @@
 
 import { FileDropzone, MemoryFile, EvidenceFile as FileDropzoneEvidenceFile } from '../../../components/FileDropzone'
 import { createMemoryFile } from '../../../utils/fileUploadHelpers'
-import { TYPE3_ALLOWED_FILE_TYPES, TYPE3_FILE_UPLOAD_HINT } from '../../../constants/fileUpload'
+import { TYPE3_ALLOWED_FILE_TYPES, TYPE3_FILE_UPLOAD_HINT } from '../../../utils/fileUpload'
 import { LPGSpec } from '../hooks/useLPGSpecManager'
 import type { EvidenceFile } from '../../../api/files'
 

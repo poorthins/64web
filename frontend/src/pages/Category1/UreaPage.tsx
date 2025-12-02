@@ -26,7 +26,7 @@ import { ImageLightbox } from './common/ImageLightbox'
 import { SDSUploadSection } from '../../components/SDSUploadSection'
 import { useThumbnailLoader } from '../../hooks/useThumbnailLoader'
 import { useType2Helpers } from '../../hooks/useType2Helpers'
-import type { MemoryFile } from '../../services/documentHandler';
+import type { MemoryFile } from '../../utils/documentHandler';
 
 
 export default function UreaPage() {

@@ -11,7 +11,7 @@ import { GroupListItem } from '../../../components/energy/GroupListItem'
 import { getFileUrl } from '../../../api/files'
 import type { MobileEnergyRecord } from './mobileEnergyTypes'
 import type { EvidenceFile } from '../../../api/files'
-import type { MemoryFile } from '../../../services/documentHandler'
+import type { MemoryFile } from '../../../utils/documentHandler'
 
 export interface MobileEnergyGroupListSectionProps {
   savedGroups: MobileEnergyRecord[]

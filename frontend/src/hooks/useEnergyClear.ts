@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { deleteEnergyEntry } from '../api/entries'
 import { deleteEvidenceFile, cleanOrphanFiles, type EvidenceFile } from '../api/files'
-import { DocumentHandler, type MemoryFile } from '../services/documentHandler'
+import { DocumentHandler, type MemoryFile } from '../utils/documentHandler'
 import type { EntryStatus } from '../components/StatusSwitcher'
 
 /**

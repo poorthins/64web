@@ -21,7 +21,7 @@ import { SepticTankUsageSection, SepticTankRecord, SepticTankCurrentEditingGroup
 import { SepticTankCalendarView } from './common/SepticTankCalendarView'
 import { useThumbnailLoader } from '../../hooks/useThumbnailLoader'
 import { useType2Helpers } from '../../hooks/useType2Helpers'
-import type { MemoryFile } from '../../services/documentHandler';
+import type { MemoryFile } from '../../utils/documentHandler';
 
 // ⭐ 創建空白記錄（預設 3 格）
 const createEmptyRecords = (): SepticTankRecord[] => {

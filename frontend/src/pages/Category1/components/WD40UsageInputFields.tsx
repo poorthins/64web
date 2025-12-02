@@ -10,7 +10,7 @@
 import { FileDropzone, MemoryFile, EvidenceFile as FileDropzoneEvidenceFile } from '../../../components/FileDropzone'
 import { Trash2 } from 'lucide-react'
 import { createMemoryFile } from '../../../utils/fileUploadHelpers'
-import { TYPE3_ALLOWED_FILE_TYPES, TYPE3_FILE_UPLOAD_HINT } from '../../../constants/fileUpload'
+import { TYPE3_ALLOWED_FILE_TYPES, TYPE3_FILE_UPLOAD_HINT } from '../../../utils/fileUpload'
 import { WD40Spec } from '../hooks/useWD40SpecManager'
 import { CurrentEditingGroup } from '../common/mobileEnergyTypes'
 

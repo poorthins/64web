@@ -2,7 +2,7 @@ import React from 'react';
 import { IconUpload } from '../../../components/icons';
 import FileDropzone from '../../../components/FileDropzone';
 import { EvidenceFile } from '../../../api/files';
-import type { MemoryFile } from '../../../services/documentHandler';
+import type { MemoryFile } from '../../../utils/documentHandler';
 
 interface CommuteUploadSectionProps {
   iconColor: string;

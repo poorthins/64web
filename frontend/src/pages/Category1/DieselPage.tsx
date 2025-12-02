@@ -25,7 +25,7 @@ import { DIESEL_CONFIG } from './common/mobileEnergyConfig'
 import { MobileEnergyUsageSection } from './common/MobileEnergyUsageSection'
 import { MobileEnergyGroupListSection } from './common/MobileEnergyGroupListSection'
 import { ImageLightbox } from './common/ImageLightbox'
-import type { MemoryFile } from '../../services/documentHandler';
+import type { MemoryFile } from '../../utils/documentHandler';
 
 
 export default function DieselPage() {

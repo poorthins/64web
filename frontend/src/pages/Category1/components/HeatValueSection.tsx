@@ -14,7 +14,7 @@ import { MonthlyHeatValueInput } from './MonthlyHeatValueInput'
 import { HeatValueReportUpload } from './HeatValueReportUpload'
 import { HeatValueEditingState } from '../../../types/naturalGasTypes'
 import { EvidenceFile } from '../../../api/files'
-import { MemoryFile } from '../../../services/documentHandler'
+import { MemoryFile } from '../../../utils/documentHandler'
 
 interface HeatValueSectionProps {
   // 月度熱值數據

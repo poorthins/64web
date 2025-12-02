@@ -15,7 +15,7 @@ import { useRole } from '../../hooks/useRole';
 import { useAdminSave } from '../../hooks/useAdminSave';
 import { EvidenceFile, deleteEvidenceFile } from '../../api/files';
 import { deleteEnergyEntry } from '../../api/entries';
-import type { MemoryFile } from '../../services/documentHandler';
+import type { MemoryFile } from '../../utils/documentHandler';
 import { entryAPI, fileAPI } from '../../api/v2';
 
 const COMMUTE_CONFIG = {

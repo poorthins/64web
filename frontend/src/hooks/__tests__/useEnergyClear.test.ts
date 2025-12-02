@@ -14,7 +14,7 @@ vi.mock('../../api/files', () => ({
   cleanOrphanFiles: vi.fn()
 }))
 
-vi.mock('../../services/documentHandler', () => ({
+vi.mock('../../utils/documentHandler', () => ({
   DocumentHandler: {
     clearAllMemoryFiles: vi.fn()
   }
@@ -22,7 +22,7 @@ vi.mock('../../services/documentHandler', () => ({
 
 import { deleteEnergyEntry } from '../../api/entries'
 import { deleteEvidenceFile, cleanOrphanFiles } from '../../api/files'
-import { DocumentHandler } from '../../services/documentHandler'
+import { DocumentHandler } from '../../utils/documentHandler'
 
 describe('useEnergyClear', () => {
   const mockFiles = [

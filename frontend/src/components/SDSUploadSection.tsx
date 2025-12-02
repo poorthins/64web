@@ -9,7 +9,7 @@
 
 import { useState } from 'react'
 import { FileText } from 'lucide-react'
-import type { MemoryFile } from '../services/documentHandler'
+import type { MemoryFile } from '../utils/documentHandler'
 import { FileDropzone } from './FileDropzone'
 
 export interface SDSUploadSectionProps {

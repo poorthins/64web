@@ -3,7 +3,7 @@
  */
 
 import { EvidenceFile } from '../api/files'
-import { MemoryFile } from '../services/documentHandler'
+import { MemoryFile } from '../utils/documentHandler'
 
 /**
  * 低位熱值資料

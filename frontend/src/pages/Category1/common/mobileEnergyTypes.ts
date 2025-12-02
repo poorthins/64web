@@ -3,7 +3,7 @@
  */
 
 import type { EvidenceFile } from '../../../api/files'
-import type { MemoryFile } from '../../../services/documentHandler'
+import type { MemoryFile } from '../../../utils/documentHandler'
 
 export interface MobileEnergyRecord {
   id: string

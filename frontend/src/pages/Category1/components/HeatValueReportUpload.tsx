@@ -9,7 +9,7 @@
 
 import { Trash2 } from 'lucide-react'
 import { EvidenceFile, deleteEvidenceFile, getFileUrl } from '../../../api/files'
-import { MemoryFile } from '../../../services/documentHandler'
+import { MemoryFile } from '../../../utils/documentHandler'
 import { FileDropzone } from '../../../components/FileDropzone'
 import { FileTypeIcon } from '../../../components/energy/FileTypeIcon'
 import { getFileType } from '../../../utils/energy/fileTypeDetector'

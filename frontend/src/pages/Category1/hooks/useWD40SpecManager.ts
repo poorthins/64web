@@ -10,7 +10,7 @@
 
 import { useState } from 'react'
 import { generateRecordId } from '../../../utils/idGenerator'
-import type { MemoryFile } from '../../../services/documentHandler'
+import type { MemoryFile } from '../../../utils/documentHandler'
 import { EvidenceFile } from '../../../api/files'
 
 export interface WD40Spec {

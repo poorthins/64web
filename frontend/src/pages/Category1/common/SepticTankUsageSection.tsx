@@ -17,7 +17,7 @@ import { MonthHoursInputRow } from '../../../components/energy/MonthHoursInputRo
 import { FileTypeIcon } from '../../../components/energy/FileTypeIcon'
 import { getFileType } from '../../../utils/energy/fileTypeDetector'
 import { createMemoryFile } from '../../../utils/fileUploadHelpers'
-import type { MemoryFile } from '../../../services/documentHandler'
+import type { MemoryFile } from '../../../utils/documentHandler'
 import { LAYOUT_CONSTANTS } from './mobileEnergyConstants'
 
 // ⭐ 化糞池專用記錄類型

@@ -1,7 +1,7 @@
 import { uploadEvidenceFile } from '../api/v2/fileAPI'
 import { deleteEvidence, adminDeleteEvidence } from '../api/files'
 import type { AdminSaveParams } from './useAdminSave'
-import type { MemoryFile } from '../services/documentHandler'
+import type { MemoryFile } from '../utils/documentHandler'
 import type { CurrentEditingGroup } from '../pages/Category1/common/mobileEnergyTypes'
 
 /**

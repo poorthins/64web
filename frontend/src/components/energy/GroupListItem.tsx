@@ -10,7 +10,7 @@ import { ActionButtons } from './ActionButtons'
 import { getFileType } from '../../utils/energy/fileTypeDetector'
 import { THUMBNAIL_PLACEHOLDER_SVG, THUMBNAIL_BACKGROUND } from '../../utils/energy/thumbnailConstants'
 import { EvidenceFile } from '../../api/files'
-import { MemoryFile } from '../../services/documentHandler'
+import { MemoryFile } from '../../utils/documentHandler'
 
 export interface GroupListItemProps {
   /** 群組索引（用於顯示編號，從 0 開始） */
