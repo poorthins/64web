@@ -1,5 +1,5 @@
 import React, { useState } from 'react'
-import { inventoryItems } from '../data/inventoryData'
+import { inventoryItems } from '../config/inventoryData'
 import { InventoryCard } from '../components/inventory/InventoryCard'
 import { ImageLightbox } from '../components/inventory/ImageLightbox'
 import SharedPageLayout from '../layouts/SharedPageLayout'

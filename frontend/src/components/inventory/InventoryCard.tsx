@@ -1,5 +1,5 @@
 import React, { useState } from 'react'
-import type { InventoryItem } from '../../data/inventoryData'
+import type { InventoryItem } from '../../config/inventoryData'
 
 interface InventoryCardProps {
   item: InventoryItem
