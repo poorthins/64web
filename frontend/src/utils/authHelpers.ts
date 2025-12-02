@@ -1,4 +1,4 @@
-import { supabase } from '../lib/supabaseClient'
+import { supabase } from '../supabaseClient'
 import { User, Session } from '@supabase/supabase-js'
 import { diagnoseAuthState, conditionalLog, isDiagnosticMode } from './authDiagnostics'
 

@@ -3,7 +3,7 @@
  * 對應後端 /api/entries/* endpoints
  */
 
-import { supabase } from '../../lib/supabaseClient'
+import { supabase } from '../../supabaseClient'
 
 /**
  * 能源條目提交請求

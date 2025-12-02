@@ -1,4 +1,4 @@
-import { supabase } from '../lib/supabaseClient'
+import { supabase } from '../supabaseClient'
 import { validateAuth, handleAPIError } from '../utils/authHelpers'
 import { getCategoryFromPageKey } from './entries'
 import { getCategoryInfo } from '../utils/categoryConstants'

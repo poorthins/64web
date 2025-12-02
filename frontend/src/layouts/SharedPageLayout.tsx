@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useRef } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
-import { supabase } from '../lib/supabaseClient'
+import { supabase } from '../supabaseClient'
 import { CATEGORY_GROUPS } from '../config/categoryMapping'
 import LogoutButton from '../components/common/LogoutButton'
 import BottomActionBar from '../components/BottomActionBar'

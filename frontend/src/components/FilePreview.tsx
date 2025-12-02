@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react'
 import { X, Download, ZoomIn, ZoomOut, RotateCcw, RotateCw, FileText, File } from 'lucide-react'
 import { EvidenceFile, getFileUrl, getFileUrlForAdmin, debugAuthAndPermissions } from '../api/files'
 import { MemoryFile } from './EvidenceUpload'
-import { supabase } from '../lib/supabaseClient'
+import { supabase } from '../supabaseClient'
 
 interface FilePreviewProps {
   file: EvidenceFile | MemoryFile | null

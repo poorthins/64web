@@ -3,7 +3,7 @@
  * 對應後端 /api/files/* endpoints
  */
 
-import { supabase } from '../../lib/supabaseClient'
+import { supabase } from '../../supabaseClient'
 
 /**
  * 檔案上傳元數據

@@ -1,6 +1,6 @@
 import { useEffect, useState, useCallback } from 'react'
 import { useAuth } from '../contexts/AuthContext'
-import { supabase } from '../lib/supabaseClient'
+import { supabase } from '../supabaseClient'
 
 export interface UseRoleReturn {
   role: string | null

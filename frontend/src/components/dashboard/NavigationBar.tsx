@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { supabase } from '../../lib/supabaseClient'
+import { supabase } from '../../supabaseClient'
 import { CATEGORY_GROUPS, CategoryGroup } from '../../config/categoryMapping'
 import { useAuth } from '../../contexts/AuthContext'
 import { useCurrentUserPermissions } from '../../hooks/useCurrentUserPermissions'

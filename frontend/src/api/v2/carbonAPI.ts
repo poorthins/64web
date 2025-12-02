@@ -3,7 +3,7 @@
  * 對應後端 /api/carbon/calculate endpoint
  */
 
-import { supabase } from '../../lib/supabaseClient'
+import { supabase } from '../../supabaseClient'
 
 /**
  * 碳排放計算請求

@@ -1,4 +1,4 @@
-import { supabase } from '../lib/supabaseClient'
+import { supabase } from '../supabaseClient'
 
 export const checkUserRoles = async (): Promise<any[] | undefined> => {
   try {

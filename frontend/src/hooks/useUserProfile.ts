@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useAuth } from '../contexts/AuthContext'
-import { supabase } from '../lib/supabaseClient'
+import { supabase } from '../supabaseClient'
 
 export interface FillingConfig {
   diesel_generator_mode: 'refuel' | 'test'

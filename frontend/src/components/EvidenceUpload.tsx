@@ -3,7 +3,7 @@ import { Upload, X, File, AlertCircle, CheckCircle, FileText, Trash2, Eye, FileS
 import { uploadEvidence, uploadEvidenceSimple, deleteEvidence, deleteEvidenceFile, adminDeleteEvidence, getFileUrl, EvidenceFile, listMSDSFiles, listUsageEvidenceFiles, getCategoryFromPageKey } from '../api/files'
 import FilePreview from './FilePreview'
 import { MemoryFile } from '../services/documentHandler'
-import { supabase } from '../lib/supabaseClient'
+import { supabase } from '../supabaseClient'
 
 export type { MemoryFile }
 

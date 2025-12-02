@@ -1,10 +1,10 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { uploadEvidence, uploadEvidenceWithEntry, type FileMetadata, type EvidenceFile } from '../files'
 import * as authHelpers from '../../utils/authHelpers'
-import { supabase } from '../../lib/supabaseClient'
+import { supabase } from '../../supabaseClient'
 
 // Mock Supabase
-vi.mock('../../lib/supabaseClient', () => ({
+vi.mock('../../supabaseClient', () => ({
   supabase: {
     from: vi.fn(),
     storage: {

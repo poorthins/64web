@@ -1,4 +1,4 @@
-import { supabase } from '../lib/supabaseClient'
+import { supabase } from '../supabaseClient'
 import { validateAuth, handleAPIError } from '../utils/authHelpers'
 
 // 資料庫 key 轉前端 key

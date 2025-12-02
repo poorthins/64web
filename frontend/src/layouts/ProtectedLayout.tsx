@@ -5,7 +5,7 @@ import { useRole } from '../hooks/useRole'
 import { useUserProfile } from '../hooks/useUserProfile'
 import Sidebar from '../components/Sidebar'
 import MainContent from '../components/MainContent'
-import { supabase } from '../lib/supabaseClient'
+import { supabase } from '../supabaseClient'
 import { LoginAttemptNotification } from '../components/LoginAttemptNotification'
 import LogoutButton from '../components/common/LogoutButton'
 

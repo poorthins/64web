@@ -13,7 +13,7 @@ import { useType3Helpers } from '../useType3Helpers'
 import * as fileAPI from '../../api/v2/fileAPI'
 
 // Mock Supabase 客戶端（避免初始化錯誤）
-vi.mock('../../lib/supabaseClient', () => ({
+vi.mock('../../supabaseClient', () => ({
   supabase: {
     from: vi.fn(() => ({
       select: vi.fn().mockReturnThis(),

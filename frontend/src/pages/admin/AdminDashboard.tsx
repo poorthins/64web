@@ -15,7 +15,7 @@ import { useKeyboardShortcuts, createCommonShortcuts, showShortcutToast } from '
 import { useUsers } from './hooks/useUsers'
 import { useMetrics } from './hooks/useMetrics'
 import { useUserExport } from './hooks/useUserExport'
-import { supabase } from '../../lib/supabaseClient'
+import { supabase } from '../../supabaseClient'
 import { toast } from 'react-hot-toast'
 
 const AdminDashboard: React.FC = () => {

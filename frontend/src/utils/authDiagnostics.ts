@@ -3,7 +3,7 @@
  * 用於診斷 RLS 錯誤和認證失效問題
  */
 
-import { supabase } from '../lib/supabaseClient'
+import { supabase } from '../supabaseClient'
 import { User, Session } from '@supabase/supabase-js'
 
 export interface AuthDiagnosticResult {
