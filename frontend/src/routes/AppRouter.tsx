@@ -40,7 +40,6 @@ import UserRoute from '../components/UserRoute'
 import FixUserRoles from '../pages/FixUserRoles'
 import RoleBasedHomePage from '../components/RoleBasedHomePage'
 import InventoryChecklistPage from '../pages/InventoryChecklistPage'
-import '../utils/roleDebug' // 載入診斷工具
 
 function AppRouter() {
   return (

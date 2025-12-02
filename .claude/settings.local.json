@@ -94,7 +94,8 @@
       "Bash(do echo '=== $file ===')",
       "Bash(git -C \"c:\\Users\\Tim\\Desktop\\python\\64web\" log --all --full-history --oneline -- \"frontend/src/hooks/useMultiRecordSubmit.ts\")",
       "Bash(for:*)",
-      "Bash(do echo '=== Checking: $file ===')"
+      "Bash(do echo '=== Checking: $file ===')",
+      "Bash(iconv:*)"
     ],
     "deny": [],
     "ask": []
