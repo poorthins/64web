@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react'
+import React, { useEffect, useState, useRef } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { supabase } from '../lib/supabaseClient'
 import { CATEGORY_GROUPS } from '../config/categoryMapping'
@@ -102,7 +102,8 @@ const SharedPageLayout: React.FC<SharedPageLayoutProps> = ({
   const navigate = useNavigate()
   const [searchParams] = useSearchParams()
   const [scale, setScale] = useState(1)
-  const [hoveredCategory, setHoveredCategory] = useState<string | null>(null)
+  const [clickedCategory, setClickedCategory] = useState<string | null>(null)
+  const scrollContainerRef = useRef<HTMLDivElement>(null)
 
   // 檢測是否為審核模式
   const isReviewMode = searchParams.get('mode') === 'review'
@@ -167,8 +168,46 @@ const SharedPageLayout: React.FC<SharedPageLayoutProps> = ({
 
   const handleItemClick = (route: string) => {
     navigate(route)
-    setHoveredCategory(null)
+    setClickedCategory(null)
   }
+
+  const toggleCategory = (categoryId: string) => {
+    setClickedCategory(prev => prev === categoryId ? null : categoryId)
+  }
+
+  const closeDropdown = () => {
+    setClickedCategory(null)
+  }
+
+  // ESC 键关闭大白框
+  useEffect(() => {
+    const handleEscape = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && clickedCategory) {
+        closeDropdown()
+      }
+    }
+    window.addEventListener('keydown', handleEscape)
+    return () => window.removeEventListener('keydown', handleEscape)
+  }, [clickedCategory])
+
+  // 锁定页面滚动（展开时）
+  useEffect(() => {
+    const container = scrollContainerRef.current
+    if (!container) return
+
+    if (clickedCategory && !isReviewMode) {
+      container.style.overflowY = 'hidden'
+    } else {
+      container.style.overflowY = 'auto'
+    }
+
+    // 清理函数：组件卸载时恢复滚动
+    return () => {
+      if (container) {
+        container.style.overflowY = 'auto'
+      }
+    }
+  }, [clickedCategory, isReviewMode])
 
   const handleLogoClick = () => {
     navigate('/app')
@@ -238,7 +277,7 @@ const SharedPageLayout: React.FC<SharedPageLayoutProps> = ({
   }
 
   return (
-    <div className="fixed inset-0 overflow-x-hidden overflow-y-auto bg-white flex justify-center">
+    <div ref={scrollContainerRef} className="fixed inset-0 overflow-x-hidden overflow-y-auto bg-white flex justify-center">
       <div
         style={{
           width: '1920px',
@@ -248,17 +287,33 @@ const SharedPageLayout: React.FC<SharedPageLayoutProps> = ({
           transformOrigin: 'top center'
         }}
       >
-        {/* 導航欄 - 86px 高度，灰色背景 */}
-        <nav
+        {/* Grid 项目 hover 样式 */}
+        <style>{`
+          .grid-item-btn:hover {
+            color: #01E083 !important;
+          }
+        `}</style>
+
+        {/* 导航栏容器（包含导航栏和大白框） */}
+        <div
           style={{
             position: 'relative',
             width: '1920px',
-            height: '86px',
-            flexShrink: 0,
-            backgroundColor: '#EBEDF0',
             zIndex: 10000
           }}
         >
+          {/* 導航欄 - 86px 高度，灰色背景（展开时变白） */}
+          <nav
+            style={{
+              position: 'relative',
+              width: '1920px',
+              height: '86px',
+              flexShrink: 0,
+              backgroundColor: clickedCategory ? '#FFFFFF' : '#EBEDF0',
+              transition: 'background-color 0.3s ease',
+              zIndex: 2
+            }}
+          >
           {isReviewMode ? (
             /* 審核模式：只顯示返回按鈕 */
             <div style={{ position: 'relative', width: '1920px', height: '100%', display: 'flex', alignItems: 'center', paddingLeft: '54px' }}>
@@ -333,30 +388,26 @@ const SharedPageLayout: React.FC<SharedPageLayoutProps> = ({
                 首頁
               </button>
 
-              {/* 類別一~六 */}
-              {CATEGORY_GROUPS.map((category, index) => (
-                <div
-                  key={category.id}
-                  className="absolute"
-                  style={{
-                    left: `${325 + (index + 1) * 114}px`,
-                    top: '50%',
-                    transform: 'translateY(-50%)'
-                  }}
-                  onMouseEnter={() => category.items.length > 0 ? setHoveredCategory(category.id) : null}
-                  onMouseLeave={() => setHoveredCategory(null)}
-                >
+              {/* 類別一~六（点击触发大白框） */}
+              {CATEGORY_GROUPS.map((category, index) => {
+                const isActive = clickedCategory === category.id
+                return (
                   <button
+                    key={category.id}
                     disabled={category.items.length === 0}
-                    className={category.items.length > 0 ? "hover:text-figma-accent transition-colors" : "cursor-not-allowed"}
+                    onClick={() => category.items.length > 0 && toggleCategory(category.id)}
+                    className={category.items.length > 0 ? "absolute hover:text-figma-accent transition-colors" : "absolute cursor-not-allowed"}
                     title={category.items.length === 0 ? "此分類尚未開放" : undefined}
                     style={{
+                      left: `${325 + (index + 1) * 114}px`,
+                      top: '50%',
+                      transform: 'translateY(-50%)',
                       display: 'flex',
                       width: '74px',
                       height: '86px',
                       justifyContent: 'center',
                       alignItems: 'center',
-                      color: category.items.length === 0 ? '#9CA3AF' : '#0E3C32',
+                      color: category.items.length === 0 ? '#9CA3AF' : (isActive ? '#01E083' : '#0E3C32'),
                       fontFamily: 'Inter',
                       fontSize: '22px',
                       fontWeight: 600
@@ -364,50 +415,8 @@ const SharedPageLayout: React.FC<SharedPageLayoutProps> = ({
                   >
                     {category.label}
                   </button>
-
-                  {/* Dropdown Menu */}
-                  {hoveredCategory === category.id && category.items.length > 0 && (
-                    <div
-                      className="absolute left-0"
-                      style={{
-                        top: '100%',
-                        marginTop: '0',
-                        width: '202px',
-                        background: 'rgba(255, 255, 255, 0.80)',
-                        borderRadius: '0 0 8px 8px',
-                        padding: '9px 0',
-                        display: 'flex',
-                        flexDirection: 'column',
-                        gap: '6px',
-                        zIndex: 9999
-                      }}
-                    >
-                      {category.items.map(item => (
-                        <button
-                          key={item.id}
-                          onClick={() => handleItemClick(item.route)}
-                          className="hover:opacity-80 transition-opacity"
-                          style={{
-                            width: '202px',
-                            height: '33px',
-                            display: 'flex',
-                            alignItems: 'center',
-                            paddingLeft: '12.76%',
-                            background: 'transparent',
-                            color: '#000',
-                            fontFamily: 'Inter',
-                            fontSize: '20px',
-                            fontWeight: 400,
-                            textAlign: 'left'
-                          }}
-                        >
-                          {item.name}
-                        </button>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              ))}
+                )
+              })}
 
               {/* 右側：盤查清單/佐證範例按鈕 */}
               {showActionButton && (
@@ -443,7 +452,84 @@ const SharedPageLayout: React.FC<SharedPageLayoutProps> = ({
               </div>
             </div>
           )}
-        </nav>
+          </nav>
+
+          {/* 大白框展开区域 */}
+          {!isReviewMode && (
+            <div
+              style={{
+                position: 'absolute',
+                top: '86px',
+                left: '0',
+                width: '1920px',
+                height: clickedCategory ? '518px' : '0',
+                background: 'white',
+                overflow: 'hidden',
+                transition: 'height 0.3s ease, box-shadow 0.3s ease',
+                borderRadius: '0 0 16px 16px',
+                boxShadow: clickedCategory ? '0 8px 32px rgba(0, 0, 0, 0.15)' : 'none',
+                zIndex: 1
+              }}
+            >
+            {/* Grid 内容 */}
+            <div
+              style={{
+                position: 'relative',
+                width: '100%',
+                height: '100%',
+                opacity: clickedCategory ? 1 : 0,
+                transition: 'opacity 0.3s ease 0.15s',
+                padding: '120px 321px'
+              }}
+            >
+              {clickedCategory && (() => {
+                const category = CATEGORY_GROUPS.find(c => c.id === clickedCategory)
+                if (!category) return null
+
+                return (
+                  <div
+                    style={{
+                      display: 'grid',
+                      gridTemplateColumns: 'repeat(4, 1fr)',
+                      gridTemplateRows: 'repeat(4, 1fr)',
+                      columnGap: '225px',
+                      rowGap: '20px',
+                      height: '277px'
+                    }}
+                  >
+                    {category.items.map(item => (
+                      <button
+                        key={item.id}
+                        onClick={() => handleItemClick(item.route)}
+                        className="grid-item-btn transition-colors"
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'flex-start',
+                          background: 'transparent',
+                          color: '#000',
+                          fontFamily: 'Inter',
+                          fontSize: '20px',
+                          fontWeight: 400,
+                          borderRadius: '8px',
+                          cursor: 'pointer',
+                          padding: '12px',
+                          textAlign: 'left',
+                          whiteSpace: 'nowrap',
+                          border: 'none'
+                        }}
+                      >
+                        {item.name}
+                      </button>
+                    ))}
+                  </div>
+                )
+              })()}
+            </div>
+            </div>
+          )}
+        </div>
+        {/* 导航栏容器结束 */}
 
         {/* 主要內容區域 */}
         <main
