@@ -96,7 +96,8 @@
       "Bash(for:*)",
       "Bash(do echo '=== Checking: $file ===')",
       "Bash(iconv:*)",
-      "Bash(git mv:*)"
+      "Bash(git mv:*)",
+      "Bash(do echo '=== $comp ===')"
     ],
     "deny": [],
     "ask": []
