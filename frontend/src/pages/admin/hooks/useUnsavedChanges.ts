@@ -20,11 +20,11 @@ export const useUnsavedChanges = ({
     if (!enabled) return;
 
     const handleBeforeUnload = (event: BeforeUnloadEvent) => {
-      if (hasUnsavedChanges) {
-        event.preventDefault();
-        event.returnValue = message;
-        return message;
-      }
+      if (!hasUnsavedChanges) return;
+
+      event.preventDefault();
+      event.returnValue = message;
+      return message;
     };
 
     window.addEventListener('beforeunload', handleBeforeUnload);

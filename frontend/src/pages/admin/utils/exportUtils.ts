@@ -909,7 +909,7 @@ export function smartFileRename(originalFileName: string, context: FileNamingCon
   let monthStr = ''
   if (month !== undefined && month >= 1 && month <= 12) {
     monthStr = `${month}月`
-  } else if (file.month !== undefined && file.month >= 1 && file.month <= 12) {
+  } else if (file.month !== undefined && file.month !== null && file.month >= 1 && file.month <= 12) {
     monthStr = `${file.month}月`
   } else {
     // 嘗試從檔名偵測月份
@@ -1391,7 +1391,7 @@ export async function exportUserEntriesWithFiles(
             }
 
             // 月份資訊（適用於所有月份頁面）
-            if (file.month !== undefined && file.month >= 1 && file.month <= 12) {
+            if (file.month !== undefined && file.month !== null && file.month >= 1 && file.month <= 12) {
               fileNamingContext.month = file.month
             }
           }

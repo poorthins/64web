@@ -120,15 +120,11 @@ export function useMetrics(): UseMetricsState & UseMetricsActions {
       // 嘗試從 usersWithSubmissions 中獲取基本用戶資料，避免重複調用 listUsers()
       const users = usersWithSubmissions.length > 0
         ? usersWithSubmissions.map(u => ({
-            id: u.user_id,
+            id: u.id,
             display_name: u.display_name || 'Unknown',
             role: u.role || 'user',
             is_active: u.is_active ?? true,
-            email: u.email,
-            company: u.company,
-            job_title: u.job_title,
-            phone: u.phone,
-            filling_config: u.filling_config
+            email: u.email
           }))
         : await listUsers() // 如果無法從現有資料獲取，才執行額外調用
 

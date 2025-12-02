@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from 'react'
 import {
   getAllUsersWithSubmissions,
   getSubmissionStats,
-  completeUserReview,
+  reviewSubmission,
   type UserWithSubmissions,
   type SubmissionStats,
   type Submission
@@ -144,7 +144,11 @@ export function useSubmissions(): UseSubmissionsState & UseSubmissionsActions {
     setState(prev => ({ ...prev, isLoading: true, error: null }))
 
     try {
-      await completeUserReview(entryId, newStatus, reviewNotes)
+      // reviewSubmission 只接受 'approved' 或 'needs_fix'
+      if (newStatus === 'pending') {
+        throw new Error('無法將狀態設為 pending')
+      }
+      await reviewSubmission(entryId, newStatus, reviewNotes)
 
       // 重新載入資料以反映變更
       await refreshData()

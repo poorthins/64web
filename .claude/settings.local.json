@@ -86,7 +86,15 @@
       "Bash(cmd /c \"dir /B c:\\Users\\Tim\\Desktop\\python\\64web\\frontend\\src\\pages\\Category1\\components\")",
       "Bash(\"c:\\Users\\Tim\\Desktop\\python\\64web\\frontend\\src\\pages\\Category1\\NaturalGasPage.tmp\")",
       "Bash(git -C \"c:\\Users\\Tim\\Desktop\\python\\64web\" status --short)",
-      "Bash(git -C \"c:\\Users\\Tim\\Desktop\\python\\64web\" checkout -- frontend/src/pages/Category1/NaturalGasPage.tsx)"
+      "Bash(git -C \"c:\\Users\\Tim\\Desktop\\python\\64web\" checkout -- frontend/src/pages/Category1/NaturalGasPage.tsx)",
+      "Bash(npm --prefix frontend run type-check)",
+      "Bash(git -C \"c:\\Users\\Tim\\Desktop\\python\\64web\" reset HEAD frontend/src/api/adminMetrics.ts frontend/src/api/smartFileOverwrite.ts frontend/src/api/v2/__test_api__.ts frontend/src/components/ErrorModal.tsx frontend/src/components/LoadingPage.tsx frontend/src/components/ReviewSectionExample.tsx frontend/src/components/dashboard/Footer.tsx frontend/src/components/inventory/InventoryNavBar.tsx frontend/src/lib/apiClient.ts frontend/src/pages/Login.tsx frontend/src/types/carbon.ts)",
+      "Bash(git -C \"c:\\Users\\Tim\\Desktop\\python\\64web\" restore frontend/src/api/adminMetrics.ts frontend/src/api/smartFileOverwrite.ts frontend/src/api/v2/__test_api__.ts frontend/src/components/ErrorModal.tsx frontend/src/components/LoadingPage.tsx frontend/src/components/ReviewSectionExample.tsx frontend/src/components/dashboard/Footer.tsx frontend/src/components/inventory/InventoryNavBar.tsx frontend/src/lib/apiClient.ts frontend/src/pages/Login.tsx frontend/src/types/carbon.ts)",
+      "Bash(for file in api/v2/__test_api__.ts api/adminMetrics.ts api/smartFileOverwrite.ts lib/apiClient.ts pages/Login.tsx types/carbon.ts components/ReviewSectionExample.tsx components/ErrorModal.tsx components/LoadingPage.tsx components/inventory/InventoryNavBar.tsx)",
+      "Bash(do echo '=== $file ===')",
+      "Bash(git -C \"c:\\Users\\Tim\\Desktop\\python\\64web\" log --all --full-history --oneline -- \"frontend/src/hooks/useMultiRecordSubmit.ts\")",
+      "Bash(for:*)",
+      "Bash(do echo '=== Checking: $file ===')"
     ],
     "deny": [],
     "ask": []

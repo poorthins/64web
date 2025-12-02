@@ -4,7 +4,10 @@ import { createMemoryFile, createMemoryFiles } from '../fileUploadHelpers'
 describe('fileUploadHelpers', () => {
   // Mock URL.createObjectURL (瀏覽器 API，測試環境需要 mock)
   beforeAll(() => {
-    global.URL.createObjectURL = vi.fn((file) => `blob:mock-url-${file.name}`)
+    global.URL.createObjectURL = vi.fn((file) => {
+      const name = (file as File).name || 'unknown'
+      return `blob:mock-url-${name}`
+    })
     global.URL.revokeObjectURL = vi.fn()
   })
   describe('createMemoryFile', () => {

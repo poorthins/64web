@@ -44,12 +44,12 @@ export const useKeyboardShortcuts = ({ shortcuts, enabled = true }: UseKeyboardS
   }, [shortcuts, enabled]);
 
   useEffect(() => {
-    if (enabled) {
-      document.addEventListener('keydown', handleKeyDown);
-      return () => {
-        document.removeEventListener('keydown', handleKeyDown);
-      };
-    }
+    if (!enabled) return;
+
+    document.addEventListener('keydown', handleKeyDown);
+    return () => {
+      document.removeEventListener('keydown', handleKeyDown);
+    };
   }, [handleKeyDown, enabled]);
 
   return shortcuts;

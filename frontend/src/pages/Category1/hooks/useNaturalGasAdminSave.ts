@@ -178,9 +178,9 @@ export function useNaturalGasAdminSave({
       reloadApprovalStatus()
 
       // 清空 memoryFiles
-      setCurrentEditingGroup(prev => ({ ...prev, memoryFiles: [] }))
+      setCurrentEditingGroup((prev: any) => ({ ...prev, memoryFiles: [] }))
       setMonthlyHeatValueMemoryFiles({})
-      setCurrentEditingHeatValue(prev => ({
+      setCurrentEditingHeatValue((prev: any) => ({
         ...prev,
         memoryFiles: [],
         evidenceFiles: []

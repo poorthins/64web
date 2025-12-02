@@ -630,7 +630,6 @@ const SharedPageLayout: React.FC<SharedPageLayoutProps> = ({
 
       <SuccessModal
         show={showSuccessModal}
-        message={successMessage}
         type={successModalType}
         onClose={() => {
           setShowSuccessModal(false)
