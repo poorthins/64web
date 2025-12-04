@@ -24,6 +24,7 @@ CATEGORY_MAP = {
     'lpg': '液化石油氣',
     'fire_extinguisher': '滅火器',
     'welding_rod': '焊條',
+    'gas_cylinder': '氣體鋼瓶',
     'electricity': '外購電力',
     'employee_commute': '員工通勤'
 }

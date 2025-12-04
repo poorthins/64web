@@ -161,38 +161,59 @@ export function useMobileType3Page<TSpec extends { id: string; name: string; mem
 
   // 載入全局檔案（從 loadedFiles）
   useEffect(() => {
+    console.log('🔄 [useEffect] 載入全局檔案觸發', {
+      hasGlobalFiles: !!globalFiles,
+      loadedFilesCount: loadedFiles?.length || 0,
+      loadedFileTypes: loadedFiles?.map(f => f.file_type) || []
+    })
+
     if (!globalFiles || !loadedFiles || loadedFiles.length === 0) return
 
     globalFiles.forEach((config) => {
+      console.log(`🔍 [useEffect] 處理全局檔案 ${config.key}`)
+
       // ⭐ 跳過使用者已刪除的檔案
       if (deletedGlobalFilesRef.current.has(config.key)) {
+        console.log(`⏭️ [useEffect] 跳過 ${config.key}（使用者已刪除）`)
         return
       }
 
       const backendFile = loadedFiles.find(f => f.file_type === config.fileType)
 
+      console.log(`🔍 [useEffect] 尋找後端檔案 ${config.key}:`, {
+        fileType: config.fileType,
+        found: !!backendFile,
+        backendFileId: backendFile?.id
+      })
+
       // ⭐ 找不到檔案時，什麼都不做（像 UreaPage 一樣）
       if (!backendFile) {
+        console.log(`⏭️ [useEffect] 跳過 ${config.key}（後端無檔案）`)
         return
       }
 
       // 如果當前有記憶體檔案（使用者剛上傳），不要覆蓋
       const currentFile = globalFilesState[config.key]
       if (currentFile && currentFile.id.startsWith('memory-')) {
+        console.log(`⏭️ [useEffect] 跳過 ${config.key}（記憶體檔案存在）`)
         return
       }
 
       // 如果已經是同一個檔案，不要重複載入
       if (currentFile && currentFile.id === backendFile.id) {
+        console.log(`⏭️ [useEffect] 跳過 ${config.key}（已載入相同檔案）`)
         return
       }
 
       // 異步載入 URL
+      console.log(`📥 [useEffect] 載入 ${config.key} 的 URL...`)
       getFileUrl(backendFile.file_path).then(url => {
         // ⭐ 再次檢查使用者是否已刪除（防止 race condition）
         if (deletedGlobalFilesRef.current.has(config.key)) {
           return
         }
+
+        console.log(`✅ [useEffect] 設置 ${config.key} 的 URL:`, url)
 
         setGlobalFilesState(prev => ({
           ...prev,
@@ -206,7 +227,7 @@ export function useMobileType3Page<TSpec extends { id: string; name: string; mem
           }
         }))
       }).catch(error => {
-        console.error(`載入全局檔案 ${config.key} 失敗:`, error)
+        console.error(`❌ [useEffect] 載入全局檔案 ${config.key} 失敗:`, error)
       })
     })
   }, [loadedFiles, globalFiles])
@@ -227,19 +248,36 @@ export function useMobileType3Page<TSpec extends { id: string; name: string; mem
   const uploadGlobalFiles = async (entryId: string) => {
     if (!globalFiles) return
 
+    console.log('🔥 [uploadGlobalFiles] 開始上傳全局檔案', { entryId, globalFiles })
+
     for (const config of globalFiles) {
       const file = globalFilesState[config.key]
 
+      console.log(`🔥 [uploadGlobalFiles] 檢查檔案 ${config.key}:`, {
+        hasFile: !!file,
+        fileId: file?.id,
+        isMemoryFile: file?.id?.startsWith('memory-')
+      })
+
       // 只上傳新檔案（記憶體檔案）
-      if (!file || !file.id.startsWith('memory-')) continue
+      if (!file || !file.id.startsWith('memory-')) {
+        console.log(`⏭️ [uploadGlobalFiles] 跳過 ${config.key}（非新檔案）`)
+        continue
+      }
 
       // 先刪除舊檔案（如果存在）
       const existingFile = loadedFiles?.find(f => f.file_type === config.fileType)
       if (existingFile) {
+        console.log(`🗑️ [uploadGlobalFiles] 刪除舊檔案:`, existingFile.id)
         await deleteEvidenceFile(existingFile.id)
       }
 
       // 上傳新檔案
+      console.log(`📤 [uploadGlobalFiles] 上傳檔案 ${config.key}:`, {
+        fileName: file.file_name,
+        fileType: config.fileType
+      })
+
       const uploadResult = await uploadEvidenceFile(file.file, {
         page_key: pageKey,
         period_year: year,
@@ -248,15 +286,14 @@ export function useMobileType3Page<TSpec extends { id: string; name: string; mem
         standard: '64'
       })
 
-      // ⭐ 上傳成功後，用後端 ID 更新 state（防止 useEffect 跳過）
-      setGlobalFilesState(prev => ({
-        ...prev,
-        [config.key]: {
-          ...file,
-          id: uploadResult.file_id  // 替換為後端 ID
-        }
-      }))
+      console.log(`✅ [uploadGlobalFiles] 上傳成功:`, uploadResult)
+
+      // ⚠️ 不要立即更新 state！讓 reload() 去載入
+      // 原因：立即更新 ID 會導致下次檢查 startsWith('memory-') 失敗
+      // 參考：UreaPage.tsx:415-424（上傳後不更新 state）
     }
+
+    console.log('🔥 [uploadGlobalFiles] 全局檔案上傳完成')
   }
 
   // ==================== 縮圖載入 ====================
@@ -495,8 +532,13 @@ export function useMobileType3Page<TSpec extends { id: string; name: string; mem
 
     if (isEditMode) {
       setSavedGroups(prev => {
-        const otherRecords = prev.filter(r => r.groupId !== targetGroupId)
-        return [...otherRecords, ...updatedRecords]
+        // 保持原位置替換（不改變順序）
+        const firstOldIndex = prev.findIndex(r => r.groupId === targetGroupId)
+        if (firstOldIndex === -1) return prev  // 找不到（不應該發生）
+
+        const before = prev.slice(0, firstOldIndex)
+        const after = prev.slice(firstOldIndex).filter(r => r.groupId !== targetGroupId)
+        return [...before, ...updatedRecords, ...after]
       })
     } else {
       setSavedGroups(prev => [...prev, ...updatedRecords])
@@ -522,7 +564,7 @@ export function useMobileType3Page<TSpec extends { id: string; name: string; mem
       memoryFiles: firstRecord?.memoryFiles || []
     })
 
-    setSavedGroups(prev => prev.filter(r => r.groupId !== groupId))
+    // ⭐ 不從列表移除 - 保留在資料列表中，只載入到編輯區
   }
 
   const deleteGroup = (groupId: string) => {
@@ -611,6 +653,22 @@ export function useMobileType3Page<TSpec extends { id: string; name: string; mem
       await reload()
       reloadApprovalStatus()
 
+      // ⭐ 清空全局檔案的記憶體 state，讓 useEffect 重新載入後端檔案
+      // 參考：UreaPage.tsx:436 reload() 後會自動從 loadedFiles 載入
+      if (globalFiles) {
+        setGlobalFilesState(prev => {
+          const updated = { ...prev }
+          globalFiles.forEach(config => {
+            const file = updated[config.key]
+            // 只清空記憶體檔案（上傳後的檔案），保留後端檔案
+            if (file && file.id.startsWith('memory-')) {
+              updated[config.key] = null
+            }
+          })
+          return updated
+        })
+      }
+
       return {
         success: true,
         message: status === 'submitted' ? '提交成功' : '暫存成功'
@@ -676,7 +734,18 @@ export function useMobileType3Page<TSpec extends { id: string; name: string; mem
               metadata: { recordId: spec.id, allRecordIds: [spec.id] }
             })) || []
           ),
-          ...type3Helpers.collectAdminFilesToUpload(savedGroups)
+          ...type3Helpers.collectAdminFilesToUpload(savedGroups),
+          // ⭐ 收集全局檔案（如：消防安全設備檢修表）
+          ...(globalFiles || []).flatMap(config => {
+            const file = globalFilesState[config.key]
+            if (file && file.id.startsWith('memory-') && file.file && file.file.size > 0) {
+              return [{
+                file: file.file,
+                metadata: { fileType: config.fileType }
+              }]
+            }
+            return []
+          })
         ]
 
         await adminSave({
@@ -691,6 +760,21 @@ export function useMobileType3Page<TSpec extends { id: string; name: string; mem
         await reload()
         reloadApprovalStatus()
         setCurrentEditingGroup(prev => ({ ...prev, memoryFiles: [] }))
+
+        // ⭐ 清空全局檔案的記憶體 state（管理員模式）
+        if (globalFiles) {
+          setGlobalFilesState(prev => {
+            const updated = { ...prev }
+            globalFiles.forEach(config => {
+              const file = updated[config.key]
+              if (file && file.id.startsWith('memory-')) {
+                updated[config.key] = null
+              }
+            })
+            return updated
+          })
+        }
+
         setAdminSuccess('儲存成功')
         return
       }

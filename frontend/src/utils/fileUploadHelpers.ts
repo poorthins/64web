@@ -5,7 +5,7 @@
  */
 
 import { MemoryFile } from '../components/FileDropzone'
-import { generateRecordId } from './idGenerator'
+import { generateMemoryFileId } from './idGenerator'
 
 /**
  * 將瀏覽器的 File 物件轉換成 MemoryFile（記憶體暫存檔案）
@@ -29,7 +29,7 @@ import { generateRecordId } from './idGenerator'
  */
 export function createMemoryFile(file: File): MemoryFile {
   return {
-    id: generateRecordId(),
+    id: generateMemoryFileId(),  // ⭐ 修復：使用 generateMemoryFileId() 產生 memory- 開頭的 ID
     file,
     preview: URL.createObjectURL(file),
     file_name: file.name,

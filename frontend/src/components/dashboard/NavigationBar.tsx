@@ -247,8 +247,9 @@ const NavigationBar: React.FC<NavigationBarProps> = ({ onChecklistClick }) => {
           style={{
             position: 'absolute',
             top: '86px',
-            left: 0,
-            width: '100%',
+            left: '50%',
+            marginLeft: '-960px',
+            width: '1920px',
             height: isExpanded ? '518px' : '0',
             background: 'white',
             overflow: 'hidden',

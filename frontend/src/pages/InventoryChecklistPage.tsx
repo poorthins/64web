@@ -2,6 +2,7 @@ import React, { useState } from 'react'
 import { inventoryItems } from '../config/inventoryData'
 import { InventoryCard } from '../components/inventory/InventoryCard'
 import { ImageLightbox } from '../components/inventory/ImageLightbox'
+import { TextLightbox } from '../components/inventory/TextLightbox'
 import SharedPageLayout from '../layouts/SharedPageLayout'
 
 interface LightboxState {
@@ -9,11 +10,31 @@ interface LightboxState {
   initialIndex: number
 }
 
+interface TextLightboxState {
+  title: string
+  content: string | string[]
+}
+
 export const InventoryChecklistPage: React.FC = () => {
   const [lightbox, setLightbox] = useState<LightboxState | null>(null)
+  const [textLightbox, setTextLightbox] = useState<TextLightboxState | null>(null)
 
   const handleImageClick = (images: string[], initialIndex: number) => {
     setLightbox({ images, initialIndex })
+  }
+
+  const handleGrayBoxClick = (item: typeof inventoryItems[0]) => {
+    setTextLightbox({
+      title: item.name,
+      content: item.description
+    })
+  }
+
+  const handleBlackBoxClick = (item: typeof inventoryItems[0]) => {
+    setTextLightbox({
+      title: '所需文件',
+      content: item.requiredDocuments
+    })
   }
 
   return (
@@ -62,6 +83,8 @@ export const InventoryChecklistPage: React.FC = () => {
               key={item.id}
               item={item}
               onImageClick={handleImageClick}
+              onGrayBoxClick={() => handleGrayBoxClick(item)}
+              onBlackBoxClick={() => handleBlackBoxClick(item)}
             />
           ))}
         </div>
@@ -73,6 +96,15 @@ export const InventoryChecklistPage: React.FC = () => {
           images={lightbox.images}
           initialIndex={lightbox.initialIndex}
           onClose={() => setLightbox(null)}
+        />
+      )}
+
+      {/* Text Lightbox */}
+      {textLightbox && (
+        <TextLightbox
+          title={textLightbox.title}
+          content={textLightbox.content}
+          onClose={() => setTextLightbox(null)}
         />
       )}
     </SharedPageLayout>

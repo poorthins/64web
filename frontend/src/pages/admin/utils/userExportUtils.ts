@@ -1,4 +1,4 @@
-import { exportUserEntriesWithFiles } from './exportUtils'
+import { exportUserEntriesWithFiles } from './simpleExportUtils'
 import { getUserEntries } from '../../../api/entries'
 
 /**

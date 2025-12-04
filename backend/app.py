@@ -1,5 +1,6 @@
 from flask import Flask, request, jsonify
 from flask_cors import CORS
+from flasgger import Swagger
 from dotenv import load_dotenv
 import os
 from datetime import datetime, timedelta
@@ -24,12 +25,100 @@ app = Flask(__name__)
 # 開發環境：允許所有來源（生產環境需要限制）
 CORS(app, resources={r"/api/*": {"origins": "*"}})
 
+# Swagger 配置
+swagger_config = {
+    "headers": [],
+    "specs": [
+        {
+            "endpoint": 'apispec',
+            "route": '/apispec.json',
+            "rule_filter": lambda rule: True,
+            "model_filter": lambda tag: True,
+        }
+    ],
+    "static_url_path": "/flasgger_static",
+    "swagger_ui": True,
+    "specs_route": "/docs"
+}
+
+swagger_template = {
+    "swagger": "2.0",
+    "info": {
+        "title": "Carbon Footprint API",
+        "description": "碳足跡管理系統 API 文檔",
+        "version": "1.0.0"
+    },
+    "securityDefinitions": {
+        "Bearer": {
+            "type": "apiKey",
+            "name": "Authorization",
+            "in": "header",
+            "description": "JWT Token (格式: Bearer <token>)"
+        }
+    },
+    "security": [
+        {
+            "Bearer": []
+        }
+    ]
+}
+
+swagger = Swagger(app, config=swagger_config, template=swagger_template)
+
+@app.route('/', methods=['GET'])
+def index():
+    return jsonify({
+        "service": "Carbon Footprint API",
+        "version": "1.0",
+        "status": "running",
+        "endpoints": {
+            "health": "/api/health",
+            "users": "/api/admin/users",
+            "entries": "/api/entries/submit"
+        }
+    })
+
 @app.route('/api/health', methods=['GET'])
 def health_check():
+    """
+    健康檢查
+    ---
+    tags:
+      - System
+    responses:
+      200:
+        description: 系統正常運行
+        schema:
+          type: object
+          properties:
+            ok:
+              type: boolean
+              example: true
+    """
     return jsonify({"ok": True})
 
 @app.route('/api/test-supabase', methods=['GET'])
 def test_supabase():
+    """
+    測試 Supabase 連接
+    ---
+    tags:
+      - System
+    responses:
+      200:
+        description: 成功連接
+        schema:
+          type: object
+          properties:
+            success:
+              type: boolean
+            profiles_count:
+              type: integer
+            profiles:
+              type: array
+      500:
+        description: 連接失敗
+    """
     try:
         supabase = get_supabase_admin()
         
@@ -49,7 +138,24 @@ def test_supabase():
 
 @app.route('/api/test-cors', methods=['GET', 'OPTIONS'])
 def test_cors():
-    """測試 CORS 設定的端點"""
+    """
+    測試 CORS 設定
+    ---
+    tags:
+      - System
+    responses:
+      200:
+        description: CORS 測試成功
+        schema:
+          type: object
+          properties:
+            message:
+              type: string
+            origin:
+              type: string
+            method:
+              type: string
+    """
     return jsonify({
         "message": "CORS test successful",
         "origin": request.headers.get('Origin'),
@@ -60,7 +166,55 @@ def test_cors():
 @require_auth
 @validate_request(CarbonCalculateRequest)
 def calculate_carbon():
-    """計算碳排放量"""
+    """
+    計算碳排放量
+    ---
+    tags:
+      - Carbon
+    security:
+      - Bearer: []
+    parameters:
+      - in: body
+        name: body
+        required: true
+        schema:
+          type: object
+          required:
+            - page_key
+            - monthly_data
+            - year
+          properties:
+            page_key:
+              type: string
+              example: diesel
+              description: 頁面類型
+            monthly_data:
+              type: object
+              description: 月份數據
+              example:
+                "1": 100.5
+                "2": 120.3
+            year:
+              type: integer
+              example: 2024
+              description: 年份
+    responses:
+      200:
+        description: 計算成功
+        schema:
+          type: object
+          properties:
+            total_carbon:
+              type: number
+            monthly_carbon:
+              type: object
+      400:
+        description: 請求驗證失敗
+      401:
+        description: 未授權
+      500:
+        description: 計算錯誤
+    """
     try:
         # 從已驗證的數據取得參數
         validated_data = get_validated_data()
@@ -89,7 +243,75 @@ def calculate_carbon():
 @require_auth
 @validate_request(EntrySubmitRequest)
 def submit_energy_entry():
-    """提交能源條目（新增）"""
+    """
+    提交能源條目（新增）
+    ---
+    tags:
+      - Entries
+    security:
+      - Bearer: []
+    parameters:
+      - in: body
+        name: body
+        required: true
+        schema:
+          type: object
+          required:
+            - page_key
+            - period_year
+            - unit
+            - monthly
+          properties:
+            page_key:
+              type: string
+              example: diesel
+              description: 頁面類型 (diesel, gasoline, natural_gas, etc.)
+            period_year:
+              type: integer
+              example: 2024
+              description: 盤查年度
+            unit:
+              type: string
+              example: L
+              description: 單位
+            monthly:
+              type: object
+              description: 月份數據 (key為月份1-12，value為數值)
+              example:
+                "1": 100.5
+                "2": 120.3
+            notes:
+              type: string
+              example: 備註資訊
+            payload:
+              type: object
+              description: 額外資料
+            extraPayload:
+              type: object
+              description: 額外佐證資料
+            status:
+              type: string
+              enum: [submitted, approved, rejected, needs_fix]
+              default: submitted
+    responses:
+      201:
+        description: 成功創建條目
+        schema:
+          type: object
+          properties:
+            success:
+              type: boolean
+            entry_id:
+              type: string
+            message:
+              type: string
+      400:
+        description: 請求驗證失敗
+      401:
+        description: 未授權
+      500:
+        description: 伺服器錯誤
+    """
     print(f"=== [ENTRY SUBMIT] Request received ===")
     try:
         validated_data = get_validated_data()
@@ -132,7 +354,64 @@ def submit_energy_entry():
 @require_auth
 @validate_request(EntryUpdateRequest)
 def update_entry(entry_id):
-    """更新能源條目"""
+    """
+    更新能源條目
+    ---
+    tags:
+      - Entries
+    security:
+      - Bearer: []
+    parameters:
+      - in: path
+        name: entry_id
+        type: string
+        required: true
+        description: 條目 ID
+      - in: body
+        name: body
+        required: true
+        schema:
+          type: object
+          properties:
+            monthly:
+              type: object
+              description: 月份數據
+              example:
+                "1": 100.5
+                "2": 120.3
+            notes:
+              type: string
+              example: 更新備註
+            payload:
+              type: object
+            extraPayload:
+              type: object
+            status:
+              type: string
+              enum: [submitted, approved, rejected, needs_fix]
+    responses:
+      200:
+        description: 成功更新條目
+        schema:
+          type: object
+          properties:
+            success:
+              type: boolean
+            entry_id:
+              type: string
+            updated_fields:
+              type: array
+              items:
+                type: string
+            message:
+              type: string
+      400:
+        description: 請求驗證失敗
+      401:
+        description: 未授權
+      500:
+        description: 更新錯誤
+    """
     try:
         validated_data = get_validated_data()
         supabase = get_supabase_admin()
@@ -171,7 +450,82 @@ def update_entry(entry_id):
 @app.route('/api/files/upload', methods=['POST'])
 @require_auth
 def upload_file():
-    """上傳證據檔案"""
+    """
+    上傳證據檔案
+    ---
+    tags:
+      - Files
+    security:
+      - Bearer: []
+    consumes:
+      - multipart/form-data
+    parameters:
+      - in: formData
+        name: file
+        type: file
+        required: true
+        description: 要上傳的檔案
+      - in: formData
+        name: page_key
+        type: string
+        required: true
+        description: 頁面類型
+      - in: formData
+        name: period_year
+        type: integer
+        required: true
+        description: 盤查年度
+      - in: formData
+        name: file_type
+        type: string
+        required: true
+        description: 檔案類型 (evidence, sds, nameplate, etc.)
+      - in: formData
+        name: month
+        type: integer
+        required: false
+        description: 月份 (1-12)
+      - in: formData
+        name: entry_id
+        type: string
+        required: false
+        description: 條目 ID
+      - in: formData
+        name: record_id
+        type: string
+        required: false
+        description: 記錄 ID
+      - in: formData
+        name: standard
+        type: string
+        required: false
+        default: "64"
+        description: 標準版本
+    responses:
+      201:
+        description: 檔案上傳成功
+        schema:
+          type: object
+          properties:
+            success:
+              type: boolean
+            file_id:
+              type: string
+            file_path:
+              type: string
+            file_name:
+              type: string
+            file_size:
+              type: integer
+            message:
+              type: string
+      400:
+        description: 請求驗證失敗或檔案驗證失敗
+      401:
+        description: 未授權
+      500:
+        description: 上傳錯誤
+    """
     try:
         supabase = get_supabase_admin()
         user_id = request.user['id']
@@ -265,7 +619,40 @@ def upload_file():
 @app.route('/api/files/<file_id>', methods=['DELETE'])
 @require_auth
 def delete_file(file_id):
-    """刪除證據檔案"""
+    """
+    刪除證據檔案
+    ---
+    tags:
+      - Files
+    security:
+      - Bearer: []
+    parameters:
+      - in: path
+        name: file_id
+        type: string
+        required: true
+        description: 檔案 ID
+    responses:
+      200:
+        description: 檔案刪除成功
+        schema:
+          type: object
+          properties:
+            success:
+              type: boolean
+            file_id:
+              type: string
+            message:
+              type: string
+      401:
+        description: 未授權
+      403:
+        description: 權限不足
+      404:
+        description: 檔案不存在
+      500:
+        description: 刪除錯誤
+    """
     try:
         supabase = get_supabase_admin()
         user_id = request.user['id']
@@ -298,6 +685,43 @@ def delete_file(file_id):
 @require_auth
 @require_admin
 def get_all_users():
+    """
+    獲取所有用戶列表
+    ---
+    tags:
+      - Admin - Users
+    security:
+      - Bearer: []
+    responses:
+      200:
+        description: 成功獲取用戶列表
+        schema:
+          type: object
+          properties:
+            users:
+              type: array
+              items:
+                type: object
+                properties:
+                  id:
+                    type: string
+                  email:
+                    type: string
+                  display_name:
+                    type: string
+                  role:
+                    type: string
+                  is_active:
+                    type: boolean
+                  company:
+                    type: string
+                  entries_count:
+                    type: integer
+      401:
+        description: 未授權
+      403:
+        description: 權限不足
+    """
     try:
         # request.user 已由 @require_auth 設置
         supabase = get_supabase_admin()
@@ -344,6 +768,49 @@ def get_all_users():
 @require_auth
 @require_admin
 def get_user_entries(user_id):
+    """
+    獲取指定用戶的填報記錄
+    ---
+    tags:
+      - Admin - Users
+    security:
+      - Bearer: []
+    parameters:
+      - in: path
+        name: user_id
+        type: string
+        required: true
+        description: 用戶 ID
+      - in: query
+        name: from
+        type: string
+        required: false
+        description: 起始日期 (YYYY-MM-DD)
+      - in: query
+        name: to
+        type: string
+        required: false
+        description: 結束日期 (YYYY-MM-DD)
+      - in: query
+        name: category
+        type: string
+        required: false
+        description: 類別篩選
+    responses:
+      200:
+        description: 成功獲取填報記錄
+        schema:
+          type: object
+          properties:
+            entries:
+              type: array
+      401:
+        description: 未授權
+      403:
+        description: 權限不足
+      500:
+        description: 伺服器錯誤
+    """
     try:
         supabase = get_supabase_admin()
         
@@ -374,6 +841,44 @@ def get_user_entries(user_id):
 @require_auth
 @require_admin
 def get_all_entries():
+    """
+    獲取所有填報記錄
+    ---
+    tags:
+      - Admin - Entries
+    security:
+      - Bearer: []
+    parameters:
+      - in: query
+        name: from
+        type: string
+        required: false
+        description: 起始日期 (YYYY-MM-DD)
+      - in: query
+        name: to
+        type: string
+        required: false
+        description: 結束日期 (YYYY-MM-DD)
+      - in: query
+        name: category
+        type: string
+        required: false
+        description: 類別篩選
+    responses:
+      200:
+        description: 成功獲取所有填報記錄
+        schema:
+          type: object
+          properties:
+            entries:
+              type: array
+      401:
+        description: 未授權
+      403:
+        description: 權限不足
+      500:
+        description: 伺服器錯誤
+    """
     try:
         supabase = get_supabase_admin()
         
@@ -406,6 +911,54 @@ def get_all_entries():
 @require_admin
 @validate_request(BulkUserUpdateSchema)
 def bulk_update_users():
+    """
+    批量更新用戶狀態
+    ---
+    tags:
+      - Admin - Users
+    security:
+      - Bearer: []
+    parameters:
+      - in: body
+        name: body
+        required: true
+        schema:
+          type: object
+          required:
+            - user_ids
+            - is_active
+          properties:
+            user_ids:
+              type: array
+              items:
+                type: string
+              minItems: 1
+              maxItems: 100
+              example: ["uuid-1", "uuid-2"]
+              description: 用戶 ID 列表
+            is_active:
+              type: boolean
+              example: false
+              description: 是否啟用
+    responses:
+      200:
+        description: 批量更新成功
+        schema:
+          type: object
+          properties:
+            success:
+              type: boolean
+            updated_count:
+              type: integer
+      400:
+        description: 請求驗證失敗
+      401:
+        description: 未授權
+      403:
+        description: 權限不足
+      500:
+        description: 伺服器錯誤
+    """
     try:
         # 從已驗證的數據取得參數
         data = get_validated_data()
@@ -427,6 +980,55 @@ def bulk_update_users():
 @require_auth
 @require_admin
 def create_entry_review(entry_id):
+    """
+    創建填報審核記錄
+    ---
+    tags:
+      - Admin - Entries
+    security:
+      - Bearer: []
+    parameters:
+      - in: path
+        name: entry_id
+        type: string
+        required: true
+        description: 條目 ID
+      - in: body
+        name: body
+        required: true
+        schema:
+          type: object
+          required:
+            - status
+          properties:
+            status:
+              type: string
+              enum: [needs_fix, approved, rejected]
+              example: approved
+              description: 審核狀態
+            note:
+              type: string
+              example: 資料填寫正確
+              description: 審核備註
+    responses:
+      200:
+        description: 審核記錄創建成功
+        schema:
+          type: object
+          properties:
+            success:
+              type: boolean
+            review:
+              type: object
+      400:
+        description: 無效的狀態或請求
+      401:
+        description: 未授權
+      403:
+        description: 權限不足
+      500:
+        description: 伺服器錯誤
+    """
     try:
         data = request.get_json()
         status = data.get('status')
@@ -454,24 +1056,100 @@ def create_entry_review(entry_id):
 @require_admin
 @validate_request(UserUpdateSchema)
 def update_user(user_id):
+    """
+    更新用戶資料
+    ---
+    tags:
+      - Admin - Users
+    security:
+      - Bearer: []
+    parameters:
+      - in: path
+        name: user_id
+        type: string
+        required: true
+        description: 用戶 ID
+      - in: body
+        name: body
+        required: true
+        schema:
+          type: object
+          properties:
+            email:
+              type: string
+              format: email
+            password:
+              type: string
+              minLength: 8
+            display_name:
+              type: string
+            company:
+              type: string
+            phone:
+              type: string
+            job_title:
+              type: string
+            role:
+              type: string
+              enum: [user, admin, manager, viewer]
+            is_active:
+              type: boolean
+            energy_categories:
+              type: array
+              items:
+                type: string
+            target_year:
+              type: integer
+            diesel_generator_version:
+              type: string
+    responses:
+      200:
+        description: 更新成功
+        schema:
+          type: object
+          properties:
+            success:
+              type: boolean
+      400:
+        description: 請求驗證失敗
+      401:
+        description: 未授權
+      403:
+        description: 權限不足
+      500:
+        description: 伺服器錯誤
+    """
     try:
+        print(f"=== [update_user] 開始更新用戶: {user_id} ===")
         # 從已驗證的數據取得參數
         validated_data = get_validated_data()
         data_dict = validated_data.dict(exclude_unset=True)  # 只包含實際提供的欄位
+        print(f"[update_user] 驗證後的資料: {data_dict}")
         supabase = get_supabase_admin()
 
-        # 處理 auth.users 的更新（email 和 password）
-        auth_updates = {}
-        if validated_data.email:
-            auth_updates['email'] = validated_data.email
+        # 處理 auth.users 的更新（僅密碼）
+        # 注意：只在明確提供密碼時才更新
         if validated_data.password:
-            auth_updates['password'] = validated_data.password
-
-        if auth_updates:
-            supabase.auth.admin.update_user_by_id(
-                user_id,
-                auth_updates
-            )
+            print(f"[update_user] 準備更新密碼")
+            try:
+                # 方法 1: 直接用 dict（某些版本支持）
+                try:
+                    result = supabase.auth.admin.update_user_by_id(
+                        user_id,
+                        {"password": validated_data.password}
+                    )
+                    print(f"[update_user] 密碼更新成功 (方法1)")
+                except:
+                    # 方法 2: 使用 attributes 參數
+                    result = supabase.auth.admin.update_user_by_id(
+                        user_id,
+                        attributes={"password": validated_data.password}
+                    )
+                    print(f"[update_user] 密碼更新成功 (方法2)")
+            except Exception as auth_error:
+                print(f"[update_user] 密碼更新失敗: {type(auth_error).__name__}: {str(auth_error)}")
+                # 記錄錯誤但不中斷，繼續更新 profiles
+                pass
 
         # 準備 profiles 表的更新資料
         profile_updates = {}
@@ -527,6 +1205,78 @@ def update_user(user_id):
 @require_admin
 @validate_request(UserCreateSchema)
 def create_user():
+    """
+    創建新用戶
+    ---
+    tags:
+      - Admin - Users
+    security:
+      - Bearer: []
+    parameters:
+      - in: body
+        name: body
+        required: true
+        schema:
+          type: object
+          required:
+            - email
+            - password
+            - display_name
+          properties:
+            email:
+              type: string
+              format: email
+              example: user@example.com
+            password:
+              type: string
+              minLength: 8
+              example: SecurePass123
+            display_name:
+              type: string
+              example: 張三
+            company:
+              type: string
+              example: 綠能科技
+            phone:
+              type: string
+              example: +886-2-1234-5678
+            job_title:
+              type: string
+              example: 環保專員
+            role:
+              type: string
+              enum: [user, admin, manager, viewer]
+              default: user
+            energy_categories:
+              type: array
+              items:
+                type: string
+              example: ["diesel", "gasoline"]
+            target_year:
+              type: integer
+              example: 2024
+            diesel_generator_version:
+              type: string
+              example: refuel
+    responses:
+      200:
+        description: 成功創建用戶
+        schema:
+          type: object
+          properties:
+            success:
+              type: boolean
+            user:
+              type: object
+      400:
+        description: 請求驗證失敗
+      401:
+        description: 未授權
+      403:
+        description: 權限不足
+      500:
+        description: 伺服器錯誤
+    """
     print("=== [create_user] 收到請求 ===")
     try:
         # 從已驗證的數據取得參數
@@ -587,7 +1337,38 @@ def create_user():
 @require_auth
 @require_admin
 def force_logout_user(user_id):
-    """管理員強制登出指定用戶（清除所有 sessions）"""
+    """
+    強制登出指定用戶
+    ---
+    tags:
+      - Admin - Users
+    security:
+      - Bearer: []
+    parameters:
+      - in: path
+        name: user_id
+        type: string
+        required: true
+        description: 用戶 ID
+    responses:
+      200:
+        description: 成功清除用戶 sessions
+        schema:
+          type: object
+          properties:
+            success:
+              type: boolean
+            message:
+              type: string
+            deleted_sessions:
+              type: integer
+      401:
+        description: 未授權
+      403:
+        description: 權限不足
+      500:
+        description: 伺服器錯誤
+    """
     try:
         supabase = get_supabase_admin()
 

@@ -130,7 +130,7 @@ export function WeldingRodSpecInputFields({
               value={spec.name}
               onChange={(e) => onFieldChange('name', e.target.value)}
               disabled={isReadOnly}
-              placeholder="例如：E7018_0.05"
+              placeholder="例: G03_3.2mm_7%_10KG"
               className="rounded-[5px] focus:outline-none focus:ring-2 focus:ring-blue-500"
               style={STYLES.field}
             />

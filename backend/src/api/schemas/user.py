@@ -16,7 +16,7 @@ class UserCreateSchema(BaseModel):
     job_title: Optional[str] = Field(None, max_length=100, description="職位")
     role: str = Field(default='user', description="用戶角色")
     energy_categories: List[str] = Field(default_factory=list, description="允許填報的能源類別")
-    target_year: Optional[int] = Field(None, ge=2020, le=2100, description="目標年份")
+    target_year: Optional[int] = Field(None, le=2100, description="目標年份")
     diesel_generator_version: Optional[str] = Field(None, description="柴油發電機版本")
 
     @validator('role')
@@ -65,8 +65,15 @@ class UserUpdateSchema(BaseModel):
     role: Optional[str] = Field(None, description="用戶角色")
     is_active: Optional[bool] = Field(None, description="是否啟用")
     energy_categories: Optional[List[str]] = Field(None, description="允許填報的能源類別")
-    target_year: Optional[int] = Field(None, ge=2020, le=2100, description="目標年份")
+    target_year: Optional[int] = Field(None, le=2100, description="目標年份")
     diesel_generator_version: Optional[str] = Field(None, description="柴油發電機版本")
+
+    @validator('password', pre=True)
+    def validate_password(cls, v):
+        """空字串視為不更新密碼"""
+        if v == '':
+            return None
+        return v
 
     @validator('role')
     def validate_role(cls, v):

@@ -4,11 +4,15 @@ import type { InventoryItem } from '../../config/inventoryData'
 interface InventoryCardProps {
   item: InventoryItem
   onImageClick: (images: string[], initialIndex: number) => void
+  onGrayBoxClick: () => void
+  onBlackBoxClick: () => void
 }
 
 export const InventoryCard: React.FC<InventoryCardProps> = ({
   item,
-  onImageClick
+  onImageClick,
+  onGrayBoxClick,
+  onBlackBoxClick
 }) => {
   const [currentImageIndex] = useState(0)
   const hasImages = item.exampleImages && item.exampleImages.length > 0
@@ -22,15 +26,15 @@ export const InventoryCard: React.FC<InventoryCardProps> = ({
 
   return (
     <div
-      onClick={handleImageAreaClick}
-      className="flex gap-[9px] cursor-pointer"
+      className="flex gap-[9px]"
       style={{
         height: item.id === 'fire_extinguisher' ? '233px' : '239px'
       }}
     >
       {/* 左側：綠色圖片區域 */}
       <div
-        className="relative overflow-hidden"
+        onClick={handleImageAreaClick}
+        className="relative overflow-hidden cursor-pointer"
         style={{
           width: '223px',
           height: item.id === 'fire_extinguisher' ? '233px' : '239px',
@@ -88,7 +92,11 @@ export const InventoryCard: React.FC<InventoryCardProps> = ({
       <div className="flex flex-col gap-[10px]">
         {/* 右上：灰色資訊區域 */}
         <div
-          className="overflow-hidden relative"
+          onClick={(e) => {
+            e.stopPropagation()
+            onGrayBoxClick()
+          }}
+          className="overflow-hidden relative cursor-pointer"
           style={{
             width: '222px',
             height: item.id === 'fire_extinguisher' ? '102px' : '143px',
@@ -153,7 +161,11 @@ export const InventoryCard: React.FC<InventoryCardProps> = ({
 
         {/* 右下：黑色佐證提示區域 */}
         <div
-          className="overflow-hidden"
+          onClick={(e) => {
+            e.stopPropagation()
+            onBlackBoxClick()
+          }}
+          className="overflow-hidden cursor-pointer"
           style={{
             width: '222px',
             height: item.id === 'fire_extinguisher' ? '121px' : '86px',

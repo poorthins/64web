@@ -101,7 +101,7 @@ const UserDetail = () => {
       }
 
       // 使用完整匯出功能（Excel + 佐證資料）
-      const { exportUserEntriesWithFiles } = await import('./utils/exportUtils')
+      const { exportUserEntriesWithFiles } = await import('./utils/simpleExportUtils')
       const result = await exportUserEntriesWithFiles(
         userId,
         user?.display_name || '未知用戶',

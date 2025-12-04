@@ -342,7 +342,11 @@ export async function updateUser(userId: string, userData: UserUpdateData): Prom
 
     if (!response.ok) {
       console.error('Error updating user via backend:', result)
-      throw new Error(result.error || '更新使用者失敗')
+      console.error('Response status:', response.status, response.statusText)
+      const errorMsg = typeof result.error === 'string'
+        ? result.error
+        : JSON.stringify(result)
+      throw new Error(errorMsg || '更新使用者失敗')
     }
   } catch (error) {
     console.error('Error in updateUser:', error)

@@ -97,7 +97,9 @@
       "Bash(do echo '=== Checking: $file ===')",
       "Bash(iconv:*)",
       "Bash(git mv:*)",
-      "Bash(do echo '=== $comp ===')"
+      "Bash(do echo '=== $comp ===')",
+      "Bash(git push:*)",
+      "Bash(cmd /c \"taskkill /F /PID 17400\")"
     ],
     "deny": [],
     "ask": []

@@ -1839,3 +1839,153 @@ const displayFile: MemoryFile | null = excelMemoryFile || (excelFile ? {
 
 **結論：符合所有品質標準，可繼續下一個任務 ✅**
 
+
+---
+
+#### 2025-12-03 - 修復 Type 3 編輯模式兩大 Bug：項目消失 + 順序錯亂
+
+**問題 1：點擊編輯後項目從列表消失**
+
+**症狀：**
+- 點擊資料列表的鉛筆圖標（編輯）→ 該項目立刻從列表中消失
+- 再點其他項目 → 新項目也消失，之前的項目也不回來
+
+**問題根源：**
+`useMobileType3Page.ts:525` 的 `editGroup` 函數在點擊編輯時**提前移除**了列表項目：
+
+```typescript
+// ❌ 錯誤邏輯（破壞性操作）
+const editGroup = (groupId: string) => {
+  const groupRecords = savedGroups.filter(r => r.groupId === groupId)
+  setCurrentEditingGroup({ groupId, records: groupRecords, ... })
+  
+  setSavedGroups(prev => prev.filter(r => r.groupId !== groupId))  // ⚠️ 提前移除
+}
+```
+
+**流程分析：**
+1. 點鉛筆 → 調用 `editGroup`
+2. 項目被從 `savedGroups` 移除
+3. 項目載入到編輯區（但編輯區在列表上方，使用者看不見）
+4. 列表重新渲染 → 項目消失
+5. 點第二個項目 → 第一個沒被放回去 → 兩個都消失
+
+**修復方案：**
+```typescript
+// ✅ 正確邏輯（非破壞性操作）
+const editGroup = (groupId: string) => {
+  const groupRecords = savedGroups.filter(r => r.groupId === groupId)
+  setCurrentEditingGroup({ groupId, records: groupRecords, ... })
+  
+  // ⭐ 不從列表移除 - 保留在資料列表中，只載入到編輯區
+}
+```
+
+**Linus 原則：**
+- **「Never break userspace」** - 使用者期望編輯時看到項目，不是看它消失
+- **分離關注點** - `editGroup` 只負責載入，`saveCurrentGroup` 負責更新
+
+---
+
+**問題 2：編輯後儲存，項目跑到列表最後**
+
+**症狀：**
+- 點擊第 2 個項目編輯 → 修改後儲存 → 項目變成最後一個
+- 破壞使用者原有的排序邏輯
+
+**問題根源：**
+`useMobileType3Page.ts:496-500` 的 `saveCurrentGroup` 編輯模式使用 `filter + append`：
+
+```typescript
+// ❌ 錯誤邏輯（破壞順序）
+if (isEditMode) {
+  setSavedGroups(prev => {
+    const otherRecords = prev.filter(r => r.groupId !== targetGroupId)
+    return [...otherRecords, ...updatedRecords]  // ⚠️ 永遠加到最後
+  })
+}
+```
+
+**修復方案（原位替換）：**
+```typescript
+// ✅ 正確邏輯（保持原位置）
+if (isEditMode) {
+  setSavedGroups(prev => {
+    // 找到第一筆舊記錄位置
+    const firstOldIndex = prev.findIndex(r => r.groupId === targetGroupId)
+    if (firstOldIndex === -1) return prev  // 找不到（不應該發生）
+
+    // 分三段：before（原位前）+ new（替換）+ after（原位後，排除舊的）
+    const before = prev.slice(0, firstOldIndex)
+    const after = prev.slice(firstOldIndex).filter(r => r.groupId !== targetGroupId)
+    return [...before, ...updatedRecords, ...after]  // ⭐ 原位替換
+  })
+}
+```
+
+**範例：**
+```
+原列表：[A, B1, B2, C, D]  // B1, B2 是 groupId=B
+編輯 B → [B1', B2', B3']  // 3 筆新記錄
+結果：  [A, B1', B2', B3', C, D]  // ✅ 順序不變
+```
+
+**Linus 原則：**
+- **「Good Taste」** - 消除特殊情況：不是「刪除 + 新增」，而是「原位替換」
+- **資料結構優先** - `findIndex + slice` 比 `filter + append` 更精確
+
+---
+
+**附帶修復：TypeScript 型別錯誤（fileMapper.ts）**
+
+**問題：**
+```typescript
+// ❌ Type narrowing 在 closure 內失效
+if (record.id) {
+  matched = allFiles.filter(f =>
+    f.record_id?.split(',').includes(record.id)  // TS2345: string | undefined
+  )
+}
+```
+
+**修復：**
+```typescript
+// ✅ 提取變數，消除特殊情況
+if (record.id) {
+  const recordId = record.id  // Type narrowing
+  matched = allFiles.filter(f =>
+    f.record_id?.split(',').includes(recordId)  // ✅ string
+  )
+}
+```
+
+---
+
+**學到的教訓：**
+
+1. **編輯操作不應破壞資料** - `editGroup` 只載入，不刪除；`saveCurrentGroup` 才更新
+2. **保持資料順序的重要性** - 使用者期望編輯後項目留在原位
+3. **TypeScript closure 陷阱** - if 內的 type narrowing 在 callback 內失效，需提取變數
+4. **資料結構 > 演算法** - `slice` 比 `filter` 更精確保留順序
+5. **Never break userspace** - 項目消失 = 破壞使用者體驗，無論「理論正確」
+
+**測試結果：**
+✅ TypeScript 編譯通過（0 errors）
+✅ 編輯項目保留在列表中
+✅ 編輯後儲存保持原順序
+✅ 多次編輯不會累積錯誤
+
+**相關檔案：**
+- `frontend/src/pages/Category1/hooks/useMobileType3Page.ts:512-526` (editGroup - 移除破壞性刪除)
+- `frontend/src/pages/Category1/hooks/useMobileType3Page.ts:496-508` (saveCurrentGroup - 原位替換)
+- `frontend/src/pages/admin/utils/fileMapper.ts:90-100, 126-136` (TypeScript 型別修復)
+
+**影響範圍：**
+- ✅ WD40Page（直接受益）
+- ✅ LPGPage（共用 useMobileType3Page）
+- ✅ AcetylenePage（共用 useMobileType3Page）
+- ✅ WeldingRodPage（共用 useMobileType3Page）
+- ✅ FireExtinguisherPage（共用 useMobileType3Page）
+- ✅ GasCylinderPage（共用 useMobileType3Page）
+
+**工作時長：** ~20 分鐘（問題定位 10 分鐘 + 修復 5 分鐘 + 型別修復 5 分鐘）
